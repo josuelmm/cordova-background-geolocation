@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased](https://github.com/HaylLtd/cordova-background-geolocation-plugin/tree/HEAD)
+
+[Full Changelog](https://github.com/HaylLtd/cordova-background-geolocation-plugin/compare/v2.3.1...HEAD)
+
+**Merged pull requests:**
+
+- Update Java to 21 [\#204](https://github.com/HaylLtd/cordova-background-geolocation-plugin/pull/204) ([HarelM](https://github.com/HarelM))
+
 ## [v2.3.1](https://github.com/HaylLtd/cordova-background-geolocation-plugin/tree/v2.3.1) (2024-08-03)
 
 [Full Changelog](https://github.com/HaylLtd/cordova-background-geolocation-plugin/compare/v2.3.0...v2.3.1)
