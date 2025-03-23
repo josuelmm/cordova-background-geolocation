@@ -6,6 +6,7 @@
 
 **Merged pull requests:**
 
+- Update show app settings for IOS 18 support [\#207](https://github.com/HaylLtd/cordova-background-geolocation-plugin/pull/207) ([AbdullahSohail-SE](https://github.com/AbdullahSohail-SE))
 - Update Java to 21 [\#204](https://github.com/HaylLtd/cordova-background-geolocation-plugin/pull/204) ([HarelM](https://github.com/HarelM))
 
 ## [v2.3.1](https://github.com/HaylLtd/cordova-background-geolocation-plugin/tree/v2.3.1) (2024-08-03)
