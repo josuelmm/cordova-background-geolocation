@@ -83,7 +83,8 @@ public class BatchManager {
 
             );
 
-            if (cursor.getCount() < syncThreshold) {
+            int threshold = (syncThreshold != null && syncThreshold >= 0) ? syncThreshold : 1;
+            if (cursor.getCount() < threshold) {
                 return null;
             }
 

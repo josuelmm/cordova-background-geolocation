@@ -21,6 +21,8 @@ We are also looking to maintainers to help with this, so that the project does n
 
 The NPM package can be found at [cordova-background-geolocation-plugin](https://www.npmjs.com/package/cordova-background-geolocation-plugin).
 
+**Recent (v2.3.4):** Sync and location providers were hardened for production: null-safe config/manager checks, HTTP timeouts so the sync notification cannot stay stuck, migration of the Android activity provider to `FusedLocationProviderClient` / `ActivityRecognitionClient`, and PendingIntent/requestCode fixes on the distance-filter provider. See [CHANGELOG](CHANGELOG.md) for details.
+
 <font size="4">[Documentation](https://haylltd.github.io/cordova-background-geolocation-plugin/)</font>
 
 ### Installing the plugin

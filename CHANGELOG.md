@@ -1,5 +1,42 @@
 # Changelog
 
+## [v2.3.4](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/v2.3.4) (2025-02-17)
+
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/v2.3.3...v2.3.4)
+
+### Android – Sync & HTTP
+
+- **Sync**: Null-safe `syncThreshold` (default 100 when null) in SyncAdapter, BatchManager and PostLocationTask to avoid NPE.
+- **Sync**: HTTP timeouts (30s connect, 120s read) in HttpPostService so sync requests cannot hang indefinitely; fixes "syncing" notification getting stuck.
+- **Sync**: Safer upload progress (division-by-zero fix when stream size is 0; use `file.length()` for file uploads).
+- **Sync**: Notification is always cleared on success/failure/timeout.
+
+### Android – Activity recognition provider
+
+- **ActivityRecognitionLocationProvider**: Migrated from deprecated `GoogleApiClient` / `FusedLocationApi` / `ActivityRecognitionApi` to `FusedLocationProviderClient` and `ActivityRecognitionClient` (same plugin API and behaviour).
+- Null and connection guards in `startTracking`, `stopTracking`, `detachRecorder`; `attachRecorder` and `translateDesiredAccuracy` are null-safe; `unregisterReceiver` in `onDestroy` wrapped in try/catch.
+- Activity updates: `requestActivityUpdates` / `removeActivityUpdates` use `addOnFailureListener` (and success log where applicable).
+
+### Android – Raw location provider
+
+- **RawLocationProvider**: Null-safe `translateDesiredAccuracy`; guards in `onStart()` for `locationManager`, `mConfig`, and `provider` (with `isProviderEnabled(GPS)` and fallback to `getBestProvider`); `getBestProvider == null` handled without crash.
+
+### Android – Distance filter provider
+
+- **DistanceFilterLocationProvider**: PendingIntents use `FLAG_IMMUTABLE` (Android 12+) and distinct request codes (9000–9003) to avoid collisions and "phantom" triggers.
+- Null-safety: `onStart()` validates `locationManager`, `alarmManager`, `mConfig`; `setPace` validates `mConfig` and `locationManager`; `translateDesiredAccuracy` handles null; `getLastBestLocation` and `startMonitoringStationaryRegion` guard nulls; `getBestProvider` null and `isProviderEnabled(GPS)` for provider choice.
+- `onStop()` cancels stationary and polling alarms (not only in `onDestroy`) and guards `locationManager` / `stationaryRegionPI` before `removeProximityAlert`.
+- `resetStationaryAlarm`, `startPollingStationaryLocation`, `onPollStationaryLocation`, `onExitStationaryRegion` and receivers (`SingleUpdateReceiver`, `StationaryLocationMonitorReceiver`) guard against null intent extras, null PIs and null managers.
+- `onDestroy()`: alarm cancel and `unregisterReceiver` calls protected (null checks and try/catch).
+- Action namespace constant `P_NAME` set to `com.marianhello.bgloc` for consistency with the fork.
+
+### iOS – Sync
+
+- **MAURPostLocationTask**: Default `syncThreshold` 100 when nil (aligned with Android).
+- **MAURBackgroundSync**: Request timeout 120s so sync cannot hang indefinitely.
+
+---
+
 ## [v2.3.3](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/v2.3.3) (2025-05-12)
 
 [Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/v2.3.2...v2.3.3)

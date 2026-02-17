@@ -105,8 +105,9 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
 
         Long batchStartMillis = System.currentTimeMillis();
         boolean isForced = extras.getBoolean(ContentResolver.SYNC_EXTRAS_MANUAL);
-        int syncThreshold = isForced ? 0 : config.getSyncThreshold();
-        logger.debug("Sync request isForced: {}, batchId: {}, config: {}", isForced, batchStartMillis, config.toString());
+        Integer configThreshold = config.getSyncThreshold();
+        int syncThreshold = isForced ? 0 : (configThreshold != null ? configThreshold : 100);
+        logger.debug("Sync request isForced: {}, batchId: {}, syncThreshold: {}, config: {}", isForced, batchStartMillis, syncThreshold, config.toString());
 
         File file = null;
         try {

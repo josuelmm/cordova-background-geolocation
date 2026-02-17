@@ -128,9 +128,11 @@ public class PostLocationTask {
         }
 
         if (mConfig.hasValidSyncUrl()) {
+            Integer configThreshold = mConfig.getSyncThreshold();
+            int threshold = (configThreshold != null) ? configThreshold : 100;
             long syncLocationsCount = mLocationDAO.getLocationsForSyncCount(System.currentTimeMillis());
-            if (syncLocationsCount >= mConfig.getSyncThreshold()) {
-                logger.debug("Attempt to sync locations: {} threshold: {}", syncLocationsCount, mConfig.getSyncThreshold());
+            if (syncLocationsCount >= threshold) {
+                logger.debug("Attempt to sync locations: {} threshold: {}", syncLocationsCount, threshold);
                 mTaskListener.onSyncRequested();
             }
         }

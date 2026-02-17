@@ -5,15 +5,10 @@ import android.location.Criteria;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
-import android.os.Build;
 import android.os.Bundle;
 
 import com.marianhello.bgloc.Config;
 import com.marianhello.logging.LoggerManager;
-
-/**
- * Created by finch on 7.11.2017.
- */
 
 public class RawLocationProvider extends AbstractLocationProvider implements LocationListener {
     private LocationManager locationManager;
@@ -36,9 +31,17 @@ public class RawLocationProvider extends AbstractLocationProvider implements Loc
         if (isStarted) {
             return;
         }
+        if (locationManager == null) {
+            logger.error("LocationManager is null");
+            return;
+        }
+        if (mConfig == null) {
+            logger.warn("RawLocationProvider started without config");
+            return;
+        }
         String provider = LocationManager.GPS_PROVIDER;
-        if (!locationManager.getAllProviders().contains(LocationManager.GPS_PROVIDER) ||
-                Build.VERSION.SDK_INT <= 30) {
+        boolean gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+        if (!gpsEnabled) {
             Criteria criteria = new Criteria();
             criteria.setAltitudeRequired(false);
             criteria.setBearingRequired(false);
@@ -48,6 +51,10 @@ public class RawLocationProvider extends AbstractLocationProvider implements Loc
             criteria.setHorizontalAccuracy(translateDesiredAccuracy(mConfig.getDesiredAccuracy()));
             criteria.setPowerRequirement(Criteria.POWER_HIGH);
             provider = locationManager.getBestProvider(criteria, true);
+        }
+        if (provider == null) {
+            logger.warn("No location provider available (GPS disabled and getBestProvider returned null)");
+            return;
         }
         try {
             logger.info("Requesting location updates from provider {}", provider);
@@ -116,21 +123,17 @@ public class RawLocationProvider extends AbstractLocationProvider implements Loc
      * 0:  most aggressive, most accurate, worst battery drain
      * 1000:  least aggressive, least accurate, best for battery.
      */
-    private Integer translateDesiredAccuracy(Integer accuracy) {
+    private int translateDesiredAccuracy(Integer accuracy) {
+        if (accuracy == null) {
+            return Criteria.ACCURACY_MEDIUM;
+        }
         if (accuracy >= 1000) {
             return Criteria.ACCURACY_LOW;
         }
         if (accuracy >= 100) {
             return Criteria.ACCURACY_MEDIUM;
         }
-        if (accuracy >= 10) {
-            return Criteria.ACCURACY_HIGH;
-        }
-        if (accuracy >= 0) {
-            return Criteria.ACCURACY_HIGH;
-        }
-
-        return Criteria.ACCURACY_MEDIUM;
+        return Criteria.ACCURACY_HIGH;
     }
 
     @Override

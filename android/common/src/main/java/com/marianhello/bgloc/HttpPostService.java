@@ -22,6 +22,10 @@ import java.net.URLEncoder;
 
 public class HttpPostService {
     public static final int BUFFER_SIZE = 1024;
+    /** Timeout to establish connection (ms). Prevents sync notification from staying stuck. */
+    private static final int CONNECT_TIMEOUT_MS = 30_000;
+    /** Timeout to read response (ms). Prevents sync notification from staying stuck. */
+    private static final int READ_TIMEOUT_MS = 120_000;
 
     private String mUrl;
     private HttpURLConnection mHttpURLConnection;
@@ -41,6 +45,8 @@ public class HttpPostService {
     private HttpURLConnection openConnection() throws IOException {
         if (mHttpURLConnection == null) {
             mHttpURLConnection = (HttpURLConnection) new URL(mUrl).openConnection();
+            mHttpURLConnection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            mHttpURLConnection.setReadTimeout(READ_TIMEOUT_MS);
         }
         return mHttpURLConnection;
     }
@@ -141,15 +147,18 @@ public class HttpPostService {
     }
 
     public int postJSONFile(File file, Map headers, UploadingProgressListener listener) throws IOException {
-        return postJSONFile(new FileInputStream(file), headers, listener);
+        long fileSize = file.length();
+        return postJSONFile(new FileInputStream(file), fileSize, headers, listener);
     }
 
     public int postJSONFile(InputStream stream, Map headers, UploadingProgressListener listener) throws IOException {
+        return postJSONFile(stream, stream.available(), headers, listener);
+    }
+
+    public int postJSONFile(InputStream stream, long streamSize, Map headers, UploadingProgressListener listener) throws IOException {
         if (headers == null) {
             headers = new HashMap();
         }
-
-        final long streamSize = stream.available();
         HttpURLConnection conn = this.openConnection();
 
         conn.setDoInput(false);
@@ -180,7 +189,7 @@ public class HttpPostService {
                 os.write(buffer, 0, bytesRead);
                 os.flush();
                 progress += bytesRead;
-                int percentage = (int) ((progress * 100L) / streamSize);
+                int percentage = (streamSize > 0) ? (int) ((progress * 100L) / streamSize) : 100;
                 if (listener != null) {
                     listener.onProgress(percentage);
                 }

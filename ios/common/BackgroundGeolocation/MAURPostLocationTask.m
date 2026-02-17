@@ -103,8 +103,9 @@ static MAURLocationTransform s_locationTransform = nil;
 
         if ([self.config hasValidSyncUrl]) {
             NSNumber *locationsCount = [locationDAO getLocationsForSyncCount];
-            if (locationsCount && [locationsCount integerValue] >= self.config.syncThreshold.integerValue) {
-                DDLogDebug(@"%@ Attempt to sync locations: %@ threshold: %@", TAG, locationsCount, self.config.syncThreshold);
+            NSInteger threshold = self.config.syncThreshold != nil ? self.config.syncThreshold.integerValue : 100;
+            if (locationsCount && [locationsCount integerValue] >= threshold) {
+                DDLogDebug(@"%@ Attempt to sync locations: %@ threshold: %ld", TAG, locationsCount, (long)threshold);
                 [self sync];
             }
         }
