@@ -12,8 +12,8 @@ Instructions for how to prepare debug logs can be found in [Debugging](debugging
 If you're reporting an app crash, debug logs might not contain all the necessary information about the cause of the crash.
 In that case, also provide relevant parts of output of `adb logcat` command.
 
-[GitHub Issues](https://github.com/HaylLtd/cordova-background-geolocation-plugin/issues){: .btn .btn-purple }
-[GitHub Discussions](https://github.com/HaylLtd/cordova-background-geolocation-plugin/discussions){: .btn .btn-blue }
+[GitHub Issues](https://github.com/josuelmm/cordova-background-geolocation/issues){: .btn .btn-purple }
+[GitHub Discussions](https://github.com/josuelmm/cordova-background-geolocation/discussions){: .btn .btn-blue }
 
 ## Android background service issues
 

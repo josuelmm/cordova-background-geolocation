@@ -11,16 +11,16 @@ Cross-platform geolocation for Cordova with battery-saving "circular region moni
 
 This plugin can be used for geolocation when the app is running in the foreground or background. It is more battery and data efficient than html5 geolocation or cordova-geolocation plugin. It can be used side by side with other geolocation providers (eg. html5 navigator.geolocation).
 
-This project is based on [@mauron85/cordova-plugin-background-geolocation](https://github.com/mauron85/cordova-plugin-background-geolocation), which in turn was based on the original [cordova-background-geolocation plugin](https://github.com/christocracy/cordova-plugin-background-geolocation) by [christocracy](https://github.com/christocracy). Hayl Ltd have taken on responsibility for hosting it and will be maintaining it and merging PRs from the community. If you have any fixes, features or updates that you would like included, please do raise a PR or issue on the GitHub repository.
+This project is based on [@mauron85/cordova-plugin-background-geolocation](https://github.com/mauron85/cordova-plugin-background-geolocation), which in turn was based on the original [cordova-background-geolocation plugin](https://github.com/christocracy/cordova-plugin-background-geolocation) by [christocracy](https://github.com/christocracy). This independent fork is maintained at [josuelmm/cordova-background-geolocation](https://github.com/josuelmm/cordova-background-geolocation). If you have any fixes, features or updates that you would like included, please do raise a PR or issue on the GitHub repository.
 
-We are also looking to maintainers to help with this, so that the project does not end up orphaned. If you are interested in helping out with maintaining the project, please see the [pinned discussion at GitHub](https://github.com/HaylLtd/cordova-background-geolocation-plugin/discussions/3).
-
-The NPM package can be found at [cordova-background-geolocation-plugin](https://www.npmjs.com/package/cordova-background-geolocation-plugin).
+The NPM package can be found at [@josuelmm/cordova-background-geolocation](https://www.npmjs.com/package/@josuelmm/cordova-background-geolocation).
 
 ## Installing the plugin
 
 ```bash
-cordova plugin add cordova-background-geolocation-plugin
+npm install @josuelmm/cordova-background-geolocation
+# or
+cordova plugin add @josuelmm/cordova-background-geolocation
 ```
 
 You may also want to change default iOS permission prompts and set specific google play version and android support library version for compatibility with other plugins.
@@ -28,7 +28,7 @@ You may also want to change default iOS permission prompts and set specific goog
 **Note:** Always consult documentation of other plugins to figure out compatible versions.
 
 ```bash
-cordova plugin add cordova-background-geolocation-plugin \
+cordova plugin add @josuelmm/cordova-background-geolocation \
   --variable GOOGLE_PLAY_SERVICES_VERSION=17+ \
   --variable ANDROID_SUPPORT_LIBRARY_VERSION=26+ \
   --variable ALWAYS_USAGE_DESCRIPTION="App requires ..." \

@@ -1,11 +1,11 @@
 # Cordova Background Geolocation Plugin
 
-[![npm](https://img.shields.io/npm/v/cordova-background-geolocation-plugin?style=flat-square)](https://www.npmjs.com/package/cordova-background-geolocation-plugin)
-![npm downloads](https://img.shields.io/npm/dm/cordova-background-geolocation-plugin?style=flat-square)
+[![npm](https://img.shields.io/npm/v/@josuelmm/cordova-background-geolocation?style=flat-square)](https://www.npmjs.com/package/@josuelmm/cordova-background-geolocation)
+![npm downloads](https://img.shields.io/npm/dm/@josuelmm/cordova-background-geolocation?style=flat-square)
 
-[![GitHub issues](https://img.shields.io/github/issues/HaylLtd/cordova-background-geolocation-plugin?style=flat-square)](https://github.com/HaylLtd/cordova-background-geolocation-plugin/issues)
-[![GitHub stars](https://img.shields.io/github/stars/HaylLtd/cordova-background-geolocation-plugin?style=flat-square)](https://github.com/HaylLtd/cordova-background-geolocation-plugin/stargazers)
-![GitHub last commit](https://img.shields.io/github/last-commit/HaylLtd/cordova-background-geolocation-plugin?style=flat-square)
+[![GitHub issues](https://img.shields.io/github/issues/josuelmm/cordova-background-geolocation?style=flat-square)](https://github.com/josuelmm/cordova-background-geolocation/issues)
+[![GitHub stars](https://img.shields.io/github/stars/josuelmm/cordova-background-geolocation?style=flat-square)](https://github.com/josuelmm/cordova-background-geolocation/stargazers)
+![GitHub last commit](https://img.shields.io/github/last-commit/josuelmm/cordova-background-geolocation?style=flat-square)
 
 ## Introduction
 
@@ -13,21 +13,21 @@
 
 This plugin can be used for geolocation when the app is running in the foreground or background. It is more battery and data efficient than html5 geolocation. It can be used side by side with other geolocation providers (eg. html5 navigator.geolocation).
 
-This project is based on [@mauron85/cordova-plugin-background-geolocation](https://github.com/mauron85/cordova-plugin-background-geolocation), which in turn was based on the original [cordova-background-geolocation plugin](https://github.com/christocracy/cordova-plugin-background-geolocation) by [christocracy](https://github.com/christocracy). Hayl Ltd have taken on responsibility for hosting it and will be maintaining it and merging PRs from the community. If you have any fixes, features or updates that you would like included, please do raise a PR or issue on the GitHub repository.
+This project is based on [@mauron85/cordova-plugin-background-geolocation](https://github.com/mauron85/cordova-plugin-background-geolocation), which in turn was based on the original [cordova-background-geolocation plugin](https://github.com/christocracy/cordova-plugin-background-geolocation) by [christocracy](https://github.com/christocracy). This independent fork is maintained at [josuelmm/cordova-background-geolocation](https://github.com/josuelmm/cordova-background-geolocation). If you have any fixes, features or updates that you would like included, please do raise a PR or issue on the GitHub repository.
 
 **ATENTION:** This project changes the package name from it's parents. The words are the same but in a different order, which is easy to miss and can cause some confusion
 
-We are also looking to maintainers to help with this, so that the project does not end up orphaned. If you are interested in helping out with maintaining the project, please see the [pinned discussion at GitHub](https://github.com/HaylLtd/cordova-background-geolocation-plugin/discussions/3).
+We are also looking to maintainers to help with this, so that the project does not end up orphaned. If you are interested in helping out with maintaining the project, please open an [issue or discussion](https://github.com/josuelmm/cordova-background-geolocation/issues) on GitHub.
 
-The NPM package can be found at [cordova-background-geolocation-plugin](https://www.npmjs.com/package/cordova-background-geolocation-plugin).
+The NPM package can be found at [@josuelmm/cordova-background-geolocation](https://www.npmjs.com/package/@josuelmm/cordova-background-geolocation).
 
 **Recent (v2.3.4):** Sync and location providers were hardened for production: null-safe config/manager checks, HTTP timeouts so the sync notification cannot stay stuck, migration of the Android activity provider to `FusedLocationProviderClient` / `ActivityRecognitionClient`, and PendingIntent/requestCode fixes on the distance-filter provider. See [CHANGELOG](CHANGELOG.md) for details.
 
-<font size="4">[Documentation](https://haylltd.github.io/cordova-background-geolocation-plugin/)</font>
+<font size="4">[Documentation](https://josuelmm.github.io/cordova-background-geolocation/)</font> (original docs; API is compatible)
 
 ### Installing the plugin
 
-Este fork se publica en npm como **`@josuelmm/cordova-background-geolocation-plugin`**. Para publicar tú mismo o automatizar desde GitHub, ver [NPM_PUBLISH.md](NPM_PUBLISH.md).
+Este fork se publica en npm como **`@josuelmm/cordova-background-geolocation`**. Para publicar tú mismo o automatizar desde GitHub, ver [NPM_PUBLISH.md](NPM_PUBLISH.md).
 
 **Note:** for non AndroidX project please use version 1.x of this plugin. Version 2.x and on will support AndroidX.
 
@@ -39,12 +39,12 @@ Este fork se publica en npm como **`@josuelmm/cordova-background-geolocation-plu
 
 
 ```bash
-npm install @josuelmm/cordova-background-geolocation-plugin
+npm install @josuelmm/cordova-background-geolocation
 npx cap sync
 ```
 
 ```bash
-cordova plugin add @josuelmm/cordova-background-geolocation-plugin
+cordova plugin add @josuelmm/cordova-background-geolocation
 ```
 
 You may also want to change default iOS permission prompts and set specific google play version and android support library version for compatibility with other plugins.
@@ -52,7 +52,7 @@ You may also want to change default iOS permission prompts and set specific goog
 **Note:** Always consult documentation of other plugins to figure out compatible versions.
 
 ```bash
-cordova plugin add @josuelmm/cordova-background-geolocation-plugin \
+cordova plugin add @josuelmm/cordova-background-geolocation \
   --variable GOOGLE_PLAY_SERVICES_VERSION=17+ \
   --variable ALWAYS_USAGE_DESCRIPTION="App requires ..." \
   --variable MOTION_USAGE_DESCRIPTION="App requires motion detection"
@@ -91,7 +91,7 @@ BackgroundGeolocation.configure({
 
 Then call `start()` to start location tracking.
 
-A more comprehensive example can be found in the [Documentation](https://haylltd.github.io/cordova-background-geolocation-plugin/example)
+A more comprehensive example can be found in the [Documentation](https://josuelmm.github.io/cordova-background-geolocation/example) (original docs).
 
 ### Compatibility
 

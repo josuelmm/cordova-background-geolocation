@@ -1,52 +1,52 @@
 # Changelog
 
-## [2.3.4](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/2.3.4) (2026-02-20)
+## [2.3.4](https://github.com/josuelmm/cordova-background-geolocation/tree/2.3.4) (2026-02-20)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/v2.0.4...2.3.4)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/v2.0.4...2.3.4)
 
-## [v2.0.4](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/v2.0.4) (2022-03-16)
+## [v2.0.4](https://github.com/josuelmm/cordova-background-geolocation/tree/v2.0.4) (2022-03-16)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/v2.0.3...v2.0.4)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/v2.0.3...v2.0.4)
 
-## [v2.0.3](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/v2.0.3) (2022-02-27)
+## [v2.0.3](https://github.com/josuelmm/cordova-background-geolocation/tree/v2.0.3) (2022-02-27)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/v2.0.2...v2.0.3)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/v2.0.2...v2.0.3)
 
-## [v2.0.2](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/v2.0.2) (2022-01-20)
+## [v2.0.2](https://github.com/josuelmm/cordova-background-geolocation/tree/v2.0.2) (2022-01-20)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/v2.0.1...v2.0.2)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/v2.0.1...v2.0.2)
 
-## [v2.0.1](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/v2.0.1) (2021-10-01)
+## [v2.0.1](https://github.com/josuelmm/cordova-background-geolocation/tree/v2.0.1) (2021-10-01)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/v2.0.0...v2.0.1)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/v2.0.0...v2.0.1)
 
-## [v2.0.0](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/v2.0.0) (2021-10-01)
+## [v2.0.0](https://github.com/josuelmm/cordova-background-geolocation/tree/v2.0.0) (2021-10-01)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/v1.1.0...v2.0.0)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/v1.1.0...v2.0.0)
 
-## [v1.1.0](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/v1.1.0) (2021-06-27)
+## [v1.1.0](https://github.com/josuelmm/cordova-background-geolocation/tree/v1.1.0) (2021-06-27)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/v1.0.0...v1.1.0)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/v1.0.0...v1.1.0)
 
-## [v1.0.0](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/v1.0.0) (2021-05-04)
+## [v1.0.0](https://github.com/josuelmm/cordova-background-geolocation/tree/v1.0.0) (2021-05-04)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/v1.0.0-rc.5...v1.0.0)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/v1.0.0-rc.5...v1.0.0)
 
-## [v1.0.0-rc.5](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/v1.0.0-rc.5) (2021-05-03)
+## [v1.0.0-rc.5](https://github.com/josuelmm/cordova-background-geolocation/tree/v1.0.0-rc.5) (2021-05-03)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/1.0.0-rc.4...v1.0.0-rc.5)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/1.0.0-rc.4...v1.0.0-rc.5)
 
-## [1.0.0-rc.4](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/1.0.0-rc.4) (2021-05-02)
+## [1.0.0-rc.4](https://github.com/josuelmm/cordova-background-geolocation/tree/1.0.0-rc.4) (2021-05-02)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/1.0.0-rc.3...1.0.0-rc.4)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/1.0.0-rc.3...1.0.0-rc.4)
 
-## [1.0.0-rc.3](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/1.0.0-rc.3) (2021-05-02)
+## [1.0.0-rc.3](https://github.com/josuelmm/cordova-background-geolocation/tree/1.0.0-rc.3) (2021-05-02)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/1.0.0-rc.2...1.0.0-rc.3)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/1.0.0-rc.2...1.0.0-rc.3)
 
-## [1.0.0-rc.2](https://github.com/josuelmm/cordova-background-geolocation-plugin/tree/1.0.0-rc.2) (2021-05-01)
+## [1.0.0-rc.2](https://github.com/josuelmm/cordova-background-geolocation/tree/1.0.0-rc.2) (2021-05-01)
 
-[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation-plugin/compare/1.0.0-rc.1...1.0.0-rc.2)
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/1.0.0-rc.1...1.0.0-rc.2)
 
 # Historical Changelog
 

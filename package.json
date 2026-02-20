@@ -1,16 +1,16 @@
 {
-  "name": "@josuelmm/cordova-background-geolocation-plugin",
+  "name": "@josuelmm/cordova-background-geolocation",
   "version": "2.3.4",
-  "description": "Cordova Background Geolocation Plugin (fork actualizado)",
+  "description": "Cordova Background Geolocation (fork actualizado)",
   "main": "./www/BackgroundGeolocation.js",
   "types": "./www/BackgroundGeolocation.d.ts",
   "cordova": {
-    "id": "cordova-background-geolocation-plugin",
+    "id": "cordova-background-geolocation",
     "platforms": ["android", "ios"]
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/josuelmm/cordova-background-geolocation-plugin.git"
+    "url": "git+https://github.com/josuelmm/cordova-background-geolocation.git"
   },
   "keywords": [
     "gps",
@@ -35,9 +35,9 @@
   "author": "",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/josuelmm/cordova-background-geolocation-plugin/issues"
+    "url": "https://github.com/josuelmm/cordova-background-geolocation/issues"
   },
-  "homepage": "https://github.com/josuelmm/cordova-background-geolocation-plugin#readme",
+  "homepage": "https://github.com/josuelmm/cordova-background-geolocation#readme",
   "publishConfig": {
     "access": "public"
   }
