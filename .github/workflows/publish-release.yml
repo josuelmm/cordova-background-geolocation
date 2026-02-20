@@ -1,5 +1,5 @@
 # Publica el paquete en npm cuando creas un Release en GitHub.
-# Requiere: secret NPM_TOKEN en este repo (token de npmjs.com con permisos "Automation" o "Publish").
+# Requiere: en el repo, Settings → Secrets and variables → Actions → secret NPM_TOKEN (token Automation de npmjs.com).
 
 name: Publish to npm
 
@@ -16,13 +16,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          registry-url: "https://registry.npmjs.org"
+
+      # Autenticación en registry.npmjs.org para poder publicar
+      - name: Set up npm authentication
+        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" >> ~/.npmrc
 
       - run: npm ci
 
-      # Paquetes con scope (@user/name) deben publicarse con --access public para ser públicos
-      - run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm
+        run: npm publish --access public
 
   
