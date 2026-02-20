@@ -94,9 +94,14 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
             config = configDAO.retrieveConfiguration();
         } catch (JSONException e) {
             logger.error("Error retrieving config: {}", e.getMessage());
+            syncResult.stats.numParseExceptions++;
+            return;
         }
 
         if (config == null || !config.hasValidSyncUrl()) {
+            if (config == null) {
+                logger.warn("Sync skipped: no config");
+            }
             return;
         }
 
@@ -104,7 +109,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         notificationsEnabled = !config.hasNotificationsEnabled() || config.getNotificationsEnabled();
 
         Long batchStartMillis = System.currentTimeMillis();
-        boolean isForced = extras.getBoolean(ContentResolver.SYNC_EXTRAS_MANUAL);
+        boolean isForced = (extras != null) && extras.getBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, false);
         Integer configThreshold = config.getSyncThreshold();
         int syncThreshold = isForced ? 0 : (configThreshold != null ? configThreshold : 100);
         logger.debug("Sync request isForced: {}, batchId: {}, syncThreshold: {}, config: {}", isForced, batchStartMillis, syncThreshold, config.toString());
@@ -114,6 +119,8 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
             file = batchManager.createBatch(batchStartMillis, syncThreshold, config.getTemplate());
         } catch (IOException e) {
             logger.error("Failed to create batch: {}", e.getMessage());
+            syncResult.stats.numIoExceptions++;
+            return;
         }
 
         if (file == null) {
@@ -124,7 +131,9 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         logger.info("Syncing startAt: {}", batchStartMillis);
         String url = config.getSyncUrl();
         HashMap<String, String> httpHeaders = new HashMap<String, String>();
-        httpHeaders.putAll(config.getHttpHeaders());
+        if (config.getHttpHeaders() != null) {
+            httpHeaders.putAll(config.getHttpHeaders());
+        }
         httpHeaders.put("x-batch-id", String.valueOf(batchStartMillis));
 
         if (uploadLocations(file, url, httpHeaders)) {
@@ -179,16 +188,22 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
                 if (isStatusOkay) {
                     builder.setContentText("Sync completed");
                 } else {
-                    builder.setContentText("Sync failed due server error");
+                    builder.setContentText("Sync failed (HTTP " + responseCode + ")");
                 }
+            }
+
+            if (!isStatusOkay) {
+                logger.warn("Batch sync failed: server returned HTTP {} (check server logs or sync URL)", responseCode);
             }
 
             return isStatusOkay;
         } catch (IOException e) {
-            logger.warn("Error uploading locations: {}", e.getMessage());
+            String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            logger.warn("Error uploading locations (network/IO): {}", errMsg);
 
-            if (builder != null)
-                builder.setContentText("Sync failed: " + e.getMessage());
+            if (builder != null) {
+                builder.setContentText("Sync failed: " + errMsg);
+            }
         } finally {
             logger.info("Syncing endAt: {}", System.currentTimeMillis());
 

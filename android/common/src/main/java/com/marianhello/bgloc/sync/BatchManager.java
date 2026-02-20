@@ -72,6 +72,9 @@ public class BatchManager {
 
         Cursor cursor = null;
         LocationWriter writer = null;
+        FileOutputStream fs = null;
+        File file = null;
+        boolean batchReturned = false;
 
         try {
             cursor = resolver.query(
@@ -83,13 +86,23 @@ public class BatchManager {
 
             );
 
+            if (cursor == null) {
+                logger.warn("ContentResolver.query returned null, cannot create batch");
+                return null;
+            }
+
             int threshold = (syncThreshold != null && syncThreshold >= 0) ? syncThreshold : 1;
             if (cursor.getCount() < threshold) {
                 return null;
             }
+            // Never create or send an empty batch (e.g. forceSync with 0 pending locations)
+            if (cursor.getCount() == 0) {
+                logger.info("No pending locations to sync, skipping batch creation");
+                return null;
+            }
 
-            File file = File.createTempFile("locations", ".json");
-            FileOutputStream fs = new FileOutputStream(file);
+            file = File.createTempFile("locations", ".json");
+            fs = new FileOutputStream(file);
             writer = new LocationWriter(fs, template);
 
             writer.beginArray();
@@ -100,7 +113,9 @@ public class BatchManager {
 
             writer.endArray();
             writer.close();
+            writer = null;
             fs.close();
+            fs = null;
 
             // set batchStartMillis for all synced locations
             ContentValues values = new ContentValues();
@@ -109,13 +124,29 @@ public class BatchManager {
 
             logger.info("Batch file: {} created successfully", file.getName());
 
+            batchReturned = true;
             return file;
         } finally {
             if (cursor != null) {
                 cursor.close();
             }
             if (writer != null) {
-                writer.close();
+                try {
+                    writer.close();
+                } catch (IOException e) {
+                    logger.debug("Error closing LocationWriter: {}", e.getMessage());
+                }
+            }
+            if (fs != null) {
+                try {
+                    fs.close();
+                } catch (IOException e) {
+                    logger.debug("Error closing FileOutputStream: {}", e.getMessage());
+                }
+            }
+            // if we threw before returning the file, delete temp file to avoid leaving garbage
+            if (!batchReturned && file != null && file.exists() && !file.delete()) {
+                logger.warn("Could not delete temp batch file: {}", file.getAbsolutePath());
             }
         }
     }
