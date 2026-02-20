@@ -1,5 +1,6 @@
 # Publica el paquete en npm cuando creas un Release en GitHub.
-# Requiere: en el repo, Settings → Secrets and variables → Actions → secret NPM_TOKEN (token Automation de npmjs.com).
+# Requiere: (1) Repository secret NPM_TOKEN (token Automation de npmjs.com).
+#           (2) package.json con "name": "@josuelmm/cordova-background-geolocation-plugin" (con scope; el nombre sin scope está ocupado).
 
 name: Publish to npm
 
