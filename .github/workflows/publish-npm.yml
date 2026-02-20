@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "22"
 
       # Autenticación en registry.npmjs.org para poder publicar
       - name: Set up npm authentication
@@ -26,3 +26,5 @@ jobs:
 
       - name: Publish to npm
         run: npm publish --access public
+
+  

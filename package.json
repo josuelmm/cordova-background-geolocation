@@ -1,6 +1,6 @@
 {
   "name": "@josuelmm/cordova-background-geolocation",
-  "version": "2.3.4",
+  "version": "2.3.5",
   "description": "Cordova Background Geolocation (fork actualizado)",
   "main": "./www/BackgroundGeolocation.js",
   "types": "./www/BackgroundGeolocation.d.ts",
