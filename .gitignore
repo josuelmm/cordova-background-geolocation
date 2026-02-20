@@ -13,3 +13,5 @@ local.properties
 *.iml
 build
 *.skip
+NPM_PUBLISH.md
+.github/workflows/publish-release.yml

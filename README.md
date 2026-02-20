@@ -27,6 +27,8 @@ The NPM package can be found at [cordova-background-geolocation-plugin](https://
 
 ### Installing the plugin
 
+Este fork se publica en npm como **`@josuelmm/cordova-background-geolocation-plugin`**. Para publicar tú mismo o automatizar desde GitHub, ver [NPM_PUBLISH.md](NPM_PUBLISH.md).
+
 **Note:** for non AndroidX project please use version 1.x of this plugin. Version 2.x and on will support AndroidX.
 
 **Note:** this plugin can be installed on a Capacitor project and it is tested to be working as expected, some configuration may need to be done differently than below according to how Capacitor configuration is implemented.
@@ -37,12 +39,12 @@ The NPM package can be found at [cordova-background-geolocation-plugin](https://
 
 
 ```bash
-npm install cordova-background-geolocation-plugin
+npm install @josuelmm/cordova-background-geolocation-plugin
 npx cap sync
 ```
 
 ```bash
-cordova plugin add cordova-background-geolocation-plugin
+cordova plugin add @josuelmm/cordova-background-geolocation-plugin
 ```
 
 You may also want to change default iOS permission prompts and set specific google play version and android support library version for compatibility with other plugins.
@@ -50,7 +52,7 @@ You may also want to change default iOS permission prompts and set specific goog
 **Note:** Always consult documentation of other plugins to figure out compatible versions.
 
 ```bash
-cordova plugin add cordova-background-geolocation-plugin \
+cordova plugin add @josuelmm/cordova-background-geolocation-plugin \
   --variable GOOGLE_PLAY_SERVICES_VERSION=17+ \
   --variable ALWAYS_USAGE_DESCRIPTION="App requires ..." \
   --variable MOTION_USAGE_DESCRIPTION="App requires motion detection"
