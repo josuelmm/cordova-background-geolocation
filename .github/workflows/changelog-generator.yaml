@@ -1,13 +1,14 @@
+# Generaba CHANGELOG.md desde issues/PRs de GitHub y lo sobrescribía en cada push a stable.
+# Desactivado para mantener el CHANGELOG manual. Para reactivar: quita el comentario de "on" y pon solo workflow_dispatch si quieres ejecutarlo a mano.
 name: changelog-generator
 
 on:
-  push:
-    branches: [stable]
-  workflow_run:
-    workflows: ["Publish Release"]
-    types: 
-      - completed
-  workflow_dispatch:
+  workflow_dispatch:  # Solo ejecución manual desde la pestaña Actions
+  # push:
+  #   branches: [stable]
+  # workflow_run:
+  #   workflows: ["Publish Release"]
+  #   types: [completed]
 jobs:
   generate_changelog:
 
