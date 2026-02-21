@@ -35,10 +35,11 @@ nav_order: 3
 | `altitude`             | `Number`  | Altitude if available, in meters above the WGS 84 reference ellipsoid. |
 | `altitudeAccuracy`     | `Number`  | Estimated accuracy of altitude, in meters.                             |
 | `bearing`              | `Number`  | Bearing, in degrees.                                                   |
-| `isFromMockProvider`   | `Boolean` | (android only) True if location was recorded by mock provider          |
-| `mockLocationsEnabled` | `Boolean` | (android only) True if device has mock locations enabled               |
+| `isFromMockProvider`   | `Boolean` | (Android only) True if location was recorded by mock provider          |
+| `mockLocationsEnabled` | `Boolean` | (Android only) True if device has mock locations enabled                |
+| `simulated`            | `Boolean` | (iOS 15+ only) True if location was simulated by software (e.g. Simulator) |
 
-Locations parameters `isFromMockProvider` and `mockLocationsEnabled` are not posted to `url` or `syncUrl` by default.
+Locations parameters `isFromMockProvider`, `mockLocationsEnabled` and `simulated` are not posted to `url` or `syncUrl` by default.
 Both can be requested via option `postTemplate`.
 
 Note: Do not use location `id` as unique key in your database as ids will be reused when `option.maxLocations` is reached.

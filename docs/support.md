@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Support
-nav_order: 9
+nav_order: 10
 ---
 
 # Support

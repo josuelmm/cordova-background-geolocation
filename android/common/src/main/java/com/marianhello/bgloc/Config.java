@@ -63,6 +63,7 @@ public class Config implements Parcelable
     private HashMap httpHeaders;
     private Integer maxLocations;
     private LocationTemplate template;
+    private Boolean enableWatchdog;
 
     public Config () {
     }
@@ -92,6 +93,7 @@ public class Config implements Parcelable
         this.syncThreshold = config.syncThreshold;
         this.httpHeaders = CloneHelper.deepCopy(config.httpHeaders);
         this.maxLocations = config.maxLocations;
+        this.enableWatchdog = config.enableWatchdog;
         if (config.template instanceof AbstractLocationTemplate) {
             this.template = ((AbstractLocationTemplate)config.template).clone();
         }
@@ -120,6 +122,7 @@ public class Config implements Parcelable
         setSyncUrl(in.readString());
         setSyncThreshold(in.readInt());
         setMaxLocations(in.readInt());
+        setEnableWatchdog((Boolean) in.readValue(null));
         Bundle bundle = in.readBundle();
         setHttpHeaders((HashMap<String, String>) bundle.getSerializable("httpHeaders"));
         setTemplate((LocationTemplate) bundle.getSerializable(AbstractLocationTemplate.BUNDLE_KEY));
@@ -151,6 +154,7 @@ public class Config implements Parcelable
         config.httpHeaders = null;
         config.maxLocations = 10000;
         config.template = null;
+        config.enableWatchdog = false;
 
         return config;
     }
@@ -183,6 +187,7 @@ public class Config implements Parcelable
         out.writeString(getSyncUrl());
         out.writeInt(getSyncThreshold());
         out.writeInt(getMaxLocations());
+        out.writeValue(getEnableWatchdog());
         Bundle bundle = new Bundle();
         bundle.putSerializable("httpHeaders", getHttpHeaders());
         bundle.putSerializable(AbstractLocationTemplate.BUNDLE_KEY, (AbstractLocationTemplate) getTemplate());
@@ -518,6 +523,19 @@ public class Config implements Parcelable
 
     public void setTemplate(LocationTemplate template) {
         this.template = template;
+    }
+
+    public boolean hasEnableWatchdog() {
+        return enableWatchdog != null;
+    }
+
+    @Nullable
+    public Boolean getEnableWatchdog() {
+        return enableWatchdog;
+    }
+
+    public void setEnableWatchdog(Boolean enableWatchdog) {
+        this.enableWatchdog = enableWatchdog;
     }
 
     @Override

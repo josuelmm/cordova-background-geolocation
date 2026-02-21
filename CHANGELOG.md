@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.0.0](https://github.com/josuelmm/cordova-background-geolocation/tree/3.0.0) (2026-02-20)
+
+### Added
+- Android: Wake lock (PARTIAL_WAKE_LOCK) during tracking
+- Android: Optional location watchdog (`enableWatchdog`) to restart provider if no update in ~60s
+- `openSettings()` — convenience alias for `showAppSettings()`
+- `getPluginVersion()` — returns plugin version from native
+- iOS: `simulated` field in location payload (iOS 15+, from `sourceInformation.isSimulatedBySoftware`)
+- Config option `enableWatchdog` (Android, default `false`)
+- Angular: full documentation in docs/angular.md
+
+### Changed
+- Version bump to 3.0.0
+
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/2.3.4...3.0.0)
+
 ## [2.3.4](https://github.com/josuelmm/cordova-background-geolocation/tree/2.3.4) (2026-02-20)
 
 [Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/v2.0.4...2.3.4)

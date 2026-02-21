@@ -129,6 +129,13 @@ var BackgroundGeolocation = {
       'showAppSettings');
   },
 
+  /** Opens app settings (alias for showAppSettings). */
+  openSettings: function () {
+    return execWithPromise(null,
+      null,
+      'showAppSettings');
+  },
+
   showLocationSettings: function () {
     return execWithPromise(null,
       null,
@@ -176,6 +183,12 @@ var BackgroundGeolocation = {
     return execWithPromise(success,
       failure,
       'getLogEntries', [limit, offset, minLevel]);
+  },
+
+  getPluginVersion: function (success, failure) {
+    return execWithPromise(success,
+      failure,
+      'getPluginVersion');
   },
 
   checkStatus: function (success, failure) {

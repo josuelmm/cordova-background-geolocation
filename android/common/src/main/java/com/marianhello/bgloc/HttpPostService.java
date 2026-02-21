@@ -11,9 +11,13 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Iterator;
+
+import org.json.JSONTokener;
 
 import java.net.URL;
 import java.net.HttpURLConnection;
@@ -92,7 +96,7 @@ public class HttpPostService {
         if (contentType == null) {
             contentType = "application/json";
         }
-        
+        // Prepare body according to Content-Type so header and body always match
         String finalBody = body;
         if (contentType.equalsIgnoreCase("application/x-www-form-urlencoded")) {
             try {
@@ -129,19 +133,38 @@ public class HttpPostService {
         return conn.getResponseCode();
     }
     
+    private static String getContentTypeFromHeaders(Map headers) {
+        if (headers == null) return null;
+        for (Object keyObj : headers.keySet()) {
+            String key = (String) keyObj;
+            if (key != null && key.equalsIgnoreCase("Content-Type")) {
+                return (String) headers.get(key);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Converts JSON string (object or array) to application/x-www-form-urlencoded.
+     * Object: flat key=value&key2=value2. Array: single key "locations" with URL-encoded JSON array.
+     */
     private String jsonToUrlEncoded(String jsonString) throws Exception {
-        JSONObject json = new JSONObject(jsonString);
+        Object json = new JSONTokener(jsonString).nextValue();
+        if (json instanceof JSONArray) {
+            return "locations=" + URLEncoder.encode(jsonString, StandardCharsets.UTF_8.name());
+        }
+        JSONObject jsonObj = (JSONObject) json;
         StringBuilder result = new StringBuilder();
-        Iterator<String> keys = json.keys();
+        Iterator<String> keys = jsonObj.keys();
         while (keys.hasNext()) {
             String key = keys.next();
-            String value = json.get(key).toString();
+            String value = jsonObj.get(key).toString();
             if (result.length() > 0) {
                 result.append("&");
             }
-            result.append(URLEncoder.encode(key, "UTF-8"));
+            result.append(URLEncoder.encode(key, StandardCharsets.UTF_8.name()));
             result.append("=");
-            result.append(URLEncoder.encode(value, "UTF-8"));
+            result.append(URLEncoder.encode(value, StandardCharsets.UTF_8.name()));
         }
         return result.toString();
     }
@@ -159,48 +182,70 @@ public class HttpPostService {
         if (headers == null) {
             headers = new HashMap();
         }
-        HttpURLConnection conn = this.openConnection();
+        String contentType = getContentTypeFromHeaders(headers);
+        if (contentType == null) {
+            contentType = "application/json";
+        }
+        final boolean isFormUrlEncoded = contentType.equalsIgnoreCase("application/x-www-form-urlencoded");
+        // Prepare body according to Content-Type (same as post to url): form body when form-urlencoded, else JSON
+        // Read full body so we can convert when needed
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        byte[] buffer = new byte[BUFFER_SIZE];
+        int bytesRead;
+        long progress = 0;
+        while ((bytesRead = stream.read(buffer)) != -1) {
+            baos.write(buffer, 0, bytesRead);
+            progress += bytesRead;
+            if (listener != null && streamSize > 0) {
+                int percentage = (int) ((progress * 100L) / streamSize);
+                listener.onProgress(percentage);
+            }
+        }
+        stream.close();
+        byte[] bodyBytes = baos.toByteArray();
 
+        byte[] outputBytes;
+        if (isFormUrlEncoded) {
+            try {
+                String jsonString = new String(bodyBytes, StandardCharsets.UTF_8);
+                String formBody = jsonToUrlEncoded(jsonString);
+                outputBytes = formBody.getBytes(StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                outputBytes = bodyBytes;
+            }
+        } else {
+            outputBytes = bodyBytes;
+        }
+
+        HttpURLConnection conn = this.openConnection();
         conn.setDoInput(false);
         conn.setDoOutput(true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            conn.setFixedLengthStreamingMode(streamSize);
+            conn.setFixedLengthStreamingMode(outputBytes.length);
         } else {
             conn.setChunkedStreamingMode(0);
         }
         conn.setRequestMethod("POST");
-        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setRequestProperty("Content-Type", contentType);
         Iterator<Map.Entry<String, String>> it = headers.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<String, String> pair = it.next();
-            conn.setRequestProperty(pair.getKey(), pair.getValue());
+            if (!pair.getKey().equalsIgnoreCase("Content-Type")) {
+                conn.setRequestProperty(pair.getKey(), pair.getValue());
+            }
         }
 
-        long progress = 0;
-        int bytesRead = -1;
-        byte[] buffer = new byte[BUFFER_SIZE];
-
-        BufferedInputStream is = null;
         BufferedOutputStream os = null;
         try {
-            is = new BufferedInputStream(stream);
             os = new BufferedOutputStream(conn.getOutputStream());
-            while ((bytesRead = is.read(buffer)) != -1) {
-                os.write(buffer, 0, bytesRead);
-                os.flush();
-                progress += bytesRead;
-                int percentage = (streamSize > 0) ? (int) ((progress * 100L) / streamSize) : 100;
-                if (listener != null) {
-                    listener.onProgress(percentage);
-                }
+            os.write(outputBytes);
+            if (listener != null) {
+                listener.onProgress(100);
             }
         } finally {
             if (os != null) {
                 os.flush();
                 os.close();
-            }
-            if (is != null) {
-                is.close();
             }
         }
 

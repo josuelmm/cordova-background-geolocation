@@ -37,6 +37,8 @@ typedef NS_ENUM(NSInteger, MAURLocationStatus) {
 @property (nonatomic, retain) NSNumber *radius; //only for stationary locations
 @property (nonatomic) BOOL isValid;
 @property (nonatomic, retain) NSDate *recordedAt;
+/** True if location was simulated by software (e.g. Simulator). iOS 15+. */
+@property (nonatomic, retain) NSNumber *simulated;
 
 + (instancetype) fromCLLocation:(CLLocation*)location;
 + (NSTimeInterval) locationAge:(CLLocation*)location;

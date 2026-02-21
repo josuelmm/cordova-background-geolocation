@@ -80,13 +80,13 @@ function printIosLogs(logEntries) {
 Print Android logs:
 
 ```javascript
-backgroundGeolocation.getLogEntries(100, printAndroidLogs);
+BackgroundGeolocation.getLogEntries(100, 0, "DEBUG", printAndroidLogs);
 ```
 
 Print iOS logs:
 
 ```javascript
-backgroundGeolocation.getLogEntries(100, printIosLogs);
+BackgroundGeolocation.getLogEntries(100, 0, "DEBUG", printIosLogs);
 ```
 
 ## Debugging sounds

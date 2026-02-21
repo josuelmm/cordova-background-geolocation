@@ -71,6 +71,10 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     public static final String ACTION_END_TASK = "endTask";
     public static final String ACTION_REGISTER_HEADLESS_TASK = "registerHeadlessTask";
     public static final String ACTION_FORCE_SYNC = "forceSync";
+    public static final String ACTION_GET_PLUGIN_VERSION = "getPluginVersion";
+
+    /** Plugin version; keep in sync with plugin.xml. */
+    public static final String PLUGIN_VERSION = "3.0.0";
 
     private BackgroundGeolocationFacade facade;
 
@@ -364,6 +368,9 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
         } else if (ACTION_FORCE_SYNC.equals(action)) {
             logger.debug("Forced location sync requested");
             facade.forceSync();
+            return true;
+        } else if (ACTION_GET_PLUGIN_VERSION.equals(action)) {
+            callbackContext.success(PLUGIN_VERSION);
             return true;
         }
 

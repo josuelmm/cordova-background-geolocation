@@ -9,9 +9,11 @@ This is a new class
 
 package com.marianhello.bgloc;
 
+import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.util.Log;
 
@@ -44,6 +46,10 @@ public class BootCompletedReceiver extends BroadcastReceiver {
         Log.d(TAG, "Boot completed " + config.toString());
 
         if (config.getStartOnBoot()) {
+            if (!hasLocationPermission(context)) {
+                Log.w(TAG, "Skipping start on boot: ACCESS_FINE_LOCATION or ACCESS_COARSE_LOCATION not granted");
+                return;
+            }
             Log.i(TAG, "Starting service after boot");
             Intent locationServiceIntent = new Intent(context, LocationServiceImpl.class);
             locationServiceIntent.addFlags(Intent.FLAG_FROM_BACKGROUND);
@@ -56,4 +62,9 @@ public class BootCompletedReceiver extends BroadcastReceiver {
             }
         }
      }
+
+    private static boolean hasLocationPermission(Context context) {
+        return context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                || context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
 }

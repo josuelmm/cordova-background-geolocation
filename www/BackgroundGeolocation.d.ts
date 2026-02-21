@@ -3,7 +3,23 @@
 // Definitions by: Mauron85 (@mauron85), Norbert Györög (@djereg)
 // Definitions: https://github.com/josuelmm/cordova-background-geolocation/blob/master/www/BackgroundGeolocation.d.ts
 
-type Event = 'location' | 'stationary' | 'activity' | 'start' | 'stop' | 'error' | 'authorization' | 'foreground' | 'background' | 'abort_requested' | 'http_authorization';
+export type Event = 'location' | 'stationary' | 'activity' | 'start' | 'stop' | 'error' | 'authorization' | 'foreground' | 'background' | 'abort_requested' | 'http_authorization';
+
+/** Event names enum (compatibility with @awesome-cordova-plugins style). Use e.g. BackgroundGeolocation.on(BackgroundGeolocationEvents.location, cb). */
+export enum BackgroundGeolocationEvents {
+  http_authorization = 'http_authorization',
+  abort_requested = 'abort_requested',
+  background = 'background',
+  foreground = 'foreground',
+  authorization = 'authorization',
+  error = 'error',
+  stop = 'stop',
+  start = 'start',
+  activity = 'activity',
+  stationary = 'stationary',
+  location = 'location',
+}
+
 type HeadlessTaskEventName = 'location' | 'stationary' | 'activity';
 type iOSActivityType = 'AutomotiveNavigation' | 'OtherNavigation' | 'Fitness' | 'Other';
 type NativeProvider = 'gps' | 'network' | 'passive' | 'fused';
@@ -149,6 +165,15 @@ export interface ConfigureOptions {
   stopOnStillActivity?: boolean;
 
   /**
+   * If true, when no location update is received for ~60s the provider is restarted
+   * to avoid silent stops on some Android devices.
+   *
+   * Platform: Android
+   * @default false
+   */
+  enableWatchdog?: boolean;
+
+  /**
    * Enable/disable local notifications when tracking and syncing locations.
    *
    * Platform: Android
@@ -274,7 +299,7 @@ export interface ConfigureOptions {
    *
    * @default 100
    */
-  syncThreshold?: string;
+  syncThreshold?: number;
 
   /**
    * Optional HTTP headers sent along in HTTP request.
@@ -376,6 +401,11 @@ export interface Location {
    * You can enable it "postTemplate" configure option.
    */
   mockLocationsEnabled?: boolean;
+
+  /**
+   * True if location was simulated by software (e.g. Simulator). (iOS 15+)
+   */
+  simulated?: boolean;
 }
 
 export interface StationaryLocation extends Location {
@@ -566,11 +596,28 @@ export interface BackgroundGeolocationPlugin {
   showAppSettings(): Promise<void>;
 
   /**
+   * Open app settings (convenience alias for showAppSettings).
+   *
+   * Platform: Android, iOS
+   */
+  openSettings(): Promise<void>;
+
+  /**
    * Show system settings to allow configuration of current location sources.
    *
    * Platform: Android
    */
   showLocationSettings(): Promise<void>;
+
+  /**
+   * Get the plugin version from native code.
+   *
+   * Platform: Android, iOS
+   */
+  getPluginVersion(
+    success?: (version: string) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<string>;
 
   /**
    * Return all stored locations.
@@ -903,8 +950,108 @@ export interface BackgroundGeolocationPlugin {
     callback?: () => void
   ): Subscribable<void>;
 
+  /**
+   * Register event listener (accepts BackgroundGeolocationEvents enum for compatibility).
+   */
+  on(
+    eventName: BackgroundGeolocationEvents,
+    callback?: (data: Location | StationaryLocation | Activity | BackgroundGeolocationError | AuthorizationStatus | void) => void
+  ): Subscribable<Location | StationaryLocation | Activity | BackgroundGeolocationError | AuthorizationStatus | void>;
+
 }
 
 declare const BackgroundGeolocation: BackgroundGeolocationPlugin;
 
 export default BackgroundGeolocation;
+export { BackgroundGeolocation };
+
+/**
+ * Type of the plugin API (use for variables/parameters).
+ * In Angular/Ionic do NOT inject this type — inject BackgroundGeolocationService from '@josuelmm/cordova-background-geolocation/angular' instead.
+ */
+export type BackgroundGeolocation = BackgroundGeolocationPlugin;
+
+/** Alias for ConfigureOptions (compatibility with @awesome-cordova-plugins style). */
+export type BackgroundGeolocationConfig = ConfigureOptions;
+
+/** Alias for Location (compatibility with @awesome-cordova-plugins style). */
+export type BackgroundGeolocationResponse = Location;
+
+/** Alias for LocationOptions (compatibility with @awesome-cordova-plugins style). */
+export type BackgroundGeolocationCurrentPositionConfig = LocationOptions;
+
+/** Alias for LogEntry (compatibility with @awesome-cordova-plugins style). */
+export type BackgroundGeolocationLogEntry = LogEntry;
+
+/** Error shape (compatibility with @awesome-cordova-plugins style). */
+export interface BackgroundGeolocationErrorLike {
+  code: BackgroundGeolocationLocationCode;
+  message: string;
+}
+
+/** Location error codes (compatibility with @awesome-cordova-plugins style). */
+export enum BackgroundGeolocationLocationCode {
+  PERMISSION_DENIED = 1,
+  LOCATION_UNAVAILABLE = 2,
+  TIMEOUT = 3,
+}
+
+/** Native provider strings (compatibility with @awesome-cordova-plugins style). */
+export enum BackgroundGeolocationNativeProvider {
+  gps = 'gps',
+  network = 'network',
+  passive = 'passive',
+  fused = 'fused',
+}
+
+/** Location provider IDs (compatibility with @awesome-cordova-plugins style). */
+export enum BackgroundGeolocationLocationProvider {
+  DISTANCE_FILTER_PROVIDER = 0,
+  ACTIVITY_PROVIDER = 1,
+  RAW_PROVIDER = 2,
+}
+
+/** Authorization status (compatibility with @awesome-cordova-plugins style). */
+export enum BackgroundGeolocationAuthorizationStatus {
+  NOT_AUTHORIZED = 0,
+  AUTHORIZED = 1,
+  AUTHORIZED_FOREGROUND = 2,
+}
+
+/** Log levels (compatibility with @awesome-cordova-plugins style). */
+export enum BackgroundGeolocationLogLevel {
+  TRACE = 'TRACE',
+  DEBUG = 'DEBUG',
+  INFO = 'INFO',
+  WARN = 'WARN',
+  ERROR = 'ERROR',
+}
+
+/** Provider enum (compatibility with @awesome-cordova-plugins style). */
+export enum BackgroundGeolocationProvider {
+  ANDROID_DISTANCE_FILTER_PROVIDER = 0,
+  ANDROID_ACTIVITY_PROVIDER = 1,
+  RAW_PROVIDER = 2,
+}
+
+/** Desired accuracy in meters (compatibility with @awesome-cordova-plugins style). Values match this plugin. */
+export enum BackgroundGeolocationAccuracy {
+  HIGH = 0,
+  MEDIUM = 100,
+  LOW = 1000,
+  PASSIVE = 10000,
+}
+
+/** Mode for switchMode (compatibility with @awesome-cordova-plugins style). */
+export enum BackgroundGeolocationMode {
+  BACKGROUND = 0,
+  FOREGROUND = 1,
+}
+
+/** iOS activity type (compatibility with @awesome-cordova-plugins style). */
+export enum BackgroundGeolocationIOSActivity {
+  AutomotiveNavigation = 'AutomotiveNavigation',
+  OtherNavigation = 'OtherNavigation',
+  Fitness = 'Fitness',
+  Other = 'Other',
+}

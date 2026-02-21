@@ -1,12 +1,42 @@
 {
   "name": "@josuelmm/cordova-background-geolocation",
-  "version": "2.3.5",
+  "version": "3.0.0",
   "description": "Cordova Background Geolocation (fork actualizado)",
   "main": "./www/BackgroundGeolocation.js",
   "types": "./www/BackgroundGeolocation.d.ts",
+  "exports": {
+    ".": {
+      "types": "./www/BackgroundGeolocation.d.ts",
+      "default": "./www/BackgroundGeolocation.js"
+    },
+    "./angular": {
+      "types": "./angular/dist/index.d.ts",
+      "default": "./angular/dist/fesm2022/josuelmm-cordova-background-geolocation.mjs"
+    }
+  },
+  "peerDependencies": {
+    "@angular/core": ">=12.0.0",
+    "tslib": "^2.0.0"
+  },
+  "devDependencies": {
+    "@angular/compiler": "^18.2.14",
+    "@angular/compiler-cli": "^18.2.14",
+    "@angular/core": "^18.2.14",
+    "ng-packagr": "^18.2.0",
+    "tslib": "^2.6.3",
+    "typescript": "~5.5.4"
+  },
+  "scripts": {
+    "build:angular": "npx ng-packagr -p angular/ng-package.json",
+    "prepack": "npm run build:angular",
+    "prepublishOnly": "npm run build:angular"
+  },
   "cordova": {
     "id": "cordova-background-geolocation",
-    "platforms": ["android", "ios"]
+    "platforms": [
+      "android",
+      "ios"
+    ]
   },
   "repository": {
     "type": "git",

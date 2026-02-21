@@ -2,7 +2,7 @@
 layout: default
 has_children: true
 title: Location Providers
-nav_order: 6
+nav_order: 7
 ---
 
 # Location Providers

@@ -1,0 +1,6 @@
+{
+  "name": "@josuelmm/cordova-background-geolocation",
+  "version": "1.0.0",
+  "description": "Angular entry for cordova-background-geolocation (ng-packagr build)",
+  "private": true
+}

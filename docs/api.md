@@ -8,7 +8,16 @@ title: API
 
 Note that all methods now return a `Promise` in case the `success` and `fail` callbacks are not provided, allowing the usage of `async/await`.
 
-We also recommend using the typescript definitions provided in this repo which have better chance of being up-to-date.
+## TypeScript
+
+Type definitions are in `www/BackgroundGeolocation.d.ts`. You can use:
+
+- **Native names:** `ConfigureOptions`, `Location`, `LocationOptions`, `ServiceStatus`, `LogEntry`, `Event`, etc.
+- **Awesome-style aliases / enums** (same names as [@awesome-cordova-plugins/background-geolocation](https://github.com/danielsogl/awesome-cordova-plugins/blob/master/src/%40awesome-cordova-plugins/plugins/background-geolocation/index.ts)): `BackgroundGeolocationConfig` (= `ConfigureOptions`), `BackgroundGeolocationResponse` (= `Location`), `BackgroundGeolocationEvents` (enum, e.g. `BackgroundGeolocationEvents.location`), `BackgroundGeolocationAccuracy`, `BackgroundGeolocationMode`, `BackgroundGeolocationLogEntry`, etc.
+
+**Accuracy values** in this plugin are `0`, `100`, `1000`, `10000` (not 10, 100, 1000 like in Awesome). Use the constants on the plugin object (`BackgroundGeolocation.HIGH_ACCURACY`, `MEDIUM_ACCURACY`, `LOW_ACCURACY`, `PASSIVE_ACCURACY`) or the `BackgroundGeolocationAccuracy` enum from the types.
+
+**Angular/Ionic:** Use a single import from `@josuelmm/cordova-background-geolocation/angular` for the service and common types; do not inject the global `BackgroundGeolocation`. See [Angular](angular).
 
 ## configure(options, success, fail)
 
@@ -35,13 +44,14 @@ Configure options:
 | `notificationIconLarge`   | `String` optional | Android      | The filename of a custom notification icon. **@see** Android quirks. (goes with `startForeground`)                                                                                                                                                                                                                                                 | all         |                            |
 | `notificationIconSmall`   | `String` optional | Android      | The filename of a custom notification icon. **@see** Android quirks. (goes with `startForeground`)                                                                                                                                                                                                                                                 | all         |                            |
 | `activityType`            | `String`          | iOS          | [AutomotiveNavigation, OtherNavigation, Fitness, Other] Presumably, this affects iOS GPS algorithm. **@see** [Apple docs](https://developer.apple.com/library/ios/documentation/CoreLocation/Reference/CLLocationManager_Class/CLLocationManager/CLLocationManager.html#//apple_ref/occ/instp/CLLocationManager/activityType) for more information | all         | "OtherNavigation"          |
-| `pauseLocationUpdates`    | `Boolean`         | iOS          | Pauses location updates when app is paused. **@see* [Apple docs](https://developer.apple.com/documentation/corelocation/cllocationmanager/1620553-pauseslocationupdatesautomatical?language=objc)                                                                                                                                                  | all         | false                      |
+| `pauseLocationUpdates`    | `Boolean`         | iOS          | Pauses location updates when app is paused. **@see** [Apple docs](https://developer.apple.com/documentation/corelocation/cllocationmanager/1620553-pauseslocationupdatesautomatical?language=objc)                                                                                                                                                  | all         | false                      |
 | `saveBatteryOnBackground` | `Boolean`         | iOS          | Switch to less accurate significant changes and region monitory when in background                                                                                                                                                                                                                                                                 | all         | false                      |
 | `url`                     | `String`          | all          | Server url where to send HTTP POST with recorded locations **@see** [HTTP locations posting](#http-locations-posting)                                                                                                                                                                                                                              | all         |                            |
 | `syncUrl`                 | `String`          | all          | Server url where to send fail to post locations **@see** [HTTP locations posting](#http-locations-posting)                                                                                                                                                                                                                                         | all         |                            |
 | `syncThreshold`           | `Number`          | all          | Specifies how many previously failed locations will be sent to server at once                                                                                                                                                                                                                                                                      | all         | 100                        |
-| `httpHeaders`             | `Object`          | all          | Optional HTTP headers sent along in HTTP request                                                                                                                                                                                                                                                                                                   | all         |                            |
+| `httpHeaders`             | `Object`          | all          | Headers for POST/sync. Two ways: static here, or dynamic on 401 via `http_authorization`. Content-Type: `application/json` (default) or `application/x-www-form-urlencoded`. **@see** [HTTP posting](http_posting#http-headers-two-ways).                                                                                                                                                                                       | all         |                            |
 | `maxLocations`            | `Number`          | all          | Limit maximum number of locations stored into db                                                                                                                                                                                                                                                                                                   | all         | 10000                      |
+| `enableWatchdog`          | `Boolean`         | Android      | If true, when no location update is received for ~60s the provider is restarted (helps on some devices).                                                                                                                                                                                                                                          | all         | false                      |
 | `postTemplate`            | `Object\|Array`   | all          | Customization post template **@see** [Custom post template](#custom-post-template)                                                                                                                                                                                                                                                                 | all         |                            |
 
 \*
@@ -121,20 +131,13 @@ Error codes:
 |-------|----------------------|--------------------------------------------------------------------------|
 | 1     | PERMISSION_DENIED    | Request failed due missing permissions                                   |
 | 2     | LOCATION_UNAVAILABLE | Internal source of location returned an internal error                   |
-| 3     | TIMEOUT              | Timeout defined by `option.timeout was exceeded                          |
+| 3     | TIMEOUT              | Timeout defined by `option.timeout` was exceeded                            |
 
-## isLocationEnabled(success, fail)
-
-Deprecated: This method is deprecated and will be removed in next major version.
-Use `checkStatus` as replacement.
+## getStationaryLocation(success, fail)
 
 Platform: iOS, Android
 
-One time check for status of location services. In case of error, fail callback will be executed.
-
-| Success callback parameter | Type      | Description                                          |
-|----------------------------|-----------|------------------------------------------------------|
-| `enabled`                  | `Boolean` | true/false (true when location services are enabled) |
+Returns the current stationary location if available (e.g. when in stationary mode). Success callback receives the location object or `null` if none.
 
 ## checkStatus(success, fail)
 
@@ -165,6 +168,18 @@ Show app settings to allow change of app location permissions.
 Platform: Android
 
 Show system settings to allow configuration of current location sources.
+
+## openSettings()
+
+Platform: Android, iOS
+
+Open app settings (convenience alias for `showAppSettings()`). Use this to let the user change location permissions.
+
+## getPluginVersion(success, fail)
+
+Platform: Android, iOS
+
+Returns the plugin version string (e.g. `"3.0.0"`). Useful for debugging or compatibility checks.
 
 ## getLocations(success, fail)
 
@@ -259,11 +274,9 @@ Return all logged events. Useful for plugin debugging.
 | Parameter  | Type          | Description                                                                                       |
 |------------|---------------|---------------------------------------------------------------------------------------------------|
 | `limit`    | `Number`      | limits number of returned entries                                                                 |
-| `fromId`   | `Number`      | return entries after fromId. Useful if you plan to implement infinite log scrolling*              |
-| `minLevel` | `String`      | return log entries above level. Available levels: ["TRACE", "DEBUG", "INFO", "WARN", "ERROR]      |
+| `fromId`   | `Number`      | return entries after fromId. Useful for pagination / infinite log scrolling                        |
+| `minLevel` | `String`      | return log entries above level. Available levels: "TRACE", "DEBUG", "INFO", "WARN", "ERROR"         |
 | `success`  | `Function`    | callback function which will be called with log entries                                           |
-
-*[Example of infinite log scrolling](https://github.com/mauron85/react-native-background-geolocation-example/blob/master/src/scenes/Logs.js)
 
 Format of log entry:
 

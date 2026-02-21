@@ -7,6 +7,15 @@
 !/plugin.xml
 !/package.json
 !/www
+!/angular
+# Only ship ng-packagr output for ./angular, not old tsc .js/.d.ts
+/angular/*.js
+/angular/*.d.ts
+/angular/public-api.ts
+/angular/ng-package.json
+/angular/tsconfig.lib.json
+/angular/package.json
+!/angular/dist
 !/android
 /android/*
 !/android/dependencies.gradle

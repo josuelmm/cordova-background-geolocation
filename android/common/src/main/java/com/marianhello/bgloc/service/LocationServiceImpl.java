@@ -18,6 +18,8 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
+import android.Manifest;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Binder;
@@ -28,6 +30,7 @@ import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Message;
+import android.os.PowerManager;
 import android.os.Process;
 import androidx.annotation.Nullable;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
@@ -124,6 +127,32 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     private long mServiceId = -1;
     private static boolean sIsRunning = false;
     private boolean mIsInForeground = false;
+
+    private PowerManager.WakeLock mWakeLock;
+    private static final String WAKE_LOCK_TAG = "com.marianhello.bgloc:LocationServiceWakeLock";
+
+    /** Last time we received a location (for watchdog). */
+    private volatile long mLastLocationTime = 0L;
+    private static final long WATCHDOG_INTERVAL_MS = 60_000L;
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mWatchdogRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!sIsRunning || mProvider == null || mConfig == null) return;
+            if (!Boolean.TRUE.equals(mConfig.getEnableWatchdog())) return;
+            long now = System.currentTimeMillis();
+            if (mLastLocationTime > 0 && (now - mLastLocationTime) > WATCHDOG_INTERVAL_MS) {
+                logger.info("Location watchdog: no update in {}s, restarting provider", WATCHDOG_INTERVAL_MS / 1000);
+                try {
+                    mProvider.onStop();
+                    mProvider.onStart();
+                } catch (Exception e) {
+                    logger.warn("Watchdog restart failed", e);
+                }
+            }
+            mMainHandler.postDelayed(this, WATCHDOG_INTERVAL_MS);
+        }
+    };
 
     private static LocationTransform sLocationTransform;
     private static LocationProviderFactory sLocationProviderFactory;
@@ -352,6 +381,12 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
 
         logger.debug("Will start service with: {}", mConfig.toString());
 
+        if (!hasLocationPermission()) {
+            logger.warn("Cannot start location service: ACCESS_FINE_LOCATION or ACCESS_COARSE_LOCATION not granted");
+            stopSelf();
+            return;
+        }
+
         mPostLocationTask.setConfig(mConfig);
         mPostLocationTask.clearQueue();
 
@@ -363,6 +398,24 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         mProvider.onConfigure(mConfig);
 
         sIsRunning = true;
+
+        if (mWakeLock == null) {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                mWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG);
+            }
+        }
+        if (mWakeLock != null && !mWakeLock.isHeld()) {
+            mWakeLock.acquire();
+            logger.debug("Wake lock acquired");
+        }
+
+        if (Boolean.TRUE.equals(mConfig.getEnableWatchdog())) {
+            mLastLocationTime = System.currentTimeMillis();
+            mMainHandler.removeCallbacks(mWatchdogRunnable);
+            mMainHandler.postDelayed(mWatchdogRunnable, WATCHDOG_INTERVAL_MS);
+        }
+
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
@@ -391,6 +444,17 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             return;
         }
 
+        mMainHandler.removeCallbacks(mWatchdogRunnable);
+
+        if (mWakeLock != null && mWakeLock.isHeld()) {
+            try {
+                mWakeLock.release();
+                logger.debug("Wake lock released");
+            } catch (Exception e) {
+                logger.warn("Wake lock release failed", e);
+            }
+        }
+
         if (mProvider != null) {
             mProvider.onStop();
         }
@@ -402,9 +466,22 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         sIsRunning = false;
     }
 
+    /**
+     * Returns true if the app has at least one of the location runtime permissions.
+     * Required before starting a location foreground service on API 34+.
+     */
+    private boolean hasLocationPermission() {
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
     @Override
     public void startForeground() {
         if (sIsRunning && !mIsInForeground) {
+            if (!hasLocationPermission()) {
+                logger.warn("Cannot start foreground: location permission not granted");
+                return;
+            }
             Config config = getConfig();
             Notification notification = new NotificationHelper.NotificationFactory(this).getNotification(
                     config.getNotificationTitle(),
@@ -417,7 +494,13 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 mProvider.onCommand(LocationProvider.CMD_SWITCH_MODE,
                         LocationProvider.FOREGROUND_MODE);
             }
-            super.startForeground(NOTIFICATION_ID, notification);
+            // Android 14+ (API 34) requires foreground service type for location services.
+            // Use literal 4 (FOREGROUND_SERVICE_TYPE_LOCATION) so this compiles with compileSdk < 34.
+            if (Build.VERSION.SDK_INT >= 34) {
+                super.startForeground(NOTIFICATION_ID, notification, 4 /* ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION */);
+            } else {
+                super.startForeground(NOTIFICATION_ID, notification);
+            }
             mIsInForeground = true;
         }
     }
@@ -531,6 +614,7 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
 
     @Override
     public void onLocation(BackgroundLocation location) {
+        mLastLocationTime = System.currentTimeMillis();
         logger.debug("New location {}", location.toString());
 
         location = transformLocation(location);

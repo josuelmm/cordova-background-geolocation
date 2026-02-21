@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Quirks
-nav_order: 8
+nav_order: 9
 ---
 
 # Quirks
@@ -63,6 +63,6 @@ Android 6.0 "Marshmallow" introduced a new permissions model where the user can 
 
 **Note:** Only available for API Level >=21.
 
-To use custom notification icons, you need to put icons into *res/drawable* directory **of your app**. You can automate the process  as part of **after_platform_add** hook configured via [config.xml](https://github.com/mauron85/cordova-plugin-background-geolocation-example/blob/master/config.xml). Check [config.xml](https://github.com/mauron85/cordova-plugin-background-geolocation-example/blob/master/config.xml) and [scripts/res_android.js](https://github.com/mauron85/cordova-plugin-background-geolocation-example/blob/master/scripts/res_android.js) of example app for reference.
+To use custom notification icons, put your icons into the *res/drawable* directory of your app. You can automate this via an **after_platform_add** hook in your project's config.xml.
 
 If you only want a single large icon, set `notificationIconLarge` to null and include your icon's filename in the `notificationIconSmall` parameter.

@@ -199,6 +199,14 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
     }];
 }
 
+- (void) getPluginVersion:(CDVInvokedUrlCommand*)command
+{
+    NSLog(@"%@ #%@", TAG, @"getPluginVersion");
+    NSString *version = @"3.0.0"; // keep in sync with plugin.xml
+    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:version];
+    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+}
+
 - (void) getLocations:(CDVInvokedUrlCommand*)command
 {
     NSLog(@"%@ #%@", TAG, @"getLocations");

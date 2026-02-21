@@ -6,6 +6,7 @@
 //
 
 #import <Foundation/Foundation.h>
+#import <CoreLocation/CoreLocation.h>
 #import "MAURLocation.h"
 
 enum {
@@ -70,7 +71,7 @@ MAURLocation* _location;
 
 @implementation MAURLocation
 
-@synthesize locationId, time, accuracy, altitudeAccuracy, speed, heading, altitude, latitude, longitude, provider, locationProvider, radius, isValid, recordedAt;
+@synthesize locationId, time, accuracy, altitudeAccuracy, speed, heading, altitude, latitude, longitude, provider, locationProvider, radius, isValid, recordedAt, simulated;
 
 + (instancetype) fromCLLocation:(CLLocation*)location;
 {
@@ -84,6 +85,14 @@ MAURLocation* _location;
     instance.altitude = [NSNumber numberWithDouble:location.altitude];
     instance.latitude = [NSNumber numberWithDouble:location.coordinate.latitude];
     instance.longitude = [NSNumber numberWithDouble:location.coordinate.longitude];
+
+    if (@available(iOS 15.0, *)) {
+        if (location.sourceInformation != nil && location.sourceInformation.isSimulatedBySoftware) {
+            instance.simulated = @YES;
+        } else {
+            instance.simulated = @NO;
+        }
+    }
 
     return instance;
 }
@@ -162,6 +171,7 @@ MAURLocation* _location;
     if (locationProvider != nil) [dict setObject:locationProvider forKey:@"locationProvider"];
     if (radius != nil) [dict setObject:radius forKey:@"radius"];
     if (recordedAt != nil) [dict setObject:[NSNumber numberWithDouble:([recordedAt timeIntervalSince1970] * 1000)] forKey:@"recordedAt"];
+    if (simulated != nil) [dict setObject:simulated forKey:@"simulated"];
 
     return dict;
 }
@@ -214,7 +224,10 @@ MAURLocation* _location;
     if ([key isEqualToString:@"@recordedAt"]) {
         return [NSNumber numberWithDouble:([recordedAt timeIntervalSince1970] * 1000)];
     }
-    
+    if ([key isEqualToString:@"@simulated"]) {
+        return simulated;
+    }
+
     return nil;
 }
 
@@ -341,6 +354,7 @@ MAURLocation* _location;
         copy.locationProvider = locationProvider;
         copy.radius = radius;
         copy.isValid = isValid;
+        copy.simulated = simulated;
     }
 
     return copy;

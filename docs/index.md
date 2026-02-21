@@ -39,6 +39,8 @@ cordova plugin add @josuelmm/cordova-background-geolocation \
 
 ## Usage
 
+**TypeScript / Angular:** For TypeScript you can use the built-in types (native or Awesome-style aliases and enums). In **Angular / Ionic**, use a **single import** from `@josuelmm/cordova-background-geolocation/angular` for the injectable service and common types; do not inject the global `BackgroundGeolocation`. See the [README TypeScript section](https://github.com/josuelmm/cordova-background-geolocation#typescript-imports) and [Angular](angular).
+
 First, configure the plugin with the settings you require.
 
 ```js
@@ -68,7 +70,7 @@ BackgroundGeolocation.configure({
 
 Then call `start()` to start location tracking.
 
-For a more detailed example, see [Example](example)
+For a more detailed example, see [Example](example). For **Angular / Ionic Angular** (injectable service, same API), see [Angular](angular).
 
 ### Location Providers
 
@@ -84,11 +86,12 @@ You can choose from three location providers:
 
 ### Compatibility
 
-| Plugin version   | Cordova CLI       | Cordova Platform Android | Cordova Platform iOS |
-|------------------|-------------------|--------------------------|----------------------|
-| >1.0.0           | 8.0.0             | 8.0.0                    | 6.0.0                |
+| Plugin version | Cordova CLI | Cordova Android | Cordova iOS |
+|----------------|-------------|-----------------|-------------|
+| 1.x            | ≥ 8.0.0     | ≥ 8.0.0         | ≥ 6.0.0    |
+| 2.x            | ≥ 10.0.0    | ≥ 10.0.0        | ≥ 6.0.0    |
 
-**Please note** that as of Cordova Android 8.0.0 icons are by default mipmap/ic_launcher  not mipmap/icon, so this plugin will have a build issue on < 8.0.0 Cordova Android builds, you will need to update the icons in AndroidManifest.xml to work on older versions.
+**Please note** that as of Cordova Android 8.0.0 icons are by default mipmap/ic_launcher not mipmap/icon. On Cordova Android &lt; 8.0.0 you may need to update the icons in AndroidManifest.xml.
 
 ### Android SDKs
 

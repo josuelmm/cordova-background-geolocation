@@ -1,7 +1,9 @@
 package com.marianhello.bgloc.service;
 
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Build;
 
 import com.marianhello.bgloc.Config;
@@ -75,10 +77,19 @@ public class LocationServiceProxy implements LocationService, LocationServiceInf
     public void startForegroundService() {
         Intent intent = mIntentBuilder.setCommand(CommandId.START_FOREGROUND_SERVICE).build();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            mContext.startForegroundService(intent);
+            if (!hasLocationPermission()) {
+                mContext.startService(intent);
+            } else {
+                mContext.startForegroundService(intent);
+            }
         } else {
             mContext.startService(intent);
         }
+    }
+
+    private boolean hasLocationPermission() {
+        return mContext.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                || mContext.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
     @Override

@@ -1,4 +1,6 @@
 # Cordova Background Geolocation
+# Capacitor Background Geolocation
+# Background Geolocation
 
 [![npm](https://img.shields.io/npm/v/@josuelmm/cordova-background-geolocation?style=flat-square)](https://www.npmjs.com/package/@josuelmm/cordova-background-geolocation)
 ![npm downloads](https://img.shields.io/npm/dm/@josuelmm/cordova-background-geolocation?style=flat-square)
@@ -19,7 +21,7 @@ This plugin provides **background and foreground geolocation** for **Cordova**, 
 - **Foreground service** (Android) with a persistent notification so the OS does not kill the tracker
 - Works alongside other geolocation sources (e.g. `navigator.geolocation`)
 
-It works well with **[@awesome-cordova-plugins/background-geolocation](https://www.npmjs.com/package/@awesome-cordova-plugins/background-geolocation)** if you use Ionic and want a typed wrapper and dependency injection.
+**Self-contained:** This plugin works on its own. You install it, call `BackgroundGeolocation.configure()`, `start()`, etc. directly. TypeScript definitions (`.d.ts`) are included. You do **not** need any wrapper or extra package for Capacitor or Cordova.
 
 **Capacitor & Ionic:** Use the plugin in a Capacitor app (with or without Ionic). Install the package, run `npx cap sync`, then use the same JavaScript API. The plugin is compatible with recent Capacitor (e.g. 6.x, 7.x) and Ionic (7.x, 8.x) versions.
 
@@ -63,7 +65,65 @@ cordova plugin add @josuelmm/cordova-background-geolocation \
 
 ---
 
-## Usage
+## Usage (with or without Angular)
+
+You can use the plugin in two ways:
+
+- **Without Angular** — Use the global `BackgroundGeolocation` object (Cordova/Capacitor injects it after `deviceready`). Same in plain JS, React, Vue, or any framework.
+- **With Angular (Ionic Angular)** — Import the Angular service and inject it; same API, better testability and no global. See [Angular (Ionic Angular)](#angular-ionic-angular) below.
+
+The following steps use the global API. If you use Angular, call the same methods on the injected service instead.
+
+### TypeScript imports
+
+You can use either the **native** type names or the **Awesome Cordova Plugins–style** aliases.
+
+**Option A — Named import (same style as @awesome-cordova-plugins):**
+
+```ts
+import {
+  BackgroundGeolocation,
+  BackgroundGeolocationConfig,
+  BackgroundGeolocationEvents,
+  BackgroundGeolocationResponse
+} from '@josuelmm/cordova-background-geolocation';
+
+// After deviceready (use the global object, not injection):
+BackgroundGeolocation.configure({ distanceFilter: 50 } as BackgroundGeolocationConfig);
+BackgroundGeolocation.on('location', (loc: BackgroundGeolocationResponse) => { ... });
+```
+
+**Angular/Ionic:** One import for service and types: use `BackgroundGeolocationService` (and types like `BackgroundGeolocationConfig`, `BackgroundGeolocationResponse`) from `@josuelmm/cordova-background-geolocation/angular`. See [Angular (Ionic Angular)](#angular-ionic-angular).
+
+**Option B — Default export + native type names:**
+
+```ts
+import BackgroundGeolocation from '@josuelmm/cordova-background-geolocation';
+import type {
+  ConfigureOptions,
+  Location,
+  LocationOptions,
+  ServiceStatus,
+  Activity,
+  BackgroundGeolocationError,
+  LogEntry
+} from '@josuelmm/cordova-background-geolocation';
+
+// After deviceready:
+BackgroundGeolocation.configure({ distanceFilter: 50 } as ConfigureOptions);
+BackgroundGeolocation.on('location', (loc: Location) => { ... });
+```
+
+**Type aliases / compatibility:** `BackgroundGeolocationConfig` = `ConfigureOptions`, `BackgroundGeolocationResponse` = `Location`. `BackgroundGeolocationEvents` is an enum (e.g. `BackgroundGeolocationEvents.location`). Enums and types match [@awesome-cordova-plugins/background-geolocation](https://github.com/danielsogl/awesome-cordova-plugins/blob/master/src/%40awesome-cordova-plugins/plugins/background-geolocation/index.ts) where applicable; **accuracy values** in this plugin are `0, 100, 1000, 10000` (use `BackgroundGeolocation.HIGH_ACCURACY` etc. or the `BackgroundGeolocationAccuracy` enum from the types).
+
+**Constants** (accuracy, provider, mode) are on the plugin object:
+
+```ts
+BackgroundGeolocation.HIGH_ACCURACY
+BackgroundGeolocation.ACTIVITY_PROVIDER
+BackgroundGeolocation.BACKGROUND_MODE
+BackgroundGeolocation.FOREGROUND_MODE
+```
 
 ### 1. Configure
 
@@ -130,17 +190,61 @@ BackgroundGeolocation.on('http_authorization', function () {
 BackgroundGeolocation.stop();
 ```
 
-More options (stationary, activity, start/stop events, headless task) are described in the [documentation](https://josuelmm.github.io/cordova-background-geolocation/).
+More options (stationary, activity, start/stop events, headless task) are in the [documentation](https://josuelmm.github.io/cordova-background-geolocation/). For **Angular** (service, methods, events, example), see [Angular (Ionic Angular)](https://josuelmm.github.io/cordova-background-geolocation/angular).
 
 ---
 
-## Awesome Cordova Plugins
+## Angular (Ionic Angular)
 
-If you use **Ionic** and **@awesome-cordova-plugins**, you can install the wrapper and use the plugin via dependency injection:
+The package includes an **Angular integration**: an injectable service and optional NgModule. You can use the plugin **without it** (global `BackgroundGeolocation`) or **with it** (inject the service). Both use the same native plugin.
 
-- [@awesome-cordova-plugins/background-geolocation](https://www.npmjs.com/package/@awesome-cordova-plugins/background-geolocation)
+### Install (same as above)
 
-This package wraps the native plugin and works with `@josuelmm/cordova-background-geolocation` when the native plugin is installed as above.
+```bash
+npm install @josuelmm/cordova-background-geolocation
+npx cap sync
+```
+
+### How to import and use
+
+**One import** — Service and the most used types are exported from the `/angular` entry, so you do **not** need a second import from the main package:
+
+```ts
+import {
+  BackgroundGeolocationService,
+  BackgroundGeolocationConfig,
+  BackgroundGeolocationEvents,
+  BackgroundGeolocationResponse
+} from '@josuelmm/cordova-background-geolocation/angular';
+
+@Injectable({ ... })
+export class MyService {
+  constructor(private bg: BackgroundGeolocationService) {}
+
+  startTracking() {
+    this.bg.configure({ distanceFilter: 50, url: 'https://...' } as BackgroundGeolocationConfig)
+      .then(() => this.bg.start());
+  }
+
+  onLocation() {
+    return this.bg.on('location', (loc: BackgroundGeolocationResponse) => console.log(loc));
+    // subscription.unsubscribe() when done
+  }
+}
+```
+
+**You must import `BackgroundGeolocationModule`** in your `AppModule` (or feature module) so the service is provided and AOT builds work. Then inject `BackgroundGeolocationService` as in the example above. See [docs/angular.md](docs/angular.md) for the full snippet.
+
+**Migrating from @awesome-cordova-plugins/background-geolocation:** there you inject a class named `BackgroundGeolocation`. In this package, `BackgroundGeolocation` is the **global plugin object**, not an injectable class. Use `BackgroundGeolocationService` instead (same API). See [docs/angular.md](docs/angular.md) for details.
+
+### Summary
+
+| Use case              | What to do |
+|-----------------------|------------|
+| **Without Angular**   | Use global `BackgroundGeolocation` after `deviceready`. Types: main package or Awesome-style aliases (see [TypeScript imports](#typescript-imports) above). |
+| **With Angular**      | Import from `@josuelmm/cordova-background-geolocation/angular`: add `BackgroundGeolocationModule` to your module `imports`, then inject `BackgroundGeolocationService`. Do **not** inject the global `BackgroundGeolocation`. |
+
+No extra wrapper (e.g. Awesome Cordova Plugins) is required.
 
 ---
 
