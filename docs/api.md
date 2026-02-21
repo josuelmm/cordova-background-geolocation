@@ -179,7 +179,7 @@ Open app settings (convenience alias for `showAppSettings()`). Use this to let t
 
 Platform: Android, iOS
 
-Returns the plugin version string (e.g. `"3.0.0"`). Useful for debugging or compatibility checks.
+Returns the plugin version string (e.g. `"3.0.2"`). Useful for debugging or compatibility checks.
 
 ## getLocations(success, fail)
 

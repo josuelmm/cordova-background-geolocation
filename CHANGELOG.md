@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.0.2](https://github.com/josuelmm/cordova-background-geolocation/tree/3.0.2) (2026-02-21)
+
+### Fixed
+
+- **Android (API 34+):** `getServiceInfo()` was returning an incomplete `ServiceInfo` (foregroundServiceType 0x0), causing "Cannot startForeground: manifest foregroundServiceType unknown/0". Fix:
+  - Use **`PackageManager.ComponentInfoFlags.of(0)`** (not `GET_META_DATA`) when calling `getServiceInfo()` on API 33+, so the system returns a complete `ServiceInfo` with the real `foregroundServiceType`.
+  - Renamed to **`getManifestForegroundServiceType()`**; never invent a fallback (no 0x4 when unknown). If the type is 0, return 0 and do not call `startForeground()` — log an error and return so the app must fix its manifest (e.g. `tools:replace="android:foregroundServiceType"` with `location`).
+  - Use `LocationServiceImpl.class` for `ComponentName`. Read `foregroundServiceType` from `ServiceInfo` (reflection only for the field so the plugin compiles with compileSdk 33).
+
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/3.0.1...3.0.2)
+
+---
+
 ## [3.0.1](https://github.com/josuelmm/cordova-background-geolocation/tree/3.0.1) (2026-02-21)
 
 ### Fixed
