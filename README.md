@@ -63,6 +63,40 @@ cordova plugin add @josuelmm/cordova-background-geolocation \
 - **Android 13+:** Request runtime `POST_NOTIFICATION` permission if you want the tracking notification to show.
 - After changing plugin options, remove and reinstall the plugin for changes to take effect.
 
+### Android: configuring your app (recommended)
+
+If your app’s merged manifest ends up with a `foregroundServiceType` other than `location` (e.g. due to other libraries or templates), you may see *"foregroundServiceType 0x00000004 is not a subset of ..."* and the tracking notification may not show. To **force** the correct type and avoid starting the service at boot without permissions, add the following in **your** Android project (the app that consumes the plugin).
+
+**1. AndroidManifest.xml** (inside `<application>`, and add `xmlns:tools="http://schemas.android.com/tools"` on the root `<manifest>` if not already present):
+
+```xml
+<!-- Background Location Service: force foregroundServiceType="location" in the merged manifest -->
+<service
+    android:name="com.marianhello.bgloc.service.LocationServiceImpl"
+    android:exported="false"
+    android:foregroundServiceType="location"
+    tools:replace="android:foregroundServiceType" />
+
+<!-- Optional: disable start on boot to avoid ForegroundServiceDidNotStartInTimeException when location permission is not granted -->
+<receiver
+    android:name="com.marianhello.bgloc.BootCompletedReceiver"
+    android:enabled="false"
+    tools:replace="android:enabled" />
+```
+
+`tools:replace="android:foregroundServiceType"` makes the merged manifest use your `location` value instead of whatever another dependency might declare, so the type matches what the plugin uses in `startForeground()`.
+
+**2. res/values/strings.xml** (required by the plugin for the sync account; replace `site.seelight.client` with your app’s package or identifier if different):
+
+```xml
+<!-- Required by cordova-background-geolocation-plugin (sync account) -->
+<string name="plugin_bgloc_account_name">Background location</string>
+<string name="plugin_bgloc_account_type">site.seelight.client.bgloc.account</string>
+<string name="plugin_bgloc_content_authority">site.seelight.client.bgloc</string>
+```
+
+This makes your app enforce the correct foreground service type and defines the strings the plugin needs for the sync account.
+
 ---
 
 ## Usage (with or without Angular)

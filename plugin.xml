@@ -2,7 +2,7 @@
 <plugin xmlns="http://www.phonegap.com/ns/plugins/1.0"
     xmlns:android="http://schemas.android.com/apk/res/android"
     id="cordova-background-geolocation"
-    version="3.0.0">
+    version="3.0.1">
     <name>cordova-background-geolocation</name>
     <description>Cordova Background Geolocation Plugin</description>
     <license>Apache-2.0</license>
@@ -157,7 +157,7 @@
                 android:enabled="true"
                 android:exported="false"
                 android:name="com.marianhello.bgloc.service.LocationServiceImpl"
-                android:foregroundServiceType="location"
+                android:foregroundServiceType="location|dataSync"
                 />
             <receiver
                   android:name="com.marianhello.bgloc.BootCompletedReceiver"
@@ -184,6 +184,7 @@
             <uses-permission android:name="android.permission.INTERNET" />
             <uses-permission android:name="android.permission.WAKE_LOCK" />
             <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+            <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
             <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
             <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
             <uses-permission android:name="android.hardware.location" />

@@ -22,3 +22,4 @@ cordova-background-geolocation-plugin.code-workspace
 angular/*.js
 angular/*.d.ts
 angular/dist
+*.tgz

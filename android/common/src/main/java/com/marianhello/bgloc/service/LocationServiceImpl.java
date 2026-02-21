@@ -18,7 +18,9 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.ComponentName;
 import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
 import android.Manifest;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
@@ -475,6 +477,61 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
+    /** FOREGROUND_SERVICE_TYPE_LOCATION = 4 when compileSdk >= 34. */
+    private static final int FOREGROUND_SERVICE_TYPE_LOCATION = 4;
+
+    /**
+     * Reads this service's foregroundServiceType from the merged AndroidManifest (API 34+).
+     * The type passed to startForeground() must be a subset of the value declared in the manifest.
+     * On API 33+ we use getServiceInfo(ComponentName, ComponentInfoFlags) because the deprecated
+     * getServiceInfo(component, int) can return an incomplete ServiceInfo (foregroundServiceType=0),
+     * which would make us fall back to 4 while the system validates against the real manifest (e.g. 0x9) and crash.
+     */
+    private int getForegroundServiceTypeFromManifest() {
+        if (Build.VERSION.SDK_INT < 34) {
+            return FOREGROUND_SERVICE_TYPE_LOCATION;
+        }
+        try {
+            ComponentName component = new ComponentName(this, getClass());
+            ServiceInfo info = getServiceInfoApi33Plus(component);
+            if (info != null) {
+                int type = getForegroundServiceTypeFromServiceInfo(info);
+                if (type != 0) return type;
+            }
+        } catch (Throwable e) {
+            logger.warn("Could not read foregroundServiceType from manifest: {}", e.getMessage());
+        }
+        return FOREGROUND_SERVICE_TYPE_LOCATION;
+    }
+
+    /** Calls getServiceInfo with ComponentInfoFlags on API 33+ so the result includes foregroundServiceType. */
+    private ServiceInfo getServiceInfoApi33Plus(ComponentName component) throws Exception {
+        if (Build.VERSION.SDK_INT < 33) {
+            return getPackageManager().getServiceInfo(component, PackageManager.GET_META_DATA);
+        }
+        // API 33+: use ComponentInfoFlags so getServiceInfo returns complete ServiceInfo (avoid deprecated int overload).
+        Class<?> flagsClass = Class.forName("android.content.pm.PackageManager$ComponentInfoFlags");
+        java.lang.reflect.Method ofMethod = flagsClass.getMethod("of", long.class);
+        Object flags = ofMethod.invoke(null, (long) PackageManager.GET_META_DATA);
+        java.lang.reflect.Method getServiceInfoMethod = getPackageManager().getClass().getMethod("getServiceInfo", ComponentName.class, flagsClass);
+        return (ServiceInfo) getServiceInfoMethod.invoke(getPackageManager(), component, flags);
+    }
+
+    /** Reads foregroundServiceType from ServiceInfo (API 34 field; use reflection to compile with any compileSdk). */
+    private int getForegroundServiceTypeFromServiceInfo(ServiceInfo info) {
+        try {
+            java.lang.reflect.Field f = ServiceInfo.class.getField("foregroundServiceType");
+            Object v = f.get(info);
+            if (v instanceof Integer) {
+                int type = (Integer) v;
+                if (type != 0) return type;
+            }
+        } catch (Throwable ignored) {
+            // field not present on older compileSdk / runtime
+        }
+        return 0;
+    }
+
     @Override
     public void startForeground() {
         if (sIsRunning && !mIsInForeground) {
@@ -494,10 +551,12 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 mProvider.onCommand(LocationProvider.CMD_SWITCH_MODE,
                         LocationProvider.FOREGROUND_MODE);
             }
-            // Android 14+ (API 34) requires foreground service type for location services.
-            // Use literal 4 (FOREGROUND_SERVICE_TYPE_LOCATION) so this compiles with compileSdk < 34.
+            // Android 14+ (API 34): type passed to startForeground() must match the service's
+            // foregroundServiceType in the merged manifest (e.g. "location"=4 or "dataSync|specialUse"=0x9).
             if (Build.VERSION.SDK_INT >= 34) {
-                super.startForeground(NOTIFICATION_ID, notification, 4 /* ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION */);
+                int serviceType = getForegroundServiceTypeFromManifest();
+                logger.info("startForeground serviceType=0x{}", Integer.toHexString(serviceType));
+                super.startForeground(NOTIFICATION_ID, notification, serviceType);
             } else {
                 super.startForeground(NOTIFICATION_ID, notification);
             }

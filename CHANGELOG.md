@@ -1,5 +1,28 @@
 # Changelog
 
+## [3.0.1](https://github.com/josuelmm/cordova-background-geolocation/tree/3.0.1) (2026-02-21)
+
+### Fixed
+
+- **Android (API 34+):** Foreground service type mismatch crash (`IllegalArgumentException: foregroundServiceType 0x00000004 is not a subset of ...`). The type passed to `startForeground()` now matches the merged app manifest:
+  - Read `foregroundServiceType` from the running service’s manifest at runtime and pass that value to `startForeground()` (so it works whether the merged manifest is `location`, `location|dataSync`, or overridden by the app to another type).
+  - On API 33+, use `getServiceInfo(ComponentName, ComponentInfoFlags)` (via reflection) instead of the deprecated `getServiceInfo(component, int)`, which could return an incomplete `ServiceInfo` and force an incorrect fallback to 4 (location) while the system validated against the real manifest (e.g. 0x9).
+  - Use `getClass()` for `ComponentName` so the manifest read corresponds to the actual running service instance.
+  - Debug log before `startForeground`: `startForeground serviceType=0x…` in logcat to confirm the type used.
+- **Android:** Avoid starting the foreground service when location permission is not granted: check in `LocationServiceImpl.startForeground()`, and in `BootCompletedReceiver` / `LocationServiceProxy` before calling `startForegroundService()` to prevent `SecurityException` and `ForegroundServiceDidNotStartInTimeException` when the app has no location permission at boot or when starting from background.
+
+### Changed
+
+- **Android:** Plugin manifests now declare the service with `foregroundServiceType`: `plugin.xml` uses `location|dataSync`; `android/common/AndroidManifest.xml` uses `location`.
+- **Angular:** Wrapper is built with **ng-packagr** (Ivy/AOT) so the service works in production without requiring the JIT compiler (fixes “The injectable 'BackgroundGeolocationService' needs to be compiled using the JIT compiler” when `@angular/compiler` is not available). Entry point is `angular/public-api.ts`; package exports point to `angular/dist/`.
+- **Angular:** Removed redundant files: `angular/index.ts`, `angular/tsconfig.lib.json`, and legacy tsc output (root-level `*.js` / `*.d.ts` in `angular/`). Only the ng-packagr build in `angular/dist/` is used.
+- **README:** New section *“Android: configuring your app (recommended)”*: how to force `foregroundServiceType="location"` in the app’s AndroidManifest with `tools:replace`, optionally disable `BootCompletedReceiver` at boot, and required `strings.xml` entries for the plugin’s sync account (`plugin_bgloc_account_name`, `plugin_bgloc_account_type`, `plugin_bgloc_content_authority`).
+- **package-lock.json:** Kept in sync with `package.json` (e.g. zone.js) so `npm ci` succeeds in CI.
+
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/3.0.0...3.0.1)
+
+---
+
 ## [3.0.0](https://github.com/josuelmm/cordova-background-geolocation/tree/3.0.0) (2026-02-20)
 
 ### Added
