@@ -101,7 +101,7 @@ static MAURLocationTransform s_locationTransform = nil;
             }
         }
 
-        if ([self.config hasValidSyncUrl]) {
+        if ([self.config hasValidSyncUrl] && [self.config syncEnabled]) {
             NSNumber *locationsCount = [locationDAO getLocationsForSyncCount];
             NSInteger threshold = self.config.syncThreshold != nil ? self.config.syncThreshold.integerValue : 100;
             if (locationsCount && [locationsCount integerValue] >= threshold) {
@@ -212,9 +212,10 @@ static MAURLocationTransform s_locationTransform = nil;
 
 - (void) sync
 {
-    if ([self.config hasValidSyncUrl]) {
-        [uploader sync:self.config.syncUrl withTemplate:self.config._template withHttpHeaders:self.config.httpHeaders];
+    if (![self.config syncEnabled] || ![self.config hasValidSyncUrl]) {
+        return;
     }
+    [uploader sync:self.config.syncUrl withTemplate:self.config._template withHttpHeaders:self.config.httpHeaders];
 }
 
 #pragma mark - Location transform

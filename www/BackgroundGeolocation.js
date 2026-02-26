@@ -221,6 +221,18 @@ var BackgroundGeolocation = {
       'forceSync');
   },
 
+  clearSync: function (success, failure) {
+    return execWithPromise(success,
+      failure,
+      'clearSync');
+  },
+
+  getPendingSyncCount: function (success, failure) {
+    return execWithPromise(success,
+      failure,
+      'getPendingSyncCount');
+  },
+
   on: function (event, callbackFn) {
     assert(this.events.indexOf(event) > -1, [TAG, '#on unknown event "' + event + '"']);
     if (!callbackFn) {

@@ -203,11 +203,44 @@ public class HttpPostService {
         }
         stream.close();
         byte[] bodyBytes = baos.toByteArray();
+        String jsonString = new String(bodyBytes, StandardCharsets.UTF_8);
+
+        // When form-urlencoded and body is a JSON array, send one POST per location (same flat
+        // format as real-time posting) so the same server endpoint accepts both.
+        if (isFormUrlEncoded) {
+            try {
+                Object parsed = new JSONTokener(jsonString).nextValue();
+                if (parsed instanceof JSONArray) {
+                    JSONArray arr = (JSONArray) parsed;
+                    int len = arr.length();
+                    if (len == 0) {
+                        if (listener != null) listener.onProgress(100);
+                        return 200;
+                    }
+                    for (int i = 0; i < len; i++) {
+                        JSONObject item = arr.getJSONObject(i);
+                        HttpPostService perRequest = new HttpPostService(mUrl);
+                        int code = perRequest.postJSON(item, headers);
+                        if (listener != null && len > 0) {
+                            listener.onProgress((i + 1) * 100 / len);
+                        }
+                        if (code < 200 || code >= 300) {
+                            return code;
+                        }
+                    }
+                    if (listener != null) {
+                        listener.onProgress(100);
+                    }
+                    return 200;
+                }
+            } catch (Exception e) {
+                // Fall through to single-POST with jsonToUrlEncoded (e.g. array wrap)
+            }
+        }
 
         byte[] outputBytes;
         if (isFormUrlEncoded) {
             try {
-                String jsonString = new String(bodyBytes, StandardCharsets.UTF_8);
                 String formBody = jsonToUrlEncoded(jsonString);
                 outputBytes = formBody.getBytes(StandardCharsets.UTF_8);
             } catch (Exception e) {

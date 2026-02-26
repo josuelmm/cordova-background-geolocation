@@ -40,6 +40,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
     private NotificationManager notificationManager;
     private BatchManager batchManager;
     private boolean notificationsEnabled = true;
+    private volatile Config currentSyncConfig;
 
     private org.slf4j.Logger logger;
 
@@ -98,15 +99,18 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
             return;
         }
 
-        if (config == null || !config.hasValidSyncUrl()) {
+        if (config == null || !config.hasValidSyncUrl() || !Boolean.TRUE.equals(config.getSyncEnabled())) {
             if (config == null) {
                 logger.warn("Sync skipped: no config");
+            } else if (!Boolean.TRUE.equals(config.getSyncEnabled())) {
+                logger.info("Sync skipped: sync disabled in config");
             }
             return;
         }
 
         //noinspection ConstantConditions
         notificationsEnabled = !config.hasNotificationsEnabled() || config.getNotificationsEnabled();
+        currentSyncConfig = config;
 
         Long batchStartMillis = System.currentTimeMillis();
         boolean isForced = (extras != null) && extras.getBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, false);
@@ -156,8 +160,8 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         if (notificationsEnabled) {
             builder = new NotificationCompat.Builder(getContext(), NotificationHelper.SYNC_CHANNEL_ID);
             builder.setOngoing(true);
-            builder.setContentTitle("Syncing locations");
-            builder.setContentText("Sync in progress");
+            builder.setContentTitle(currentSyncConfig.getNotificationSyncTitle());
+            builder.setContentText(currentSyncConfig.getNotificationSyncText());
             builder.setSmallIcon(android.R.drawable.ic_dialog_info);
             notificationManager.notify(NOTIFICATION_ID, builder.build());
         }
@@ -186,9 +190,9 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
 
             if (builder != null) {
                 if (isStatusOkay) {
-                    builder.setContentText("Sync completed");
+                    builder.setContentText(currentSyncConfig.getNotificationSyncCompletedText());
                 } else {
-                    builder.setContentText("Sync failed (HTTP " + responseCode + ")");
+                    builder.setContentText(currentSyncConfig.getNotificationSyncFailedText() + " (HTTP " + responseCode + ")");
                 }
             }
 
@@ -202,7 +206,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
             logger.warn("Error uploading locations (network/IO): {}", errMsg);
 
             if (builder != null) {
-                builder.setContentText("Sync failed: " + errMsg);
+                builder.setContentText(currentSyncConfig.getNotificationSyncFailedText() + ": " + errMsg);
             }
         } finally {
             logger.info("Syncing endAt: {}", System.currentTimeMillis());
@@ -230,11 +234,12 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
     public void onProgress(int progress) {
         logger.debug("Syncing progress: {} updatedAt: {}", progress, System.currentTimeMillis());
 
-        if (notificationsEnabled) {
+        Config c = currentSyncConfig;
+        if (notificationsEnabled && c != null) {
             NotificationCompat.Builder builder = new NotificationCompat.Builder(getContext(), NotificationHelper.SYNC_CHANNEL_ID);
             builder.setOngoing(true);
-            builder.setContentTitle("Syncing locations");
-            builder.setContentText("Sync in progress");
+            builder.setContentTitle(c.getNotificationSyncTitle());
+            builder.setContentText(c.getNotificationSyncText());
             builder.setSmallIcon(android.R.drawable.ic_dialog_info);
             builder.setProgress(100, progress, false);
             notificationManager.notify(NOTIFICATION_ID, builder.build());

@@ -35,6 +35,8 @@
 - (void) startTask:(CDVInvokedUrlCommand*)command;
 - (void) endTask:(CDVInvokedUrlCommand*)command;
 - (void) forceSync:(CDVInvokedUrlCommand*)command;
+- (void) clearSync:(CDVInvokedUrlCommand*)command;
+- (void) getPendingSyncCount:(CDVInvokedUrlCommand*)command;
 - (void) addEventListener:(CDVInvokedUrlCommand*)command;
 - (void) removeEventListener:(CDVInvokedUrlCommand*)command;
 

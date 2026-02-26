@@ -42,6 +42,8 @@
 - (NSArray*) getLogEntries:(NSInteger)limit;
 - (NSArray*) getLogEntries:(NSInteger)limit fromLogEntryId:(NSInteger)entryId minLogLevelFromString:(NSString *)minLogLevel;
 - (void) forceSync;
+- (void) clearSync;
+- (NSInteger) getPendingSyncCount;
 - (void) onAppTerminate;
 
 

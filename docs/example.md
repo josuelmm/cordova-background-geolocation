@@ -116,3 +116,44 @@ function onDeviceReady() {
 
 document.addEventListener('deviceready', onDeviceReady, false);
 ```
+
+## Sync queue example (getPendingSyncCount, forceSync, clearSync)
+
+When using `syncUrl`, you can show how many locations are pending, let the user trigger sync, or clear the queue:
+
+```js
+// e.g. in your UI: "Sync (5)" or "Clear queue"
+function updateSyncUI() {
+  BackgroundGeolocation.getPendingSyncCount()
+    .then(function (count) {
+      console.log('Pending to sync:', count);
+      // Update button labels: "Sync now (" + count + ")", "Clear queue"
+    });
+}
+
+// User taps "Sync now"
+function onSyncNow() {
+  BackgroundGeolocation.forceSync()
+    .then(function () {
+      console.log('Sync completed');
+      updateSyncUI();
+    })
+    .catch(function (err) {
+      console.warn('Sync failed', err);
+    });
+}
+
+// User taps "Clear queue"
+function onClearQueue() {
+  BackgroundGeolocation.clearSync()
+    .then(function () {
+      console.log('Queue cleared');
+      updateSyncUI();
+    });
+}
+
+// Call updateSyncUI() when the app comes to foreground or when you open the sync screen
+BackgroundGeolocation.on('foreground', updateSyncUI);
+```
+
+Configure with `syncUrl` and optional `sync: true` (default) so automatic sync and `forceSync()` work. To disable automatic sync but still allow manual `forceSync()`, keep `sync: true`. To disable both automatic and manual sync, set `sync: false`; locations are still stored until you set `sync: true` again.

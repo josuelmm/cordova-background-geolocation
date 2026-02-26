@@ -22,6 +22,10 @@ public final class SQLiteConfigurationContract {
         public static final String COLUMN_NAME_DEBUG = "debugging";
         public static final String COLUMN_NAME_NOTIF_TITLE = "notification_title";
         public static final String COLUMN_NAME_NOTIF_TEXT = "notification_text";
+        public static final String COLUMN_NAME_NOTIF_SYNC_TITLE = "notification_sync_title";
+        public static final String COLUMN_NAME_NOTIF_SYNC_TEXT = "notification_sync_text";
+        public static final String COLUMN_NAME_NOTIF_SYNC_COMPLETED = "notification_sync_completed_text";
+        public static final String COLUMN_NAME_NOTIF_SYNC_FAILED = "notification_sync_failed_text";
         public static final String COLUMN_NAME_NOTIF_ICON_LARGE = "notification_icon_large";
         public static final String COLUMN_NAME_NOTIF_ICON_SMALL = "notification_icon_small";
         public static final String COLUMN_NAME_NOTIF_COLOR = "notification_icon_color";
@@ -37,6 +41,7 @@ public final class SQLiteConfigurationContract {
         public static final String COLUMN_NAME_URL = "url";
         public static final String COLUMN_NAME_SYNC_URL = "sync_url";
         public static final String COLUMN_NAME_SYNC_THRESHOLD = "sync_threshold";
+        public static final String COLUMN_NAME_SYNC_ENABLED = "sync_enabled";
         public static final String COLUMN_NAME_HEADERS = "http_headers";
         public static final String COLUMN_NAME_MAX_LOCATIONS = "max_locations";
         public static final String COLUMN_NAME_TEMPLATE = "template";
@@ -50,6 +55,10 @@ public final class SQLiteConfigurationContract {
                         ConfigurationEntry.COLUMN_NAME_DEBUG + INTEGER_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_NOTIF_TITLE + TEXT_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_NOTIF_TEXT + TEXT_TYPE + COMMA_SEP +
+                        ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_TITLE + TEXT_TYPE + COMMA_SEP +
+                        ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_TEXT + TEXT_TYPE + COMMA_SEP +
+                        ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_COMPLETED + TEXT_TYPE + COMMA_SEP +
+                        ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_FAILED + TEXT_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_NOTIF_ICON_SMALL + TEXT_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_NOTIF_ICON_LARGE + TEXT_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_NOTIF_COLOR + TEXT_TYPE + COMMA_SEP +
@@ -65,6 +74,7 @@ public final class SQLiteConfigurationContract {
                         ConfigurationEntry.COLUMN_NAME_URL + TEXT_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_SYNC_URL + TEXT_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_SYNC_THRESHOLD + INTEGER_TYPE + COMMA_SEP +
+                        ConfigurationEntry.COLUMN_NAME_SYNC_ENABLED + INTEGER_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_HEADERS + TEXT_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_MAX_LOCATIONS + INTEGER_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_TEMPLATE + TEXT_TYPE +

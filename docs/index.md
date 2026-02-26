@@ -82,6 +82,10 @@ You can choose from three location providers:
 
 *See [Which provider should I use?](providers) for more information about providers.*
 
+## Sending locations to a server (url, syncUrl, sync)
+
+When `url` is set, each location is posted immediately. When `syncUrl` is set, locations that fail to post (or that are only queued for sync) are sent in batch when their count reaches `syncThreshold`, or when you call **`forceSync()`**. You can get the pending count with **`getPendingSyncCount()`** and discard the queue with **`clearSync()`**. Set **`sync: false`** in config to disable automatic and manual sync (locations are still stored). See [HTTP Location Posting](http_posting) for headers, Content-Type (JSON vs form-urlencoded), and [API](api) for `forceSync`, `clearSync`, `getPendingSyncCount`.
+
 ## Compilation
 
 ### Compatibility

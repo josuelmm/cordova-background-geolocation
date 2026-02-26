@@ -341,6 +341,22 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
 
+- (void) clearSync:(CDVInvokedUrlCommand*)command
+{
+    [facade clearSync];
+    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+}
+
+- (void) getPendingSyncCount:(CDVInvokedUrlCommand*)command
+{
+    [self.commandDelegate runInBackground:^{
+        NSInteger count = [facade getPendingSyncCount];
+        CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsNSInteger:count];
+        [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+    }];
+}
+
 - (void) addEventListener:(CDVInvokedUrlCommand*)command
 {
     callbackId = command.callbackId;

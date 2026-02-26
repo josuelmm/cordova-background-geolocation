@@ -418,6 +418,19 @@ public class SQLiteLocationDAO implements LocationDAO {
     return db.update(LocationEntry.TABLE_NAME, values, whereClause, whereArgs);
   }
 
+  /**
+   * Mark all locations pending sync (SYNC_PENDING) as deleted. Clears the sync queue without sending.
+   */
+  public int deletePendingSyncLocations() {
+    ContentValues values = new ContentValues();
+    values.put(LocationEntry.COLUMN_NAME_STATUS, BackgroundLocation.DELETED);
+
+    String whereClause = LocationEntry.COLUMN_NAME_STATUS + " = ?";
+    String[] whereArgs = { String.valueOf(BackgroundLocation.SYNC_PENDING) };
+
+    return db.update(LocationEntry.TABLE_NAME, values, whereClause, whereArgs);
+  }
+
   private BackgroundLocation hydrate(Cursor c) {
     BackgroundLocation l = new BackgroundLocation(c.getString(c.getColumnIndex(LocationEntry.COLUMN_NAME_PROVIDER)));
     l.setTime(c.getLong(c.getColumnIndex(LocationEntry.COLUMN_NAME_TIME)));

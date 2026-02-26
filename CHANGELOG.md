@@ -1,5 +1,29 @@
 # Changelog
 
+## [3.1.0](https://github.com/josuelmm/cordova-background-geolocation/tree/3.1.0) (2026-02-21)
+
+### Added
+
+- **`getPendingSyncCount(success?, fail?)`** — Returns the number of locations pending to be synced (not yet sent to `syncUrl`). Use with `forceSync()` to show "X locations pending" and let the user trigger sync on demand. (Android, iOS)
+- **`clearSync(success?, fail?)`** — Clears the pending sync queue: discards all locations waiting to be sent to `syncUrl` (they will not be synced). Use when the user wants to discard pending locations (e.g. "Clear queue" button). (Android, iOS)
+- **Config option `sync`** (default `true`) — When `false`, automatic sync and `forceSync()` do not run; locations are still stored and can be synced later by setting `sync: true`. (Android, iOS)
+- **Config options for sync notification texts (Android):** `notificationSyncTitle`, `notificationSyncText`, `notificationSyncCompletedText`, `notificationSyncFailedText` — Customize or localize the notification shown while locations are syncing to the server.
+
+### Fixed
+
+- **Android:** `forceSync()` now correctly calls `callbackContext.success()` so the JS Promise resolves.
+- **Android SyncAdapter:** Use `currentSyncConfig` (not out-of-scope `config`) when building sync notifications.
+- **Android & iOS:** When `sync` was never set in config, DB column `sync_enabled` could be NULL; the plugin now treats NULL as “not set” (sync enabled by default) instead of “sync disabled”, so `forceSync()` and automatic sync work when the user did not pass `sync: false`.
+- **Android sync with `Content-Type: application/x-www-form-urlencoded`:** Batch sync was sending one POST with `locations=<url-encoded-json-array>`, which many servers reject (400). Sync now sends **one POST per location** with the same flat `key=value&key=value` format as real-time posting, so the same endpoint accepts both.
+
+### Changed
+
+- Version bump to 3.1.0.
+
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/3.0.2...3.1.0)
+
+---
+
 ## [3.0.2](https://github.com/josuelmm/cordova-background-geolocation/tree/3.0.2) (2026-02-21)
 
 ### Fixed

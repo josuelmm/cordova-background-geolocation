@@ -304,6 +304,26 @@
     return success;
 }
 
+- (BOOL) deletePendingSyncLocations:(NSError * __autoreleasing *)outError
+{
+    __block BOOL success = YES;
+    NSString *sql = @"UPDATE " @LC_TABLE_NAME @" SET " @LC_COLUMN_NAME_STATUS @" = ? WHERE " @LC_COLUMN_NAME_STATUS @" = ?";
+
+    [queue inDatabase:^(FMDatabase *database) {
+        if (![database executeUpdate:sql, [NSString stringWithFormat:@"%ld", MAURLocationDeleted], [NSString stringWithFormat:@"%ld", MAURLocationPostPending]]) {
+            int errorCode = [database lastErrorCode];
+            NSString *errorMessage = [database lastErrorMessage];
+            NSLog(@"deletePendingSyncLocations failed code: %d: message: %@", errorCode, errorMessage);
+            if (outError != NULL) {
+                *outError = [NSError errorWithDomain:Domain code:errorCode userInfo:@{ NSLocalizedDescriptionKey: errorMessage ?: @"" }];
+            }
+            success = NO;
+        }
+    }];
+
+    return success;
+}
+
 - (BOOL) clearDatabase
 {
     __block BOOL success;

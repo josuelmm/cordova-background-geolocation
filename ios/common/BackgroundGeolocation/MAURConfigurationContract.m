@@ -37,6 +37,7 @@
         @{ @"name": @CC_COLUMN_NAME_URL, @"type": [SQLColumnType sqlColumnWithType: kText]},
         @{ @"name": @CC_COLUMN_NAME_SYNC_URL, @"type": [SQLColumnType sqlColumnWithType: kText]},
         @{ @"name": @CC_COLUMN_NAME_SYNC_THRESHOLD, @"type": [SQLColumnType sqlColumnWithType: kInteger]},
+        @{ @"name": @CC_COLUMN_NAME_SYNC_ENABLED, @"type": [SQLColumnType sqlColumnWithType: kInteger]},
         @{ @"name": @CC_COLUMN_NAME_HEADERS, @"type": [SQLColumnType sqlColumnWithType: kText]},
         @{ @"name": @CC_COLUMN_NAME_SAVE_BATTERY, @"type": [SQLColumnType sqlColumnWithType: kInteger]},
         @{ @"name": @CC_COLUMN_NAME_MAX_LOCATIONS, @"type": [SQLColumnType sqlColumnWithType: kInteger]},

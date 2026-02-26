@@ -26,6 +26,8 @@
 - (NSNumber*) persistLocation:(MAURLocation*)location limitRows:(NSInteger)maxRows;
 - (BOOL) deleteLocation:(NSNumber*)locationId error:(NSError * __autoreleasing *)outError;
 - (BOOL) deleteAllLocations:(NSError * __autoreleasing *)outError;
+/** Mark all locations pending sync (PostPending) as deleted. Clears the sync queue without sending. */
+- (BOOL) deletePendingSyncLocations:(NSError * __autoreleasing *)outError;
 - (BOOL) clearDatabase;
 - (NSString*) getDatabaseName;
 - (NSString*) getDatabasePath;

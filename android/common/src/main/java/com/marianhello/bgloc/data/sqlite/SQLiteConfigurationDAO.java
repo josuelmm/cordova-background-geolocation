@@ -39,6 +39,10 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
       ConfigurationEntry.COLUMN_NAME_DEBUG,
       ConfigurationEntry.COLUMN_NAME_NOTIF_TITLE,
       ConfigurationEntry.COLUMN_NAME_NOTIF_TEXT,
+      ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_TITLE,
+      ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_TEXT,
+      ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_COMPLETED,
+      ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_FAILED,
       ConfigurationEntry.COLUMN_NAME_NOTIF_ICON_LARGE,
       ConfigurationEntry.COLUMN_NAME_NOTIF_ICON_SMALL,
       ConfigurationEntry.COLUMN_NAME_NOTIF_COLOR,
@@ -54,6 +58,7 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
       ConfigurationEntry.COLUMN_NAME_URL,
       ConfigurationEntry.COLUMN_NAME_SYNC_URL,
       ConfigurationEntry.COLUMN_NAME_SYNC_THRESHOLD,
+      ConfigurationEntry.COLUMN_NAME_SYNC_ENABLED,
       ConfigurationEntry.COLUMN_NAME_HEADERS,
       ConfigurationEntry.COLUMN_NAME_MAX_LOCATIONS,
       ConfigurationEntry.COLUMN_NAME_TEMPLATE
@@ -105,6 +110,16 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
     config.setDebugging( (c.getInt(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_DEBUG)) == 1) ? true : false );
     config.setNotificationTitle(c.getString(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_NOTIF_TITLE)));
     config.setNotificationText(c.getString(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_NOTIF_TEXT)));
+    int idxSyncTitle = c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_TITLE);
+    if (idxSyncTitle >= 0) {
+      if (!c.isNull(idxSyncTitle)) config.setNotificationSyncTitle(c.getString(idxSyncTitle));
+      int idxSyncText = c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_TEXT);
+      if (idxSyncText >= 0 && !c.isNull(idxSyncText)) config.setNotificationSyncText(c.getString(idxSyncText));
+      int idxSyncCompleted = c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_COMPLETED);
+      if (idxSyncCompleted >= 0 && !c.isNull(idxSyncCompleted)) config.setNotificationSyncCompletedText(c.getString(idxSyncCompleted));
+      int idxSyncFailed = c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_FAILED);
+      if (idxSyncFailed >= 0 && !c.isNull(idxSyncFailed)) config.setNotificationSyncFailedText(c.getString(idxSyncFailed));
+    }
     config.setSmallNotificationIcon(c.getString(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_NOTIF_ICON_SMALL)));
     config.setLargeNotificationIcon(c.getString(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_NOTIF_ICON_LARGE)));
     config.setNotificationIconColor(c.getString(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_NOTIF_COLOR)));
@@ -120,6 +135,10 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
     config.setUrl(c.getString(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_URL)));
     config.setSyncUrl(c.getString(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_SYNC_URL)));
     config.setSyncThreshold(c.getInt(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_SYNC_THRESHOLD)));
+    int idxSyncEnabled = c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_SYNC_ENABLED);
+    if (idxSyncEnabled >= 0 && !c.isNull(idxSyncEnabled)) {
+      config.setSyncEnabled(c.getInt(idxSyncEnabled) == 1);
+    }
     config.setHttpHeaders(new JSONObject(c.getString(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_HEADERS))));
     config.setMaxLocations(c.getInt(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_MAX_LOCATIONS)));
     config.setTemplate(LocationTemplateFactory.fromJSONString(c.getString(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_TEMPLATE))));
@@ -136,6 +155,10 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
     values.put(ConfigurationEntry.COLUMN_NAME_DEBUG, (config.isDebugging() == true) ? 1 : 0);
     values.put(ConfigurationEntry.COLUMN_NAME_NOTIF_TITLE, config.getNotificationTitle());
     values.put(ConfigurationEntry.COLUMN_NAME_NOTIF_TEXT, config.getNotificationText());
+    values.put(ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_TITLE, config.getNotificationSyncTitle());
+    values.put(ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_TEXT, config.getNotificationSyncText());
+    values.put(ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_COMPLETED, config.getNotificationSyncCompletedText());
+    values.put(ConfigurationEntry.COLUMN_NAME_NOTIF_SYNC_FAILED, config.getNotificationSyncFailedText());
     values.put(ConfigurationEntry.COLUMN_NAME_NOTIF_ICON_SMALL, config.getSmallNotificationIcon());
     values.put(ConfigurationEntry.COLUMN_NAME_NOTIF_ICON_LARGE, config.getLargeNotificationIcon());
     values.put(ConfigurationEntry.COLUMN_NAME_NOTIF_COLOR, config.getNotificationIconColor());
@@ -151,6 +174,7 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
     values.put(ConfigurationEntry.COLUMN_NAME_URL, config.getUrl());
     values.put(ConfigurationEntry.COLUMN_NAME_SYNC_URL, config.getSyncUrl());
     values.put(ConfigurationEntry.COLUMN_NAME_SYNC_THRESHOLD, config.getSyncThreshold());
+    values.put(ConfigurationEntry.COLUMN_NAME_SYNC_ENABLED, Boolean.TRUE.equals(config.getSyncEnabled()) ? 1 : 0);
     values.put(ConfigurationEntry.COLUMN_NAME_HEADERS, new JSONObject(config.getHttpHeaders()).toString());
     values.put(ConfigurationEntry.COLUMN_NAME_MAX_LOCATIONS, config.getMaxLocations());
     values.put(ConfigurationEntry.COLUMN_NAME_TEMPLATE, config.hasTemplate() ? config.getTemplate().toString() : null);

@@ -45,6 +45,10 @@ public class Config implements Parcelable
     private Boolean debug;
     private String notificationTitle;
     private String notificationText;
+    private String notificationSyncTitle;
+    private String notificationSyncText;
+    private String notificationSyncCompletedText;
+    private String notificationSyncFailedText;
     private String notificationIconLarge;
     private String notificationIconSmall;
     private String notificationIconColor;
@@ -60,6 +64,7 @@ public class Config implements Parcelable
     private String url;
     private String syncUrl;
     private Integer syncThreshold;
+    private Boolean syncEnabled;
     private HashMap httpHeaders;
     private Integer maxLocations;
     private LocationTemplate template;
@@ -76,6 +81,10 @@ public class Config implements Parcelable
         this.debug = config.debug;
         this.notificationTitle = config.notificationTitle;
         this.notificationText = config.notificationText;
+        this.notificationSyncTitle = config.notificationSyncTitle;
+        this.notificationSyncText = config.notificationSyncText;
+        this.notificationSyncCompletedText = config.notificationSyncCompletedText;
+        this.notificationSyncFailedText = config.notificationSyncFailedText;
         this.notificationIconLarge = config.notificationIconLarge;
         this.notificationIconSmall = config.notificationIconSmall;
         this.notificationIconColor = config.notificationIconColor;
@@ -91,6 +100,7 @@ public class Config implements Parcelable
         this.url = config.url;
         this.syncUrl = config.syncUrl;
         this.syncThreshold = config.syncThreshold;
+        this.syncEnabled = config.syncEnabled;
         this.httpHeaders = CloneHelper.deepCopy(config.httpHeaders);
         this.maxLocations = config.maxLocations;
         this.enableWatchdog = config.enableWatchdog;
@@ -106,6 +116,10 @@ public class Config implements Parcelable
         setDebugging((Boolean) in.readValue(null));
         setNotificationTitle(in.readString());
         setNotificationText(in.readString());
+        setNotificationSyncTitle(in.readString());
+        setNotificationSyncText(in.readString());
+        setNotificationSyncCompletedText(in.readString());
+        setNotificationSyncFailedText(in.readString());
         setLargeNotificationIcon(in.readString());
         setSmallNotificationIcon(in.readString());
         setNotificationIconColor(in.readString());
@@ -121,6 +135,7 @@ public class Config implements Parcelable
         setUrl(in.readString());
         setSyncUrl(in.readString());
         setSyncThreshold(in.readInt());
+        setSyncEnabled((Boolean) in.readValue(null));
         setMaxLocations(in.readInt());
         setEnableWatchdog((Boolean) in.readValue(null));
         Bundle bundle = in.readBundle();
@@ -136,6 +151,10 @@ public class Config implements Parcelable
         config.debug = false;
         config.notificationTitle = "Background tracking";
         config.notificationText = "ENABLED";
+        config.notificationSyncTitle = "Syncing locations";
+        config.notificationSyncText = "Sync in progress";
+        config.notificationSyncCompletedText = "Sync completed";
+        config.notificationSyncFailedText = "Sync failed";
         config.notificationIconLarge = "";
         config.notificationIconSmall = "";
         config.notificationIconColor = "";
@@ -151,6 +170,7 @@ public class Config implements Parcelable
         config.url = "";
         config.syncUrl = "";
         config.syncThreshold = 100;
+        config.syncEnabled = true;
         config.httpHeaders = null;
         config.maxLocations = 10000;
         config.template = null;
@@ -171,6 +191,10 @@ public class Config implements Parcelable
         out.writeValue(isDebugging());
         out.writeString(getNotificationTitle());
         out.writeString(getNotificationText());
+        out.writeString(getNotificationSyncTitle());
+        out.writeString(getNotificationSyncText());
+        out.writeString(getNotificationSyncCompletedText());
+        out.writeString(getNotificationSyncFailedText());
         out.writeString(getLargeNotificationIcon());
         out.writeString(getSmallNotificationIcon());
         out.writeString(getNotificationIconColor());
@@ -186,6 +210,7 @@ public class Config implements Parcelable
         out.writeString(getUrl());
         out.writeString(getSyncUrl());
         out.writeInt(getSyncThreshold());
+        out.writeValue(getSyncEnabled());
         out.writeInt(getMaxLocations());
         out.writeValue(getEnableWatchdog());
         Bundle bundle = new Bundle();
@@ -291,6 +316,38 @@ public class Config implements Parcelable
 
     public void setNotificationText(String notificationText) {
         this.notificationText = notificationText;
+    }
+
+    public String getNotificationSyncTitle() {
+        return notificationSyncTitle != null ? notificationSyncTitle : "Syncing locations";
+    }
+
+    public void setNotificationSyncTitle(String notificationSyncTitle) {
+        this.notificationSyncTitle = notificationSyncTitle;
+    }
+
+    public String getNotificationSyncText() {
+        return notificationSyncText != null ? notificationSyncText : "Sync in progress";
+    }
+
+    public void setNotificationSyncText(String notificationSyncText) {
+        this.notificationSyncText = notificationSyncText;
+    }
+
+    public String getNotificationSyncCompletedText() {
+        return notificationSyncCompletedText != null ? notificationSyncCompletedText : "Sync completed";
+    }
+
+    public void setNotificationSyncCompletedText(String notificationSyncCompletedText) {
+        this.notificationSyncCompletedText = notificationSyncCompletedText;
+    }
+
+    public String getNotificationSyncFailedText() {
+        return notificationSyncFailedText != null ? notificationSyncFailedText : "Sync failed";
+    }
+
+    public void setNotificationSyncFailedText(String notificationSyncFailedText) {
+        this.notificationSyncFailedText = notificationSyncFailedText;
     }
 
     public boolean hasLargeNotificationIcon() {
@@ -468,6 +525,20 @@ public class Config implements Parcelable
         this.syncThreshold = syncThreshold;
     }
 
+    public boolean hasSyncEnabled() {
+        return syncEnabled != null;
+    }
+
+    /** Whether synchronization to syncUrl is enabled. Default true. */
+    @Nullable
+    public Boolean getSyncEnabled() {
+        return syncEnabled != null ? syncEnabled : true;
+    }
+
+    public void setSyncEnabled(@Nullable Boolean syncEnabled) {
+        this.syncEnabled = syncEnabled;
+    }
+
     public boolean hasHttpHeaders() {
         return httpHeaders != null;
     }
@@ -562,6 +633,7 @@ public class Config implements Parcelable
                 .append(" url=").append(getUrl())
                 .append(" syncUrl=").append(getSyncUrl())
                 .append(" syncThreshold=").append(getSyncThreshold())
+                .append(" syncEnabled=").append(getSyncEnabled())
                 .append(" httpHeaders=").append(getHttpHeaders().toString())
                 .append(" maxLocations=").append(getMaxLocations())
                 .append(" postTemplate=").append(hasTemplate() ? getTemplate().toString() : null)
@@ -602,6 +674,18 @@ public class Config implements Parcelable
         }
         if (config2.hasNotificationText()) {
             merger.setNotificationText(config2.getNotificationText());
+        }
+        if (config2.notificationSyncTitle != null) {
+            merger.setNotificationSyncTitle(config2.getNotificationSyncTitle());
+        }
+        if (config2.notificationSyncText != null) {
+            merger.setNotificationSyncText(config2.getNotificationSyncText());
+        }
+        if (config2.notificationSyncCompletedText != null) {
+            merger.setNotificationSyncCompletedText(config2.getNotificationSyncCompletedText());
+        }
+        if (config2.notificationSyncFailedText != null) {
+            merger.setNotificationSyncFailedText(config2.getNotificationSyncFailedText());
         }
         if (config2.hasStopOnTerminate()) {
             merger.setStopOnTerminate(config2.getStopOnTerminate());
@@ -647,6 +731,9 @@ public class Config implements Parcelable
         }
         if (config2.hasSyncThreshold()) {
             merger.setSyncThreshold(config2.getSyncThreshold());
+        }
+        if (config2.hasSyncEnabled()) {
+            merger.setSyncEnabled(config2.getSyncEnabled());
         }
         if (config2.hasHttpHeaders()) {
             merger.setHttpHeaders(config2.getHttpHeaders());

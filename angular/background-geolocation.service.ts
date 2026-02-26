@@ -154,6 +154,20 @@ export class BackgroundGeolocationService {
     return this.ensurePlugin().forceSync(success, fail);
   }
 
+  clearSync(
+    success?: () => void,
+    fail?: (error: any) => void
+  ): Promise<void> {
+    return this.ensurePlugin().clearSync(success, fail);
+  }
+
+  getPendingSyncCount(
+    success?: (count: number) => void,
+    fail?: (error: any) => void
+  ): Promise<number> {
+    return this.ensurePlugin().getPendingSyncCount(success, fail);
+  }
+
   getConfig(
     success?: (config: any) => void,
     fail?: (error: any) => void

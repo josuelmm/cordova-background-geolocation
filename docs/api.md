@@ -6,7 +6,9 @@ title: API
 
 # API
 
-Note that all methods now return a `Promise` in case the `success` and `fail` callbacks are not provided, allowing the usage of `async/await`.
+Note that all methods now return a `Promise` when the `success` and `fail` callbacks are omitted, so you can use `async/await`.
+
+**Quick reference — main methods:** `configure`, `start`, `stop`, `getConfig`, `getCurrentLocation`, `checkStatus`, `getLocations`, `getValidLocations`, `deleteLocation`, `deleteAllLocations`, **`getPendingSyncCount`**, **`forceSync`**, **`clearSync`**, `getPluginVersion`, `showAppSettings`, `openSettings`, `showLocationSettings`, `getLogEntries`, `switchMode` (iOS), `startTask` / `endTask` (iOS), `removeAllListeners`, `on`. For sync queue (`syncUrl`), see [forceSync](#forcesync), [clearSync](#clearsyncsuccess-fail), [getPendingSyncCount](#getpendingsynccountsuccess-fail); for HTTP posting see [HTTP Location Posting](http_posting).
 
 ## TypeScript
 
@@ -40,6 +42,10 @@ Configure options:
 | `startForeground`         | `Boolean`         | Android      | Allow location sync service to run in foreground state. Foreground state also requires a notification to be presented to the user.                                                                                                                                                                                                                 | all         | false                      |
 | `notificationTitle`       | `String` optional | Android      | Custom notification title in the drawer. (goes with `startForeground`)                                                                                                                                                                                                                                                                             | all         | "Background tracking"      |
 | `notificationText`        | `String` optional | Android      | Custom notification text in the drawer. (goes with `startForeground`)                                                                                                                                                                                                                                                                              | all         | "ENABLED"                  |
+| `notificationSyncTitle`   | `String` optional | Android      | Title of the notification shown while syncing locations to the server. Use to localize (e.g. "Sincronizando ubicaciones").                                                                                                                                                                                                                         | all         | "Syncing locations"       |
+| `notificationSyncText`   | `String` optional | Android      | Text shown while sync is in progress (e.g. "Sync in progress" / "Sincronizando…").                                                                                                                                                                                                                                                                 | all         | "Sync in progress"         |
+| `notificationSyncCompletedText` | `String` optional | Android | Text when sync completes successfully.                                                                                                                                                                                                                                                                    | all         | "Sync completed"           |
+| `notificationSyncFailedText`   | `String` optional | Android | Text when sync fails (prefix before " (HTTP …)" or ": error").                                                                                                                                                                                                                                            | all         | "Sync failed"              |
 | `notificationIconColor`   | `String` optional | Android      | The accent color to use for notification. Eg. **#4CAF50**. (goes with `startForeground`)                                                                                                                                                                                                                                                           | all         |                            |
 | `notificationIconLarge`   | `String` optional | Android      | The filename of a custom notification icon. **@see** Android quirks. (goes with `startForeground`)                                                                                                                                                                                                                                                 | all         |                            |
 | `notificationIconSmall`   | `String` optional | Android      | The filename of a custom notification icon. **@see** Android quirks. (goes with `startForeground`)                                                                                                                                                                                                                                                 | all         |                            |
@@ -49,6 +55,7 @@ Configure options:
 | `url`                     | `String`          | all          | Server url where to send HTTP POST with recorded locations **@see** [HTTP locations posting](#http-locations-posting)                                                                                                                                                                                                                              | all         |                            |
 | `syncUrl`                 | `String`          | all          | Server url where to send fail to post locations **@see** [HTTP locations posting](#http-locations-posting)                                                                                                                                                                                                                                         | all         |                            |
 | `syncThreshold`           | `Number`          | all          | Specifies how many previously failed locations will be sent to server at once                                                                                                                                                                                                                                                                      | all         | 100                        |
+| `sync`                    | `Boolean`         | all          | When true, automatic sync and forceSync() send locations to syncUrl. When false, sync is disabled (locations are still stored; set sync: true later to sync).                                                                                                                                                                                       | all         | true                       |
 | `httpHeaders`             | `Object`          | all          | Headers for POST/sync. Two ways: static here, or dynamic on 401 via `http_authorization`. Content-Type: `application/json` (default) or `application/x-www-form-urlencoded`. **@see** [HTTP posting](http_posting#http-headers-two-ways).                                                                                                                                                                                       | all         |                            |
 | `maxLocations`            | `Number`          | all          | Limit maximum number of locations stored into db                                                                                                                                                                                                                                                                                                   | all         | 10000                      |
 | `enableWatchdog`          | `Boolean`         | Android      | If true, when no location update is received for ~60s the provider is restarted (helps on some devices).                                                                                                                                                                                                                                          | all         | false                      |
@@ -58,6 +65,8 @@ Configure options:
 DIS = DISTANCE\_FILTER\_PROVIDER
 ACT = ACTIVITY\_PROVIDER
 RAW = RAW\_PROVIDER
+
+**Sync notification texts (Android):** Pass `notificationSyncTitle`, `notificationSyncText`, `notificationSyncCompletedText`, and `notificationSyncFailedText` in the same `configure()` call you use for the plugin. They are stored and used when sync runs (including `forceSync()`). If you never set them, the English defaults are shown. To verify they were saved, call `getConfig()` and check the returned object.
 
 Partial reconfiguration is possible by later providing a subset of the configuration options:
 
@@ -179,7 +188,7 @@ Open app settings (convenience alias for `showAppSettings()`). Use this to let t
 
 Platform: Android, iOS
 
-Returns the plugin version string (e.g. `"3.0.2"`). Useful for debugging or compatibility checks.
+Returns the plugin version string (e.g. `"3.1.0"`). Useful for debugging or compatibility checks.
 
 ## getLocations(success, fail)
 
@@ -264,6 +273,32 @@ Platform: Android, iOS
 
 Force sync of pending locations. Option `syncThreshold` will be ignored and
 all pending locations will be immediately posted to `syncUrl` in single batch.
+No-op if `sync` is `false` in config.
+
+## clearSync(success, fail)
+
+Platform: Android, iOS
+
+Clear the pending sync queue: discard all locations waiting to be sent to `syncUrl`.
+They will not be synced. Use when the user wants to discard pending locations (e.g. "Clear queue" button).
+After calling, `getPendingSyncCount()` will return 0 until new locations are stored for sync.
+
+## getPendingSyncCount(success, fail)
+
+Platform: Android, iOS
+
+Returns the number of locations pending to be synced (not yet sent to `syncUrl`).
+Use with `forceSync()` to show "X locations pending" and let the user trigger sync on demand.
+
+```javascript
+BackgroundGeolocation.getPendingSyncCount()
+  .then(function (count) {
+    console.log('Pending to sync:', count);
+    if (count > 0) {
+      // optionally: BackgroundGeolocation.forceSync();
+    }
+  });
+```
 
 ## getLogEntries(limit, fromId, minLevel, success, fail)
 

@@ -392,4 +392,15 @@ public class ContentProviderLocationDAO implements LocationDAO {
 
         return mResolver.update(mContentUri, values, whereClause, whereArgs);
     }
+
+    @Override
+    public int deletePendingSyncLocations() {
+        ContentValues values = new ContentValues();
+        values.put(LocationEntry.COLUMN_NAME_STATUS, BackgroundLocation.DELETED);
+
+        String whereClause = LocationEntry.COLUMN_NAME_STATUS + " = ?";
+        String[] whereArgs = { String.valueOf(BackgroundLocation.SYNC_PENDING) };
+
+        return mResolver.update(mContentUri, values, whereClause, whereArgs);
+    }
 }

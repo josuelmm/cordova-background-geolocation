@@ -92,7 +92,9 @@ The service exposes the same methods as the global plugin. All methods that acce
 | `deleteLocation(locationId, success?, fail?)` | `Promise<void>` | Delete one location by id. |
 | `deleteAllLocations(success?, fail?)` | `Promise<void>` | Delete all stored locations. |
 | `switchMode(modeId, success?, fail?)` | `Promise<void>` | Force BACKGROUND or FOREGROUND mode (iOS). Use `this.bg.native.BACKGROUND_MODE` / `FOREGROUND_MODE`. |
-| `forceSync(success?, fail?)` | `Promise<void>` | Force sync of pending locations to `syncUrl`. |
+| `forceSync(success?, fail?)` | `Promise<void>` | Force sync of pending locations to `syncUrl`. No-op if `sync: false`. |
+| `clearSync(success?, fail?)` | `Promise<void>` | Clear the pending sync queue (discard locations waiting to be sent to `syncUrl`). |
+| `getPendingSyncCount(success?, fail?)` | `Promise<number>` | Number of locations pending to be synced. Use with `forceSync` / `clearSync` for sync UI. |
 | `getConfig(success?, fail?)` | `Promise<ConfigureOptions>` | Current configuration. |
 | `getLogEntries(limit, fromId, minLevel, success?, fail?)` | `Promise<LogEntry[]>` | Debug log entries. |
 | `removeAllListeners(event?)` | `void` | Unregister listeners (one event or all). |
@@ -102,6 +104,8 @@ The service exposes the same methods as the global plugin. All methods that acce
 | `on(eventName, callback?)` | `{ unsubscribe(): void }` | Subscribe to an event. Call `unsubscribe()` when done. |
 
 **Constants (provider, accuracy, mode, etc.):** use the `native` getter to access the same constants as the global plugin, e.g. `this.bg.native.ACTIVITY_PROVIDER`, `this.bg.native.HIGH_ACCURACY`, `this.bg.native.BACKGROUND_MODE`.
+
+**Sync (syncUrl):** Configure `syncUrl` (and optionally `sync: true`) to send pending locations in batch. Use `getPendingSyncCount()` for “X pending” UI, `forceSync()` to send now, and `clearSync()` to discard the queue. See [HTTP Location Posting](http_posting#sync-queue-getpendingsynccount-forcesync-clearsync).
 
 ---
 

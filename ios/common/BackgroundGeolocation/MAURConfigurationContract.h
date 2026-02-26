@@ -33,6 +33,7 @@
 #define CC_COLUMN_NAME_URL                    "url"
 #define CC_COLUMN_NAME_SYNC_URL               "sync_url"
 #define CC_COLUMN_NAME_SYNC_THRESHOLD         "sync_threshold"
+#define CC_COLUMN_NAME_SYNC_ENABLED           "sync_enabled"
 #define CC_COLUMN_NAME_HEADERS                "http_headers"
 #define CC_COLUMN_NAME_SAVE_BATTERY           "save_battery"
 #define CC_COLUMN_NAME_MAX_LOCATIONS          "max_locations"

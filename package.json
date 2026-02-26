@@ -1,6 +1,6 @@
 {
   "name": "@josuelmm/cordova-background-geolocation",
-  "version": "3.0.2",
+  "version": "3.1.0",
   "description": "Cordova Background Geolocation (fork actualizado)",
   "main": "./www/BackgroundGeolocation.js",
   "types": "./www/BackgroundGeolocation.d.ts",
@@ -29,7 +29,8 @@
   "scripts": {
     "build:angular": "npx ng-packagr -p angular/ng-package.json",
     "prepack": "npm run build:angular",
-    "prepublishOnly": "npm run build:angular"
+    "pack": "npm pack",
+    "build-package": "npm run build:angular && npm pack"
   },
   "cordova": {
     "id": "cordova-background-geolocation",

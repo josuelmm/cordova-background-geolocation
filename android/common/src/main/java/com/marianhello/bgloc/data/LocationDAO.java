@@ -19,4 +19,9 @@ public interface LocationDAO {
     BackgroundLocation deleteFirstUnpostedLocation();
     int deleteAllLocations();
     int deleteUnpostedLocations();
+    /**
+     * Delete (mark as deleted) all locations that are pending sync to syncUrl.
+     * Same effect as discarding the pending sync queue without sending to server.
+     */
+    int deletePendingSyncLocations();
 }

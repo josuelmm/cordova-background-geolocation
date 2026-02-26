@@ -71,10 +71,12 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     public static final String ACTION_END_TASK = "endTask";
     public static final String ACTION_REGISTER_HEADLESS_TASK = "registerHeadlessTask";
     public static final String ACTION_FORCE_SYNC = "forceSync";
+    public static final String ACTION_CLEAR_SYNC = "clearSync";
+    public static final String ACTION_GET_PENDING_SYNC_COUNT = "getPendingSyncCount";
     public static final String ACTION_GET_PLUGIN_VERSION = "getPluginVersion";
 
     /** Plugin version; keep in sync with plugin.xml. */
-    public static final String PLUGIN_VERSION = "3.0.0";
+    public static final String PLUGIN_VERSION = "3.1.0";
 
     private BackgroundGeolocationFacade facade;
 
@@ -367,7 +369,35 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
             return true;
         } else if (ACTION_FORCE_SYNC.equals(action)) {
             logger.debug("Forced location sync requested");
-            facade.forceSync();
+            runOnWebViewThread(new Runnable() {
+                @Override
+                public void run() {
+                    facade.forceSync();
+                    callbackContext.success();
+                }
+            });
+            return true;
+        } else if (ACTION_CLEAR_SYNC.equals(action)) {
+            runOnWebViewThread(new Runnable() {
+                @Override
+                public void run() {
+                    facade.clearSync();
+                    callbackContext.success();
+                }
+            });
+            return true;
+        } else if (ACTION_GET_PENDING_SYNC_COUNT.equals(action)) {
+            runOnWebViewThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        long count = facade.getPendingSyncCount();
+                        callbackContext.success((int) Math.min(count, Integer.MAX_VALUE));
+                    } catch (Exception e) {
+                        callbackContext.sendPluginResult(ErrorPluginResult.from("getPendingSyncCount failed", e, PluginException.SERVICE_ERROR));
+                    }
+                }
+            });
             return true;
         } else if (ACTION_GET_PLUGIN_VERSION.equals(action)) {
             callbackContext.success(PLUGIN_VERSION);

@@ -12,7 +12,7 @@
 
 @implementation MAURConfig 
 
-@synthesize stationaryRadius, distanceFilter, desiredAccuracy, _debug, activityType, activitiesInterval, _stopOnTerminate, url, syncUrl, syncThreshold, httpHeaders, _saveBatteryOnBackground, maxLocations, _pauseLocationUpdates, locationProvider, _template;
+@synthesize stationaryRadius, distanceFilter, desiredAccuracy, _debug, activityType, activitiesInterval, _stopOnTerminate, url, syncUrl, syncThreshold, syncEnabled, httpHeaders, _saveBatteryOnBackground, maxLocations, _pauseLocationUpdates, locationProvider, _template;
 
 -(instancetype) initWithDefaults {
     self = [super init];
@@ -31,6 +31,7 @@
     _saveBatteryOnBackground = [NSNumber numberWithBool:NO];
     maxLocations = [NSNumber numberWithInt:10000];
     syncThreshold = [NSNumber numberWithInt:100];
+    syncEnabled = [NSNumber numberWithBool:YES];
     _pauseLocationUpdates = [NSNumber numberWithBool:NO];
     locationProvider = [NSNumber numberWithInt:DISTANCE_FILTER_PROVIDER];
 //    template =
@@ -71,6 +72,9 @@
     }
     if (isNotNull(config[@"syncThreshold"])) {
         instance.syncThreshold = config[@"syncThreshold"];
+    }
+    if (isNotNull(config[@"sync"])) {
+        instance.syncEnabled = config[@"sync"];
     }
     if (config[@"httpHeaders"] != nil) {
         instance.httpHeaders = config[@"httpHeaders"];
@@ -136,6 +140,9 @@
     if ([newConfig hasSyncThreshold]) {
         merger.syncThreshold = newConfig.syncThreshold;
     }
+    if ([newConfig hasSyncEnabled]) {
+        merger.syncEnabled = [NSNumber numberWithBool:[newConfig syncEnabled]];
+    }
     if ([newConfig hasHttpHeaders]) {
         merger.httpHeaders = newConfig.httpHeaders;
     }
@@ -172,6 +179,7 @@
         copy.url = url;
         copy.syncUrl = syncUrl;
         copy.syncThreshold = syncThreshold;
+        copy.syncEnabled = syncEnabled;
         copy.httpHeaders = httpHeaders;
         copy._saveBatteryOnBackground = _saveBatteryOnBackground;
         copy.maxLocations = maxLocations;
@@ -275,6 +283,16 @@
 - (BOOL) hasSyncThreshold
 {
     return syncThreshold != nil;
+}
+
+- (BOOL) hasSyncEnabled
+{
+    return syncEnabled != nil;
+}
+
+- (BOOL) syncEnabled
+{
+    return syncEnabled == nil ? YES : [syncEnabled boolValue];
 }
 
 - (BOOL) hasHttpHeaders
@@ -467,6 +485,7 @@
     if ([self hasDebug]) [dict setObject:self._debug forKey:@"debug"];
     if ([self hasStopOnTerminate]) [dict setObject:self._stopOnTerminate forKey:@"stopOnTerminate"];
     if ([self hasSyncThreshold]) [dict setObject:self.syncThreshold forKey:@"syncThreshold"];
+    if ([self hasSyncEnabled]) [dict setObject:syncEnabled forKey:@"sync"];
     if ([self hasSaveBatteryOnBackground]) [dict setObject:self._saveBatteryOnBackground forKey:@"saveBatteryOnBackground"];
     if ([self hasMaxLocations]) [dict setObject:self.maxLocations forKey:@"maxLocations"];
     if ([self hasPauseLocationUpdates]) [dict setObject:self._pauseLocationUpdates forKey:@"pauseLocationUpdates"];

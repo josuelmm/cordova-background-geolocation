@@ -81,13 +81,14 @@
         @COMMA_SEP @CC_COLUMN_NAME_URL
         @COMMA_SEP @CC_COLUMN_NAME_SYNC_URL
         @COMMA_SEP @CC_COLUMN_NAME_SYNC_THRESHOLD
+        @COMMA_SEP @CC_COLUMN_NAME_SYNC_ENABLED
         @COMMA_SEP @CC_COLUMN_NAME_HEADERS
         @COMMA_SEP @CC_COLUMN_NAME_SAVE_BATTERY
         @COMMA_SEP @CC_COLUMN_NAME_MAX_LOCATIONS
         @COMMA_SEP @CC_COLUMN_NAME_PAUSE_LOCATION_UPDATES
         @COMMA_SEP @CC_COLUMN_NAME_TEMPLATE
         @COMMA_SEP @CC_COLUMN_NAME_LAST_UPDATED_AT
-        @") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,DateTime('now'))";
+        @") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,DateTime('now'))";
 
     [queue inDatabase:^(FMDatabase *database) {
         success = [database executeUpdate:sql,
@@ -113,6 +114,7 @@
                     [config hasUrl] ? config.url : @CC_COLUMN_NAME_NULLABLE,
                     [config hasSyncUrl] ? config.syncUrl : @CC_COLUMN_NAME_NULLABLE,
                     [config hasSyncThreshold] ? config.syncThreshold : @CC_COLUMN_NAME_NULLABLE,
+                    [config hasSyncEnabled] ? [NSNumber numberWithBool:[config syncEnabled]] : @CC_COLUMN_NAME_NULLABLE,
                     (httpHeadersString != nil) ? httpHeadersString : @CC_COLUMN_NAME_NULLABLE,
                     [config hasSaveBatteryOnBackground] ? config._saveBatteryOnBackground : @CC_COLUMN_NAME_NULLABLE,
                     [config hasMaxLocations] ? config.maxLocations : @CC_COLUMN_NAME_NULLABLE,
@@ -157,6 +159,7 @@
     @COMMA_SEP @CC_COLUMN_NAME_URL
     @COMMA_SEP @CC_COLUMN_NAME_SYNC_URL
     @COMMA_SEP @CC_COLUMN_NAME_SYNC_THRESHOLD
+    @COMMA_SEP @CC_COLUMN_NAME_SYNC_ENABLED
     @COMMA_SEP @CC_COLUMN_NAME_HEADERS
     @COMMA_SEP @CC_COLUMN_NAME_SAVE_BATTERY
     @COMMA_SEP @CC_COLUMN_NAME_MAX_LOCATIONS
@@ -201,24 +204,28 @@
             if ([self isNonNull:rs columnIndex:21]) {
                 config.syncThreshold = [NSNumber numberWithInt:[rs intForColumnIndex:21]];
             }
-            if ([self isNonNull:rs columnIndex:22]) {
-                NSString *httpHeadersString = [rs stringForColumnIndex:22];
+            id syncEnabledVal = [rs objectForColumnIndex:22];
+            if (syncEnabledVal != nil && syncEnabledVal != [NSNull null]) {
+                config.syncEnabled = [NSNumber numberWithBool:[rs intForColumnIndex:22] == 1 ? YES : NO];
+            }
+            if ([self isNonNull:rs columnIndex:23]) {
+                NSString *httpHeadersString = [rs stringForColumnIndex:23];
                 if (httpHeadersString != nil) {
                     NSData *jsonHttpHeaders = [httpHeadersString dataUsingEncoding:NSUTF8StringEncoding];
                     config.httpHeaders = [NSJSONSerialization JSONObjectWithData:jsonHttpHeaders options:0 error:nil];
                 }
             }
-            if ([self isNonNull:rs columnIndex:23]) {
-                config._saveBatteryOnBackground = [NSNumber numberWithBool:[rs intForColumnIndex:23] == 1 ? YES : NO];
-            }
             if ([self isNonNull:rs columnIndex:24]) {
-                config.maxLocations = [NSNumber numberWithInt:[rs intForColumnIndex:24]];
+                config._saveBatteryOnBackground = [NSNumber numberWithBool:[rs intForColumnIndex:24] == 1 ? YES : NO];
             }
             if ([self isNonNull:rs columnIndex:25]) {
-                config._pauseLocationUpdates = [NSNumber numberWithBool:[rs intForColumnIndex:25] == 1 ? YES : NO];
+                config.maxLocations = [NSNumber numberWithInt:[rs intForColumnIndex:25]];
             }
             if ([self isNonNull:rs columnIndex:26]) {
-                NSString *templateAsString = [rs stringForColumnIndex:26];
+                config._pauseLocationUpdates = [NSNumber numberWithBool:[rs intForColumnIndex:26] == 1 ? YES : NO];
+            }
+            if ([self isNonNull:rs columnIndex:27]) {
+                NSString *templateAsString = [rs stringForColumnIndex:27];
                 if (templateAsString != nil) {
                     NSData *jsonTemplate = [templateAsString dataUsingEncoding:NSUTF8StringEncoding];
                     config._template = [NSJSONSerialization JSONObjectWithData:jsonTemplate options:0 error:nil];

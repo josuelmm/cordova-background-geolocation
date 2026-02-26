@@ -407,14 +407,37 @@ public class BackgroundGeolocationFacade {
      * Force location sync
      *
      * Method is ignoring syncThreshold and also user sync settings preference
-     * and sync locations to defined syncUrl
+     * and sync locations to defined syncUrl. No-op if sync is disabled in config (sync: false).
      */
     public void forceSync() {
+        Config config = getConfig();
+        if (!Boolean.TRUE.equals(config.getSyncEnabled())) {
+            logger.debug("Sync disabled in config, skipping forceSync");
+            return;
+        }
         logger.debug("Sync locations forced");
         ResourceResolver resolver = ResourceResolver.newInstance(getContext());
         Account syncAccount = AccountHelper.CreateSyncAccount(getContext(), resolver.getAccountName(),
                 resolver.getAccountType());
         SyncService.sync(syncAccount, resolver.getAuthority(), true);
+    }
+
+    /**
+     * Returns the number of locations pending to be synced (not yet sent to syncUrl).
+     */
+    public long getPendingSyncCount() {
+        LocationDAO dao = DAOFactory.createLocationDAO(getContext());
+        return dao.getLocationsForSyncCount(Long.MAX_VALUE);
+    }
+
+    /**
+     * Clear the pending sync queue: mark all locations waiting to be synced as deleted.
+     * They will not be sent to syncUrl. Use when the user wants to discard pending locations.
+     */
+    public void clearSync() {
+        LocationDAO dao = DAOFactory.createLocationDAO(getContext());
+        int count = dao.deletePendingSyncLocations();
+        logger.debug("Cleared {} pending sync locations", count);
     }
 
     public int getAuthorizationStatus() {

@@ -460,7 +460,29 @@ FMDBLogger *sqliteLogger;
 
 - (void) forceSync
 {
+    if (![_config syncEnabled]) {
+        DDLogDebug(@"Sync disabled in config, skipping forceSync");
+        return;
+    }
     [postLocationTask sync];
+}
+
+- (void) clearSync
+{
+    MAURSQLiteLocationDAO *locationDAO = [MAURSQLiteLocationDAO sharedInstance];
+    NSError *error = nil;
+    if ([locationDAO deletePendingSyncLocations:&error]) {
+        DDLogDebug(@"Cleared pending sync locations");
+    } else {
+        DDLogError(@"clearSync failed: %@", error.localizedDescription);
+    }
+}
+
+- (NSInteger) getPendingSyncCount
+{
+    MAURSQLiteLocationDAO *locationDAO = [MAURSQLiteLocationDAO sharedInstance];
+    NSNumber *count = [locationDAO getLocationsForSyncCount];
+    return count != nil ? [count integerValue] : 0;
 }
 
 - (void) notify:(NSString*)message

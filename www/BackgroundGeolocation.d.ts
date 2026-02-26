@@ -215,6 +215,33 @@ export interface ConfigureOptions {
   notificationText?: string;
 
   /**
+   * Title shown in the notification while locations are syncing to the server.
+   * Use this (and notificationSyncText, etc.) to localize sync notifications.
+   *
+   * Platform: Android
+   * @default "Syncing locations"
+   */
+  notificationSyncTitle?: string;
+
+  /**
+   * Text shown in the sync notification while upload is in progress.
+   * @default "Sync in progress"
+   */
+  notificationSyncText?: string;
+
+  /**
+   * Text shown when sync completes successfully.
+   * @default "Sync completed"
+   */
+  notificationSyncCompletedText?: string;
+
+  /**
+   * Text shown when sync fails (prefix before " (HTTP …)" or ": error").
+   * @default "Sync failed"
+   */
+  notificationSyncFailedText?: string;
+
+  /**
    * The accent color (hex triplet) to use for notification.
    * Eg. <code>#4CAF50</code>.
    *
@@ -300,6 +327,15 @@ export interface ConfigureOptions {
    * @default 100
    */
   syncThreshold?: number;
+
+  /**
+   * Whether synchronization to syncUrl is enabled (automatic and forceSync).
+   * When false, no sync runs; locations are still stored and can be synced later by setting sync: true.
+   *
+   * Platform: Android, iOS
+   * @default true
+   */
+  sync?: boolean;
 
   /**
    * Optional HTTP headers sent along in HTTP request.
@@ -710,6 +746,7 @@ export interface BackgroundGeolocationPlugin {
   /**
    * Force sync of pending locations.
    * Option <code>syncThreshold</code> will be ignored and all pending locations will be immediately posted to <code>syncUrl</code> in single batch.
+   * No-op if <code>sync</code> is false in config.
    *
    * Platform: Android, iOS
    *
@@ -720,6 +757,34 @@ export interface BackgroundGeolocationPlugin {
     success?: () => void,
     fail?: (error: BackgroundGeolocationError) => void
   ): Promise<void>;
+
+  /**
+   * Clear the pending sync queue: discard all locations waiting to be sent to syncUrl.
+   * They will not be synced. Use when the user wants to discard pending locations.
+   *
+   * Platform: Android, iOS
+   *
+   * @param success
+   * @param fail
+   */
+  clearSync(
+    success?: () => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<void>;
+
+  /**
+   * Get the number of locations pending to be synced (not yet sent to syncUrl).
+   * Use with forceSync() to sync on demand.
+   *
+   * Platform: Android, iOS
+   *
+   * @param success Called with the pending count (number).
+   * @param fail
+   */
+  getPendingSyncCount(
+    success?: (count: number) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<number>;
 
   /**
    * Get stored configuration options.

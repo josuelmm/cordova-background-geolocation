@@ -161,7 +161,31 @@ BackgroundGeolocation.FOREGROUND_MODE
 
 ### 1. Configure
 
-Set your preferred provider, accuracy, intervals, and optional server URL:
+Set your preferred provider, accuracy, intervals, and optional server URLs. All options are optional; you can reconfigure later with a subset (options are merged).
+
+**Main options:**
+
+| Option | Description |
+|--------|-------------|
+| `locationProvider` | `ACTIVITY_PROVIDER`, `DISTANCE_FILTER_PROVIDER`, or `RAW_PROVIDER` |
+| `desiredAccuracy` | `HIGH_ACCURACY`, `MEDIUM_ACCURACY`, `LOW_ACCURACY`, `PASSIVE_ACCURACY` |
+| `distanceFilter` | Minimum metres the device must move before an update (e.g. 50) |
+| `stationaryRadius` | Metres from “stationary” point before aggressive tracking (e.g. 50) |
+| `interval` / `fastestInterval` / `activitiesInterval` | Android timing (ms) |
+| `notificationTitle` / `notificationText` | Android foreground notification text |
+| `url` | Server URL where **each** location is posted immediately (if post fails, it goes to sync queue) |
+| `syncUrl` | Server URL where **pending** locations are sent in batch (when count reaches `syncThreshold` or on `forceSync()`) |
+| `syncThreshold` | Number of pending locations before automatic batch sync (default 100) |
+| `sync` | When `true` (default), automatic sync and `forceSync()` run. When `false`, sync is disabled (locations are still stored). |
+| `httpHeaders` | Headers for every POST (e.g. `{ 'Content-Type': 'application/json', 'Authorization': 'Bearer TOKEN' }`) |
+| `postTemplate` | Object or array of properties to send (use `@latitude`, `@longitude`, etc.). See [Custom post template](docs/api.md#custom-post-template). |
+| `maxLocations` | Max locations kept in DB (default 10000). Should be &gt; `syncThreshold`. |
+
+**Android-only:** `notificationSyncTitle`, `notificationSyncText`, `notificationSyncCompletedText`, `notificationSyncFailedText` — texts shown in the notification while syncing (defaults in English; set for localization). `startForeground`, `notificationsEnabled`, `startOnBoot`, `stopOnTerminate`, `enableWatchdog`.
+
+**iOS-only:** `activityType`, `pauseLocationUpdates`, `saveBatteryOnBackground`.
+
+Example:
 
 ```js
 BackgroundGeolocation.configure({
@@ -176,15 +200,17 @@ BackgroundGeolocation.configure({
   fastestInterval: 5000,
   activitiesInterval: 10000,
   url: 'https://yourserver.com/location',
-  // HTTP headers can be sent in two ways:
-  // 1) Static: set httpHeaders here — same headers on every POST/sync request (e.g. API key, Content-Type).
+  syncUrl: 'https://yourserver.com/location',
+  syncThreshold: 5,
+  sync: true,
   httpHeaders: {
-    'X-FOO': 'bar',
+    'Content-Type': 'application/json',
     'Authorization': 'Bearer YOUR_TOKEN'
   },
   postTemplate: {
     lat: '@latitude',
-    lon: '@longitude'
+    lon: '@longitude',
+    timestamp: '@time'
   }
 });
 ```
@@ -224,7 +250,82 @@ BackgroundGeolocation.on('http_authorization', function () {
 BackgroundGeolocation.stop();
 ```
 
-More options (stationary, activity, start/stop events, headless task) are in the [documentation](https://josuelmm.github.io/cordova-background-geolocation/). For **Angular** (service, methods, events, example), see [Angular (Ionic Angular)](https://josuelmm.github.io/cordova-background-geolocation/angular).
+### 5. Sync queue (syncUrl): pending count, force sync, clear queue
+
+When you use `syncUrl`, locations that fail to post to `url` (or that are only queued for sync) are sent in batch to `syncUrl`. You can:
+
+- **Get pending count** — `getPendingSyncCount()` returns how many locations are waiting to be synced.
+- **Force sync now** — `forceSync()` sends all pending locations immediately (ignores `syncThreshold`). No-op if `sync: false`.
+- **Clear queue** — `clearSync()` discards all pending locations (they will not be sent). Use for a “Clear queue” or “Discard” button.
+
+```js
+// Show "X locations pending" and let user sync or clear
+BackgroundGeolocation.getPendingSyncCount()
+  .then(function (count) {
+    console.log('Pending to sync:', count);
+    // e.g. show UI: "Sync (5)" or "Clear queue"
+  });
+
+// User taps "Sync now"
+BackgroundGeolocation.forceSync().then(function () {
+  console.log('Sync completed');
+});
+
+// User taps "Clear queue"
+BackgroundGeolocation.clearSync().then(function () {
+  console.log('Queue cleared');
+});
+```
+
+### 6. Other methods (summary)
+
+| Method | Description |
+|--------|-------------|
+| `getConfig(success, fail)` | Get current configuration (merged options). |
+| `getLocations(success, fail)` | Get all stored locations. |
+| `getValidLocations(success, fail)` | Get locations not yet posted (valid only). |
+| `deleteLocation(id, success, fail)` | Delete one location by id. |
+| `deleteAllLocations(success, fail)` | Delete all stored locations. |
+| `getCurrentLocation(success, fail, options)` | One-shot location (e.g. timeout, maximumAge). |
+| `getPluginVersion(success, fail)` | Plugin version string (e.g. "3.1.0"). |
+| `checkStatus(success, fail)` | Service status (isRunning, authorization, etc.). |
+| `showAppSettings()` / `openSettings()` | Open app settings. |
+| `showLocationSettings()` | Open system location settings. |
+| `getLogEntries(limit, fromId, minLevel, success, fail)` | Debug log entries. |
+
+All methods return a **Promise** if you omit the `success` / `fail` callbacks.
+
+### 7. Events (summary)
+
+Subscribe with `BackgroundGeolocation.on(eventName, callback)`. Unsubscribe with the returned object’s `remove()` or by calling `removeAllListeners(eventName)`.
+
+| Event | Payload | When |
+|-------|---------|------|
+| `location` | Location object | New location (foreground/background). |
+| `stationary` | Location | Device stopped (activity provider). |
+| `activity` | Activity type | Activity changed (walking, driving, still). |
+| `error` | `{ code, message }` | Error (e.g. permission, timeout). |
+| `start` | — | Tracking started. |
+| `stop` | — | Tracking stopped. |
+| `authorization` | status | Permission status changed. |
+| `background` / `foreground` | — | App entered background/foreground. |
+| `http_authorization` | — | Server returned 401; refresh token and reconfigure headers. |
+| `abort_requested` | — | Server returned 285 (updates not required). |
+
+Full event payloads and options: [Events](docs/events.md). Full API (all options, all methods): [API](docs/api.md).
+
+### New in 3.1.0
+
+- **`getPendingSyncCount()`** — Number of locations pending to be synced. Use with `forceSync()` for “X pending” UI.
+- **`forceSync()`** — Sends all pending locations to `syncUrl` immediately. Promise now resolves correctly on Android.
+- **`clearSync()`** — Clears the pending sync queue (discard without sending).
+- **Config `sync`** (default `true`) — Set `sync: false` to disable automatic sync and `forceSync()`; locations are still stored.
+- **Config `notificationSyncTitle`, `notificationSyncText`, `notificationSyncCompletedText`, `notificationSyncFailedText`** (Android) — Customize or localize the notification shown while syncing.
+- **Sync with `Content-Type: application/x-www-form-urlencoded`** — Batch sync now sends **one POST per location** (same flat format as real-time), so the same server endpoint works for both.
+
+---
+
+More (stationary, activity, headless task, Angular) is in the [documentation](https://josuelmm.github.io/cordova-background-geolocation/). For **Angular** (service, methods, events), see [docs/angular.md](docs/angular.md).
 
 ---
 
@@ -293,8 +394,13 @@ No extra wrapper (e.g. Awesome Cordova Plugins) is required.
 
 ## Documentation and changelog
 
-- [Documentation](https://josuelmm.github.io/cordova-background-geolocation/) (API, options, examples)
-- [CHANGELOG](CHANGELOG.md) for version history
+- **[Documentation](https://josuelmm.github.io/cordova-background-geolocation/)** — Full docs (API, options, examples).
+- **[API reference](docs/api.md)** — All `configure` options, every method (`configure`, `start`, `stop`, `getPendingSyncCount`, `forceSync`, `clearSync`, `getConfig`, `getLocations`, etc.), TypeScript types.
+- **[HTTP posting](docs/http_posting.md)** — `url` vs `syncUrl`, headers, Content-Type (JSON vs form-urlencoded), sync batch behaviour, `getPendingSyncCount` / `forceSync` / `clearSync`.
+- **[Events](docs/events.md)** — All events (`location`, `error`, `stationary`, `activity`, `http_authorization`, etc.) and payloads.
+- **[Angular / Ionic](docs/angular.md)** — Injectable service, module, same API.
+- **[Example](docs/example.md)** — Full example with events and sync.
+- **[CHANGELOG](CHANGELOG.md)** — Version history.
 
 This project is based on [@mauron85/cordova-plugin-background-geolocation](https://github.com/mauron85/cordova-plugin-background-geolocation) and the original by [christocracy](https://github.com/christocracy). Maintained at [josuelmm/cordova-background-geolocation](https://github.com/josuelmm/cordova-background-geolocation). Issues and PRs welcome.
 

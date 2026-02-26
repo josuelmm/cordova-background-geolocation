@@ -42,6 +42,18 @@ public class ConfigMapper {
         if (jObject.has("notificationText")) {
             config.setNotificationText(!jObject.isNull("notificationText") ? jObject.getString("notificationText") : Config.NullString);
         }
+        if (jObject.has("notificationSyncTitle")) {
+            config.setNotificationSyncTitle(jObject.isNull("notificationSyncTitle") ? null : jObject.getString("notificationSyncTitle"));
+        }
+        if (jObject.has("notificationSyncText")) {
+            config.setNotificationSyncText(jObject.isNull("notificationSyncText") ? null : jObject.getString("notificationSyncText"));
+        }
+        if (jObject.has("notificationSyncCompletedText")) {
+            config.setNotificationSyncCompletedText(jObject.isNull("notificationSyncCompletedText") ? null : jObject.getString("notificationSyncCompletedText"));
+        }
+        if (jObject.has("notificationSyncFailedText")) {
+            config.setNotificationSyncFailedText(jObject.isNull("notificationSyncFailedText") ? null : jObject.getString("notificationSyncFailedText"));
+        }
         if (jObject.has("stopOnTerminate")) {
             config.setStopOnTerminate(jObject.getBoolean("stopOnTerminate"));
         }
@@ -84,6 +96,9 @@ public class ConfigMapper {
         if (jObject.has("syncThreshold")) {
             config.setSyncThreshold(jObject.getInt("syncThreshold"));
         }
+        if (jObject.has("sync")) {
+            config.setSyncEnabled(jObject.getBoolean("sync"));
+        }
         if (jObject.has("httpHeaders")) {
             config.setHttpHeaders(jObject.getJSONObject("httpHeaders"));
         }
@@ -114,6 +129,10 @@ public class ConfigMapper {
         json.put("notificationsEnabled", config.getNotificationsEnabled());
         json.put("notificationTitle", config.getNotificationTitle() != Config.NullString ? config.getNotificationTitle() : JSONObject.NULL);
         json.put("notificationText", config.getNotificationText() != Config.NullString ? config.getNotificationText() : JSONObject.NULL);
+        json.put("notificationSyncTitle", config.getNotificationSyncTitle());
+        json.put("notificationSyncText", config.getNotificationSyncText());
+        json.put("notificationSyncCompletedText", config.getNotificationSyncCompletedText());
+        json.put("notificationSyncFailedText", config.getNotificationSyncFailedText());
         json.put("notificationIconLarge", config.getLargeNotificationIcon() != Config.NullString ? config.getLargeNotificationIcon() : JSONObject.NULL);
         json.put("notificationIconSmall", config.getSmallNotificationIcon() != Config.NullString ? config.getSmallNotificationIcon() : JSONObject.NULL);
         json.put("notificationIconColor", config.getNotificationIconColor() != Config.NullString ? config.getNotificationIconColor() : JSONObject.NULL);
@@ -128,6 +147,7 @@ public class ConfigMapper {
         json.put("url", config.getUrl() != Config.NullString ? config.getUrl() : JSONObject.NULL);
         json.put("syncUrl", config.getSyncUrl() != Config.NullString  ? config.getSyncUrl() : JSONObject.NULL);
         json.put("syncThreshold", config.getSyncThreshold());
+        json.put("sync", config.getSyncEnabled());
         json.put("httpHeaders", new JSONObject(config.getHttpHeaders()));
         json.put("maxLocations", config.getMaxLocations());
         json.put("enableWatchdog", Boolean.TRUE.equals(config.getEnableWatchdog()));

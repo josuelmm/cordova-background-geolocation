@@ -34,6 +34,10 @@ public class ConfigMapperTest {
         Assert.assertEquals(config.isDebugging().booleanValue(), jConfig.getBoolean("debug"));
         Assert.assertEquals(config.getNotificationTitle(), jConfig.getString("notificationTitle"));
         Assert.assertEquals(config.getNotificationText(), jConfig.getString("notificationText"));
+        Assert.assertEquals(config.getNotificationSyncTitle(), jConfig.getString("notificationSyncTitle"));
+        Assert.assertEquals(config.getNotificationSyncText(), jConfig.getString("notificationSyncText"));
+        Assert.assertEquals(config.getNotificationSyncCompletedText(), jConfig.getString("notificationSyncCompletedText"));
+        Assert.assertEquals(config.getNotificationSyncFailedText(), jConfig.getString("notificationSyncFailedText"));
         Assert.assertEquals(config.getStopOnTerminate().booleanValue(), jConfig.getBoolean("stopOnTerminate"));
         Assert.assertEquals(config.getStartOnBoot().booleanValue(), jConfig.getBoolean("startOnBoot"));
         Assert.assertEquals(config.getLocationProvider().intValue(), jConfig.getInt("locationProvider"));
@@ -48,6 +52,7 @@ public class ConfigMapperTest {
         Assert.assertEquals(config.getUrl(), jConfig.getString("url"));
         Assert.assertEquals(config.getSyncUrl(), jConfig.getString("syncUrl"));
         Assert.assertEquals(config.getSyncThreshold().intValue(), jConfig.getInt("syncThreshold"));
+        Assert.assertEquals(Boolean.TRUE.equals(config.getSyncEnabled()), jConfig.getBoolean("sync"));
         Assert.assertEquals(new JSONObject(config.getHttpHeaders()).toString(), jConfig.getJSONObject("httpHeaders").toString());
         Assert.assertEquals(config.getMaxLocations().intValue(), jConfig.getInt("maxLocations"));
         Assert.assertEquals(LocationTemplateFactory.getDefault().toString(), jConfig.get("postTemplate").toString());
@@ -88,6 +93,13 @@ public class ConfigMapperTest {
 
         Assert.assertEquals(Config.NullString, config.getSmallNotificationIcon());
         Assert.assertFalse(config.hasSmallNotificationIcon());
+    }
+
+    /** When "sync" is not in JSON, getSyncEnabled() must return true (default). */
+    @Test
+    public void testSyncDefaultWhenNotInJson() throws JSONException {
+        Config config = ConfigMapper.fromJSONObject(new JSONObject());
+        Assert.assertTrue("sync not in JSON should default to true", config.getSyncEnabled());
     }
 
     @Test
