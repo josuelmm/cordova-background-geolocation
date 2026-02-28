@@ -2,7 +2,7 @@
 <plugin xmlns="http://www.phonegap.com/ns/plugins/1.0"
     xmlns:android="http://schemas.android.com/apk/res/android"
     id="cordova-background-geolocation"
-    version="3.1.1">
+    version="3.2.0">
     <name>cordova-background-geolocation</name>
     <description>Cordova Background Geolocation Plugin</description>
     <license>Apache-2.0</license>
@@ -62,6 +62,7 @@
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/DAOFactory.java" target-dir="src/com/marianhello/bgloc/data" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/HashMapLocationTemplate.java" target-dir="src/com/marianhello/bgloc/data" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/LocationDAO.java" target-dir="src/com/marianhello/bgloc/data" />
+        <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/SessionLocationDAO.java" target-dir="src/com/marianhello/bgloc/data" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/LocationTemplateFactory.java" target-dir="src/com/marianhello/bgloc/data" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/LocationTemplate.java" target-dir="src/com/marianhello/bgloc/data" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/LocationTransform.java" target-dir="src/com/marianhello/bgloc/data" />
@@ -70,7 +71,9 @@
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/sqlite/SQLiteConfigurationContract.java" target-dir="src/com/marianhello/bgloc/data/sqlite" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/sqlite/SQLiteConfigurationDAO.java" target-dir="src/com/marianhello/bgloc/data/sqlite" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/sqlite/SQLiteLocationContract.java" target-dir="src/com/marianhello/bgloc/data/sqlite" />
+        <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/sqlite/SQLiteSessionContract.java" target-dir="src/com/marianhello/bgloc/data/sqlite" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/sqlite/SQLiteLocationDAO.java" target-dir="src/com/marianhello/bgloc/data/sqlite" />
+        <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/sqlite/SQLiteSessionLocationDAO.java" target-dir="src/com/marianhello/bgloc/data/sqlite" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/data/sqlite/SQLiteOpenHelper.java" target-dir="src/com/marianhello/bgloc/data/sqlite" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/headless/AbstractTaskRunner.java" target-dir="src/com/marianhello/bgloc/headless" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/headless/ActivityTask.java" target-dir="src/com/marianhello/bgloc/headless" />
@@ -313,6 +316,8 @@
         <source-file src="ios/common/BackgroundGeolocation/MAURLocation.m" />
         <header-file src="ios/common/BackgroundGeolocation/MAURLocationContract.h" />
         <source-file src="ios/common/BackgroundGeolocation/MAURLocationContract.m" />
+        <header-file src="ios/common/BackgroundGeolocation/MAURSessionLocationContract.h" />
+        <source-file src="ios/common/BackgroundGeolocation/MAURSessionLocationContract.m" />
         <header-file src="ios/common/BackgroundGeolocation/MAURLocationManager.h" />
         <source-file src="ios/common/BackgroundGeolocation/MAURLocationManager.m" />
         <header-file src="ios/common/BackgroundGeolocation/MAURLogReader.h" />
@@ -329,6 +334,8 @@
         <source-file src="ios/common/BackgroundGeolocation/MAURSQLiteHelper.m" />
         <header-file src="ios/common/BackgroundGeolocation/MAURSQLiteLocationDAO.h" />
         <source-file src="ios/common/BackgroundGeolocation/MAURSQLiteLocationDAO.m" />
+        <header-file src="ios/common/BackgroundGeolocation/MAURSessionLocationDAO.h" />
+        <source-file src="ios/common/BackgroundGeolocation/MAURSessionLocationDAO.m" />
         <header-file src="ios/common/BackgroundGeolocation/MAURSQLiteOpenHelper.h" />
         <source-file src="ios/common/BackgroundGeolocation/MAURSQLiteOpenHelper.m" />
         <header-file src="ios/common/BackgroundGeolocation/MAURUncaughtExceptionLogger.h" />

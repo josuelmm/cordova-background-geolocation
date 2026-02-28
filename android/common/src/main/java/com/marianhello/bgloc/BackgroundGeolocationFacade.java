@@ -26,11 +26,13 @@ import com.marianhello.bgloc.data.BackgroundLocation;
 import com.marianhello.bgloc.data.ConfigurationDAO;
 import com.marianhello.bgloc.data.DAOFactory;
 import com.marianhello.bgloc.data.LocationDAO;
+import com.marianhello.bgloc.data.SessionLocationDAO;
 import com.marianhello.bgloc.provider.LocationProvider;
 import com.marianhello.bgloc.service.LocationService;
 import com.marianhello.bgloc.service.LocationServiceImpl;
 import com.marianhello.bgloc.service.LocationServiceProxy;
 import com.marianhello.bgloc.data.LocationTransform;
+import com.marianhello.bgloc.data.sqlite.SQLiteSessionLocationDAO;
 import com.marianhello.bgloc.sync.AccountHelper;
 import com.marianhello.bgloc.sync.NotificationHelper;
 import com.marianhello.bgloc.sync.SyncService;
@@ -292,6 +294,30 @@ public class BackgroundGeolocationFacade {
     public Collection<BackgroundLocation> getValidLocationsAndDelete() {
         LocationDAO dao = DAOFactory.createLocationDAO(getContext());
         return dao.getValidLocationsAndDelete();
+    }
+
+    /** Clear session table and start storing all new locations in session. Call when user starts a route. */
+    public void startSession() {
+        SessionLocationDAO dao = new SQLiteSessionLocationDAO(getContext());
+        dao.startSession();
+    }
+
+    /** Return all locations stored in the current session (ordered by time). */
+    public Collection<BackgroundLocation> getSessionLocations() {
+        SessionLocationDAO dao = new SQLiteSessionLocationDAO(getContext());
+        return dao.getSessionLocations();
+    }
+
+    /** Clear session table and stop storing. Call when route is finished and sync OK. */
+    public void clearSession() {
+        SessionLocationDAO dao = new SQLiteSessionLocationDAO(getContext());
+        dao.clearSession();
+    }
+
+    /** Number of locations in the current session. */
+    public int getSessionLocationsCount() {
+        SessionLocationDAO dao = new SQLiteSessionLocationDAO(getContext());
+        return dao.getSessionLocationsCount();
     }
 
     public BackgroundLocation getStationaryLocation() {

@@ -49,7 +49,9 @@ import com.marianhello.bgloc.data.BackgroundLocation;
 import com.marianhello.bgloc.data.ConfigurationDAO;
 import com.marianhello.bgloc.data.DAOFactory;
 import com.marianhello.bgloc.data.LocationDAO;
+import com.marianhello.bgloc.data.SessionLocationDAO;
 import com.marianhello.bgloc.data.LocationTransform;
+import com.marianhello.bgloc.data.sqlite.SQLiteSessionLocationDAO;
 import com.marianhello.bgloc.headless.AbstractTaskRunner;
 import com.marianhello.bgloc.headless.ActivityTask;
 import com.marianhello.bgloc.headless.LocationTask;
@@ -125,6 +127,7 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     private HandlerThread mHandlerThread;
     private ServiceHandler mServiceHandler;
     private LocationDAO mLocationDAO;
+    private SessionLocationDAO mSessionDAO;
     private PostLocationTask mPostLocationTask;
     private String mHeadlessTaskRunnerClass;
     private TaskRunner mHeadlessTaskRunner;
@@ -255,8 +258,9 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         ContentResolver.setSyncAutomatically(mSyncAccount, authority, true);
 
         mLocationDAO = DAOFactory.createLocationDAO(this);
+        mSessionDAO = new SQLiteSessionLocationDAO(this);
 
-        mPostLocationTask = new PostLocationTask(mLocationDAO,
+        mPostLocationTask = new PostLocationTask(mLocationDAO, mSessionDAO,
                 new PostLocationTask.PostLocationTaskListener() {
                     @Override
                     public void onRequestedAbortUpdates() {

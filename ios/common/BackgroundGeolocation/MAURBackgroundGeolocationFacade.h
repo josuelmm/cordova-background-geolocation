@@ -44,6 +44,10 @@
 - (void) forceSync;
 - (void) clearSync;
 - (NSInteger) getPendingSyncCount;
+- (void) startSession;
+- (NSArray<MAURLocation*>*) getSessionLocations;
+- (void) clearSession;
+- (NSInteger) getSessionLocationsCount;
 - (void) onAppTerminate;
 
 

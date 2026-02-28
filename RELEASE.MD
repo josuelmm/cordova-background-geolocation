@@ -1,7 +1,7 @@
 In order to release a version the following actions are needed:
 
 1. **Version and docs**
-   - Set the new version (e.g. `3.1.1`) in:
+   - Set the new version (e.g. `3.2.0`) in:
      - `package.json` (`version` field)
      - `plugin.xml` (root `<plugin>` attribute `version`)
    - Add a release entry in `CHANGELOG.md` (date, Added/Fixed/Changed/Documentation).
@@ -12,5 +12,5 @@ In order to release a version the following actions are needed:
 
 3. **Git tag and release**
    - Go to [Releases → Create a new release](https://github.com/josuelmm/cordova-background-geolocation/releases/new).
-   - Create a tag with the version name (e.g. `v3.1.1`).
+   - Create a tag with the version name (e.g. `v3.2.0`).
    - Publish the release. GitHub Actions will publish the package to npm.

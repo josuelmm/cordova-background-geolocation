@@ -8,6 +8,7 @@ import android.util.Log;
 
 import com.marianhello.bgloc.data.sqlite.SQLiteLocationContract.LocationEntry;
 import com.marianhello.bgloc.data.sqlite.SQLiteConfigurationContract.ConfigurationEntry;
+import com.marianhello.bgloc.data.sqlite.SQLiteSessionContract.SessionEntry;
 
 import java.util.ArrayList;
 
@@ -21,7 +22,7 @@ import static com.marianhello.bgloc.data.sqlite.SQLiteLocationContract.LocationE
 public class SQLiteOpenHelper extends android.database.sqlite.SQLiteOpenHelper {
     private static final String TAG = SQLiteOpenHelper.class.getName();
     public static final String SQLITE_DATABASE_NAME = "cordova_bg_geolocation.db";
-    public static final int DATABASE_VERSION = 19;
+    public static final int DATABASE_VERSION = 20;
 
     public static final String TEXT_TYPE = " TEXT";
     public static final String INTEGER_TYPE = " INTEGER";
@@ -66,6 +67,8 @@ public class SQLiteOpenHelper extends android.database.sqlite.SQLiteOpenHelper {
         execAndLogSql(db, SQL_CREATE_CONFIG_TABLE);
         execAndLogSql(db, SQL_CREATE_LOCATION_TABLE_TIME_IDX);
         execAndLogSql(db, SQL_CREATE_LOCATION_TABLE_BATCH_ID_IDX);
+        execAndLogSql(db, SessionEntry.SQL_CREATE_SESSION_TABLE);
+        execAndLogSql(db, SessionEntry.SQL_CREATE_SESSION_TABLE_TIME_IDX);
     }
 
     @Override
@@ -137,6 +140,9 @@ public class SQLiteOpenHelper extends android.database.sqlite.SQLiteOpenHelper {
                         " ADD COLUMN " + ConfigurationEntry.COLUMN_NAME_SHOW_TIME + INTEGER_TYPE);
                 alterSql.add("ALTER TABLE " + ConfigurationEntry.TABLE_NAME +
                         " ADD COLUMN " + ConfigurationEntry.COLUMN_NAME_SHOW_DISTANCE + INTEGER_TYPE);
+            case 19:
+                alterSql.add(SessionEntry.SQL_CREATE_SESSION_TABLE);
+                alterSql.add(SessionEntry.SQL_CREATE_SESSION_TABLE_TIME_IDX);
 
                 break; // DO NOT FORGET TO MOVE DOWN BREAK ON DB UPGRADE!!!
             default:
@@ -154,6 +160,7 @@ public class SQLiteOpenHelper extends android.database.sqlite.SQLiteOpenHelper {
         // we don't support db downgrade yet, instead we drop table and start over
         execAndLogSql(db, SQL_DROP_LOCATION_TABLE);
         execAndLogSql(db, SQL_DROP_CONFIG_TABLE);
+        execAndLogSql(db, SessionEntry.SQL_DROP_SESSION_TABLE);
         onCreate(db);
     }
 

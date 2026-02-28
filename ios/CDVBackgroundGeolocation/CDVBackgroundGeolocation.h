@@ -37,6 +37,10 @@
 - (void) forceSync:(CDVInvokedUrlCommand*)command;
 - (void) clearSync:(CDVInvokedUrlCommand*)command;
 - (void) getPendingSyncCount:(CDVInvokedUrlCommand*)command;
+- (void) startSession:(CDVInvokedUrlCommand*)command;
+- (void) getSessionLocations:(CDVInvokedUrlCommand*)command;
+- (void) clearSession:(CDVInvokedUrlCommand*)command;
+- (void) getSessionLocationsCount:(CDVInvokedUrlCommand*)command;
 - (void) addEventListener:(CDVInvokedUrlCommand*)command;
 - (void) removeEventListener:(CDVInvokedUrlCommand*)command;
 

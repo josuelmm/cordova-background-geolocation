@@ -86,6 +86,8 @@ You can choose from three location providers:
 
 When `url` is set, each location is posted immediately. When `syncUrl` is set, locations that fail to post (or that are only queued for sync) are sent in batch when their count reaches `syncThreshold`, or when you call **`forceSync()`**. You can get the pending count with **`getPendingSyncCount()`** and discard the queue with **`clearSync()`**. Set **`sync: false`** in config to disable automatic and manual sync (locations are still stored). See [HTTP Location Posting](http_posting) for headers, Content-Type (JSON vs form-urlencoded), and [API](api) for `forceSync`, `clearSync`, `getPendingSyncCount`.
 
+**Route/session (restore without internet):** From v3.2.0 you can use **`startSession()`** when the user starts a route, **`getSessionLocations()`** to get all points (e.g. when reopening without internet to redraw the track), **`clearSession()`** when the route is finished and sync OK, and **`getSessionLocationsCount()`** to show how many points are in the session. See [API](api) for details.
+
 ## Compilation
 
 ### Compatibility

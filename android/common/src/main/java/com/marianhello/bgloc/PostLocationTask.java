@@ -2,6 +2,7 @@ package com.marianhello.bgloc;
 
 import com.marianhello.bgloc.data.BackgroundLocation;
 import com.marianhello.bgloc.data.LocationDAO;
+import com.marianhello.bgloc.data.SessionLocationDAO;
 import com.marianhello.logging.LoggerManager;
 
 import org.json.JSONArray;
@@ -29,6 +30,7 @@ import java.util.concurrent.TimeUnit;
  */
 public class PostLocationTask {
     private final LocationDAO mLocationDAO;
+    private final SessionLocationDAO mSessionDAO;
     private final PostLocationTaskListener mTaskListener;
     private final ConnectivityListener mConnectivityListener;
 
@@ -48,10 +50,17 @@ public class PostLocationTask {
 
     public PostLocationTask(LocationDAO dao, PostLocationTaskListener taskListener,
                             ConnectivityListener connectivityListener) {
+        this(dao, null, taskListener, connectivityListener);
+    }
+
+    public PostLocationTask(LocationDAO dao, SessionLocationDAO sessionDAO,
+                            PostLocationTaskListener taskListener,
+                            ConnectivityListener connectivityListener) {
         logger = LoggerManager.getLogger(PostLocationTask.class);
         logger.info("Creating PostLocationTask");
 
         mLocationDAO = dao;
+        mSessionDAO = sessionDAO;
         mTaskListener = taskListener;
         mConnectivityListener = connectivityListener;
 
@@ -83,6 +92,10 @@ public class PostLocationTask {
 
         long locationId = mLocationDAO.persistLocation(location);
         location.setLocationId(locationId);
+
+        if (mSessionDAO != null && mSessionDAO.isSessionActive()) {
+            mSessionDAO.persistSessionLocation(location);
+        }
 
         try {
             mExecutor.execute(new Runnable() {

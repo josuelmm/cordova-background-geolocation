@@ -2,6 +2,12 @@
 
 **for cordova-plugin-background-geolocation**
 
+## [3.2.0] - 2026-02-28
+
+### Added
+
+- **Session API (route/recording):** `startSession()`, `getSessionLocations()`, `clearSession()`, `getSessionLocationsCount()`. Separate session table (Android DB v20, iOS DB v5) so the app can restore the full route when reopening without internet. Session is cleared on `startSession()` and `clearSession()`; not cleared when sync succeeds.
+
 ## [3.1.0] - 2019-09-24
 
 ### Fixed

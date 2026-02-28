@@ -1,5 +1,34 @@
 # Changelog
 
+## [3.2.0](https://github.com/josuelmm/cordova-background-geolocation/tree/3.2.0) (2026-02-28)
+
+### Added
+
+- **Session API for route/recording** — Lets the app keep a full copy of all locations for the *current recording session* in the plugin, independent of the sync queue. When the user reopens the app without internet, the app can restore the entire route from the plugin (no need to rely on `localStorage` for points).
+  - **`startSession(success?, fail?)`** — Call when the user starts a route (e.g. "Start" button). Clears the session table and from then on every new location is also stored in the session table. Session data is **not** removed when locations are synced to the server.
+  - **`getSessionLocations(success?, fail?)`** — Returns all locations currently in the session table, ordered by time. Same format as `Location` (latitude, longitude, time, speed, altitude, bearing, accuracy, etc.). Use when reopening without internet to rebuild the track.
+  - **`clearSession(success?, fail?)`** — Call when the route is finished and sync has succeeded. Clears the session table so the next `startSession()` starts clean.
+  - **`getSessionLocationsCount(success?, fail?)`** — Returns the number of locations in the session (e.g. to show "X points" without loading all).
+- **Android:** New table `location_session` (DB version 20), `SessionLocationDAO`, and persistence from `PostLocationTask` when session is active. Session state stored in `SharedPreferences`.
+- **iOS:** New table `location_session` (DB version 5), `MAURSessionLocationDAO` (singleton), and persistence from `MAURPostLocationTask` when session is active. Session state stored in `NSUserDefaults`.
+- **JS / TypeScript:** The four session methods are available on the global plugin and in the `.d.ts`. **Angular:** `BackgroundGeolocationService` exposes `startSession`, `getSessionLocations`, `clearSession`, `getSessionLocationsCount`.
+
+### Documentation
+
+- **README.md** — New section *"New in 3.2.0"* describing the session API and typical flow (start route → startSession; reopen without internet → getSessionLocations; finish route → clearSession).
+- **docs/api.md** — Quick reference and full sections for `startSession`, `getSessionLocations`, `clearSession`, `getSessionLocationsCount`.
+- **docs/angular.md** — Session methods added to the methods table.
+- **docs/index.md** — Mention of session/route restore without internet.
+- **CHANGELOG.md** — This entry. **HISTORY.md** — 3.2.0 session methods. **RELEASE.MD** — Version example updated.
+
+### Changed
+
+- Version bump to 3.2.0.
+
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/3.1.1...3.2.0)
+
+---
+
 ## [3.1.1](https://github.com/josuelmm/cordova-background-geolocation/tree/3.1.1) (2026-02-27)
 
 ### Added

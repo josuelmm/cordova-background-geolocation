@@ -805,6 +805,48 @@ export interface BackgroundGeolocationPlugin {
   ): Promise<number>;
 
   /**
+   * Start recording session: clear session table and store all new locations in it.
+   * Call when user starts a route. Session locations are independent of sync (not cleared when sync succeeds).
+   *
+   * Platform: Android, iOS
+   */
+  startSession(
+    success?: () => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<void>;
+
+  /**
+   * Return all locations stored in the current session (ordered by time).
+   * Same format as Location (latitude, longitude, time, speed, altitude, bearing, accuracy).
+   *
+   * Platform: Android, iOS
+   */
+  getSessionLocations(
+    success?: (locations: Location[]) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<Location[]>;
+
+  /**
+   * Clear the session table and stop storing. Call when route is finished and sync OK.
+   *
+   * Platform: Android, iOS
+   */
+  clearSession(
+    success?: () => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<void>;
+
+  /**
+   * Get the number of locations in the current session.
+   *
+   * Platform: Android, iOS
+   */
+  getSessionLocationsCount(
+    success?: (count: number) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<number>;
+
+  /**
    * Get stored configuration options.
    *
    * @param success

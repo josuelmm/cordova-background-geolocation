@@ -233,6 +233,30 @@ var BackgroundGeolocation = {
       'getPendingSyncCount');
   },
 
+  startSession: function (success, failure) {
+    return execWithPromise(success,
+      failure,
+      'startSession');
+  },
+
+  getSessionLocations: function (success, failure) {
+    return execWithPromise(success,
+      failure,
+      'getSessionLocations');
+  },
+
+  clearSession: function (success, failure) {
+    return execWithPromise(success,
+      failure,
+      'clearSession');
+  },
+
+  getSessionLocationsCount: function (success, failure) {
+    return execWithPromise(success,
+      failure,
+      'getSessionLocationsCount');
+  },
+
   on: function (event, callbackFn) {
     assert(this.events.indexOf(event) > -1, [TAG, '#on unknown event "' + event + '"']);
     if (!callbackFn) {

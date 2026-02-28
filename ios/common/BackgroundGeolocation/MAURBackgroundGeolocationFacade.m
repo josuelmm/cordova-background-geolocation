@@ -17,6 +17,7 @@
 #import "MAURPostLocationTask.h"
 #import "MAURSQLiteConfigurationDAO.h"
 #import "MAURSQLiteLocationDAO.h"
+#import "MAURSessionLocationDAO.h"
 #import "MAURBackgroundTaskManager.h"
 #import "MAURLogging.h"
 #import "FMDBLogger.h"
@@ -356,6 +357,26 @@ FMDBLogger *sqliteLogger;
 {
     MAURSQLiteLocationDAO* locationDAO = [MAURSQLiteLocationDAO sharedInstance];
     return [locationDAO getLocationsForSync];
+}
+
+- (void) startSession
+{
+    [[MAURSessionLocationDAO sharedInstance] startSession];
+}
+
+- (NSArray<MAURLocation*>*) getSessionLocations
+{
+    return [[MAURSessionLocationDAO sharedInstance] getSessionLocations];
+}
+
+- (void) clearSession
+{
+    [[MAURSessionLocationDAO sharedInstance] clearSession];
+}
+
+- (NSInteger) getSessionLocationsCount
+{
+    return [[MAURSessionLocationDAO sharedInstance] getSessionLocationsCount];
 }
 
 - (BOOL) deleteLocation:(NSNumber*)locationId error:(NSError * __autoreleasing *)outError

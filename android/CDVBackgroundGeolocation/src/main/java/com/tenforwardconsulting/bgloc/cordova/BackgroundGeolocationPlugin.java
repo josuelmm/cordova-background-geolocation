@@ -73,10 +73,14 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     public static final String ACTION_FORCE_SYNC = "forceSync";
     public static final String ACTION_CLEAR_SYNC = "clearSync";
     public static final String ACTION_GET_PENDING_SYNC_COUNT = "getPendingSyncCount";
+    public static final String ACTION_START_SESSION = "startSession";
+    public static final String ACTION_GET_SESSION_LOCATIONS = "getSessionLocations";
+    public static final String ACTION_CLEAR_SESSION = "clearSession";
+    public static final String ACTION_GET_SESSION_LOCATIONS_COUNT = "getSessionLocationsCount";
     public static final String ACTION_GET_PLUGIN_VERSION = "getPluginVersion";
 
     /** Plugin version; keep in sync with plugin.xml. */
-    public static final String PLUGIN_VERSION = "3.1.0";
+    public static final String PLUGIN_VERSION = "3.2.0";
 
     private BackgroundGeolocationFacade facade;
 
@@ -399,6 +403,49 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
                 }
             });
             return true;
+        } else if (ACTION_START_SESSION.equals(action)) {
+            runOnWebViewThread(new Runnable() {
+                @Override
+                public void run() {
+                    facade.startSession();
+                    callbackContext.success();
+                }
+            });
+            return true;
+        } else if (ACTION_GET_SESSION_LOCATIONS.equals(action)) {
+            runOnWebViewThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        callbackContext.success(getSessionLocations());
+                    } catch (JSONException e) {
+                        callbackContext.sendPluginResult(ErrorPluginResult.from("getSessionLocations failed", e, PluginException.JSON_ERROR));
+                    }
+                }
+            });
+            return true;
+        } else if (ACTION_CLEAR_SESSION.equals(action)) {
+            runOnWebViewThread(new Runnable() {
+                @Override
+                public void run() {
+                    facade.clearSession();
+                    callbackContext.success();
+                }
+            });
+            return true;
+        } else if (ACTION_GET_SESSION_LOCATIONS_COUNT.equals(action)) {
+            runOnWebViewThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        int count = facade.getSessionLocationsCount();
+                        callbackContext.success(count);
+                    } catch (Exception e) {
+                        callbackContext.sendPluginResult(ErrorPluginResult.from("getSessionLocationsCount failed", e, PluginException.SERVICE_ERROR));
+                    }
+                }
+            });
+            return true;
         } else if (ACTION_GET_PLUGIN_VERSION.equals(action)) {
             callbackContext.success(PLUGIN_VERSION);
             return true;
@@ -551,6 +598,15 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     private JSONArray getValidLocationsAndDelete() throws JSONException {
         JSONArray jsonLocationsArray = new JSONArray();
         Collection<BackgroundLocation> locations = facade.getValidLocationsAndDelete();
+        for (BackgroundLocation location : locations) {
+            jsonLocationsArray.put(location.toJSONObjectWithId());
+        }
+        return jsonLocationsArray;
+    }
+
+    private JSONArray getSessionLocations() throws JSONException {
+        JSONArray jsonLocationsArray = new JSONArray();
+        Collection<BackgroundLocation> locations = facade.getSessionLocations();
         for (BackgroundLocation location : locations) {
             jsonLocationsArray.put(location.toJSONObjectWithId());
         }

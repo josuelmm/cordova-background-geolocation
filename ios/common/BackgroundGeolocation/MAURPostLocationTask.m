@@ -14,6 +14,7 @@
 #import "MAURLogging.h"
 #import "MAURPostLocationTask.h"
 #import "MAURSQLiteLocationDAO.h"
+#import "MAURSessionLocationDAO.h"
 
 static NSString * const TAG = @"MAURPostLocationTask";
 
@@ -91,6 +92,10 @@ static MAURLocationTransform s_locationTransform = nil;
         MAURSQLiteLocationDAO *locationDAO = [MAURSQLiteLocationDAO sharedInstance];
         // TODO: investigate location id always 0
         NSNumber *locationId = [locationDAO persistLocation:location limitRows:self.config.maxLocations.integerValue];
+        
+        if ([[MAURSessionLocationDAO sharedInstance] isSessionActive]) {
+            [[MAURSessionLocationDAO sharedInstance] persistSessionLocation:location];
+        }
         
         if (hasConnectivity && [self.config hasValidUrl]) {
             NSError *error = nil;

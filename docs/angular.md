@@ -110,6 +110,10 @@ The service exposes the same methods as the global plugin. All methods that acce
 | `forceSync(success?, fail?)` | `Promise<void>` | Force sync of pending locations to `syncUrl`. No-op if `sync: false`. |
 | `clearSync(success?, fail?)` | `Promise<void>` | Clear the pending sync queue (discard locations waiting to be sent to `syncUrl`). |
 | `getPendingSyncCount(success?, fail?)` | `Promise<number>` | Number of locations pending to be synced. Use with `forceSync` / `clearSync` for sync UI. |
+| `startSession(success?, fail?)` | `Promise<void>` | Start session: clear session table and store all new locations until `clearSession()`. |
+| `getSessionLocations(success?, fail?)` | `Promise<Location[]>` | All locations in current session (restore route when reopening without internet). |
+| `clearSession(success?, fail?)` | `Promise<void>` | Clear session table (call when route finished and sync OK). |
+| `getSessionLocationsCount(success?, fail?)` | `Promise<number>` | Number of locations in current session. |
 | `getConfig(success?, fail?)` | `Promise<ConfigureOptions>` | Current configuration. |
 | `getLogEntries(limit, fromId, minLevel, success?, fail?)` | `Promise<LogEntry[]>` | Debug log entries. |
 | `removeAllListeners(event?)` | `void` | Unregister listeners (one event or all). |

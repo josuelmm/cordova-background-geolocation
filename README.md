@@ -316,11 +316,15 @@ More on sync (headers, retries, postTemplate): [HTTP posting](docs/http_posting.
 | `deleteLocation(id, success, fail)` | Delete one location by id. |
 | `deleteAllLocations(success, fail)` | Delete all stored locations. |
 | `getCurrentLocation(success, fail, options)` | One-shot location (e.g. timeout, maximumAge). |
-| `getPluginVersion(success, fail)` | Plugin version string (e.g. "3.1.1"). |
+| `getPluginVersion(success, fail)` | Plugin version string (e.g. "3.2.0"). |
 | `checkStatus(success, fail)` | Service status (isRunning, authorization, etc.). |
 | `showAppSettings()` / `openSettings()` | Open app settings. |
 | `showLocationSettings()` | Open system location settings. |
 | `getLogEntries(limit, fromId, minLevel, success, fail)` | Debug log entries. |
+| `startSession(success, fail)` | Start session: clear session table and store all new locations until `clearSession()`. |
+| `getSessionLocations(success, fail)` | All locations in current session (restore route when reopening without internet). |
+| `clearSession(success, fail)` | Clear session table (call when route finished and sync OK). |
+| `getSessionLocationsCount(success, fail)` | Number of locations in current session. |
 
 All methods return a **Promise** if you omit the `success` / `fail` callbacks.
 
@@ -342,6 +346,15 @@ Subscribe with `BackgroundGeolocation.on(eventName, callback)`. Unsubscribe with
 | `abort_requested` | — | Server returned 285 (updates not required). |
 
 Full event payloads and options: [Events](docs/events.md). Full API (all options, all methods): [API](docs/api.md).
+
+### New in 3.2.0
+
+- **Session API for route/recording** — Store all locations for the *current route* in the plugin, independent of sync. When the user reopens the app without internet, you can restore the full track from the plugin (no need for `localStorage` for points).
+  - **`startSession()`** — Call when the user starts a route. Clears the session table; from then on every location is also saved in the session table (and not removed when synced).
+  - **`getSessionLocations()`** — Returns all session locations (same format as `Location`: latitude, longitude, time, speed, altitude, bearing, accuracy). Use to rebuild the track after reopening without internet.
+  - **`clearSession()`** — Call when the route is finished and sync succeeded. Clears the session table.
+  - **`getSessionLocationsCount()`** — Returns how many points are in the session (e.g. to show "X points" in the UI).
+- Typical flow: **Start route** → `startSession()` then `start()`. **Reopen without internet** → `getSessionLocations()` and redraw the route. **Finish route and sync OK** → `clearSession()`.
 
 ### New in 3.1.1
 
@@ -435,7 +448,7 @@ This README is the main entry point. For more detail, edge cases and examples us
 
 | Doc | What you’ll find |
 |-----|------------------|
-| **[API reference](docs/api.md)** | Every `configure` option, every method (`configure`, `start`, `stop`, `getPendingSyncCount`, `forceSync`, `clearSync`, `getConfig`, `getLocations`, etc.), TypeScript types. |
+| **[API reference](docs/api.md)** | Every `configure` option, every method (`configure`, `start`, `stop`, `getPendingSyncCount`, `forceSync`, `clearSync`, `startSession`, `getSessionLocations`, `clearSession`, `getSessionLocationsCount`, `getConfig`, `getLocations`, etc.), TypeScript types. |
 | **[HTTP posting](docs/http_posting.md)** | `url` vs `syncUrl`, Content-Type (JSON = one POST with array; form-urlencoded = one POST per location), headers, retries, `postTemplate`, sync behaviour. |
 | **[Events](docs/events.md)** | All events (`location`, `error`, `stationary`, `activity`, `http_authorization`, etc.) and payloads. |
 | **[Angular / Ionic](docs/angular.md)** | Injectable service, module, lazy-loaded modules and token “must be defined”, `ng serve` / browser build. |

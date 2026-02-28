@@ -10,11 +10,12 @@
 #import "MAURGeolocationOpenHelper.h"
 #import "MAURLocationContract.h"
 #import "MAURConfigurationContract.h"
+#import "MAURSessionLocationContract.h"
 
 @implementation MAURGeolocationOpenHelper
 
 static NSString *const kDatabaseName = @"cordova_bg_geolocation.db";
-static NSInteger const kDatabaseVersion = 4;
+static NSInteger const kDatabaseVersion = 5;
 
 - (instancetype)init
 {
@@ -39,7 +40,9 @@ static NSInteger const kDatabaseVersion = 4;
         NSString *sql = [@[
                            [MAURLocationContract createTableSQL],
                            [MAURConfigurationContract createTableSQL],
-                           @"CREATE INDEX recorded_at_idx ON " @LC_TABLE_NAME @" (" @LC_COLUMN_NAME_RECORDED_AT @")"
+                           @"CREATE INDEX recorded_at_idx ON " @LC_TABLE_NAME @" (" @LC_COLUMN_NAME_RECORDED_AT @")",
+                           [MAURSessionLocationContract createTableSQL],
+                           @"CREATE INDEX session_recorded_at_idx ON " @LSC_TABLE_NAME @" (" @LSC_COLUMN_NAME_RECORDED_AT @")"
                            ]  componentsJoinedByString:@";"];
         if (![database executeStatements:sql]) {
             NSLog(@"%@ failed code: %d: message: %@", sql, [database lastErrorCode], [database lastErrorMessage]);
@@ -52,7 +55,8 @@ static NSInteger const kDatabaseVersion = 4;
     NSLog(@"Downgrading geolocation db oldVersion: %ld, newVersion: %ld", oldVersion, newVersion);
 
     NSString *sql = [@[
-         @"DROP TABLE IF EXISTS " @LC_TABLE_NAME
+         @"DROP TABLE IF EXISTS " @LC_TABLE_NAME,
+         @"DROP TABLE IF EXISTS " @LSC_TABLE_NAME
     ] componentsJoinedByString:@";"];
 
     [queue inDatabase:^(FMDatabase *database) {
@@ -84,6 +88,11 @@ static NSInteger const kDatabaseVersion = 4;
         case 3:
             [sql addObjectsFromArray: @[
                 [NSString stringWithFormat:@"ALTER TABLE %s ADD COLUMN %s INTEGER", CC_TABLE_NAME, CC_COLUMN_NAME_SYNC_ENABLED]
+            ]];
+        case 4:
+            [sql addObjectsFromArray: @[
+                [MAURSessionLocationContract createTableSQL],
+                [NSString stringWithFormat:@"CREATE INDEX session_recorded_at_idx ON %@ (%@)", @LSC_TABLE_NAME, @LSC_COLUMN_NAME_RECORDED_AT]
             ]];
             break; // break only for previous db version (cascade statements)
         default:

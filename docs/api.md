@@ -8,7 +8,7 @@ title: API
 
 Note that all methods now return a `Promise` when the `success` and `fail` callbacks are omitted, so you can use `async/await`.
 
-**Quick reference — main methods:** `configure`, `start`, `stop`, `getConfig`, `getCurrentLocation`, `checkStatus`, `getLocations`, `getValidLocations`, `deleteLocation`, `deleteAllLocations`, **`getPendingSyncCount`**, **`forceSync`**, **`clearSync`**, `getPluginVersion`, `showAppSettings`, `openSettings`, `showLocationSettings`, `getLogEntries`, `switchMode` (iOS), `startTask` / `endTask` (iOS), `removeAllListeners`, `on`. For sync queue (`syncUrl`), see [forceSync](#forcesync), [clearSync](#clearsyncsuccess-fail), [getPendingSyncCount](#getpendingsynccountsuccess-fail); for HTTP posting see [HTTP Location Posting](http_posting).
+**Quick reference — main methods:** `configure`, `start`, `stop`, `getConfig`, `getCurrentLocation`, `checkStatus`, `getLocations`, `getValidLocations`, `deleteLocation`, `deleteAllLocations`, **`getPendingSyncCount`**, **`forceSync`**, **`clearSync`**, **`startSession`**, **`getSessionLocations`**, **`clearSession`**, **`getSessionLocationsCount`**, `getPluginVersion`, `showAppSettings`, `openSettings`, `showLocationSettings`, `getLogEntries`, `switchMode` (iOS), `startTask` / `endTask` (iOS), `removeAllListeners`, `on`. For sync queue (`syncUrl`), see [forceSync](#forcesync), [clearSync](#clearsyncsuccess-fail), [getPendingSyncCount](#getpendingsynccountsuccess-fail). For route/session (restore track without internet), see [startSession](#startsessionsuccess-fail), [getSessionLocations](#getsessionlocationssuccess-fail), [clearSession](#clearsessionsuccess-fail), [getSessionLocationsCount](#getsessionlocationscountsuccess-fail). For HTTP posting see [HTTP Location Posting](http_posting).
 
 ## TypeScript
 
@@ -300,6 +300,59 @@ BackgroundGeolocation.getPendingSyncCount()
       // optionally: BackgroundGeolocation.forceSync();
     }
   });
+```
+
+## startSession(success, fail)
+
+Platform: Android, iOS
+
+Starts a *recording session*: clears the session table and from then on every new location is also stored in the session table. Session data is **not** removed when locations are synced to the server. Call when the user starts a route (e.g. "Start" button).
+
+When the user reopens the app without internet, use `getSessionLocations()` to get all points and restore the track. When the route is finished and sync has succeeded, call `clearSession()` to clear the session table.
+
+```javascript
+// When user taps "Start" on a route
+BackgroundGeolocation.startSession().then(function () {
+  return BackgroundGeolocation.start();
+});
+```
+
+## getSessionLocations(success, fail)
+
+Platform: Android, iOS
+
+Returns all locations currently stored in the session table, ordered by time. Same format as `Location` (latitude, longitude, time, speed, altitude, bearing, accuracy, etc.). Use when reopening the app without internet to rebuild the full route/track.
+
+```javascript
+BackgroundGeolocation.getSessionLocations().then(function (locations) {
+  // Redraw the route on the map, compute distance, etc.
+  console.log('Session points:', locations.length);
+});
+```
+
+## clearSession(success, fail)
+
+Platform: Android, iOS
+
+Clears the session table. Call when the route is finished and sync to the server has succeeded. After this, the next `startSession()` will start with an empty session.
+
+```javascript
+// When user finishes the route and sync OK
+BackgroundGeolocation.clearSession().then(function () {
+  console.log('Session cleared');
+});
+```
+
+## getSessionLocationsCount(success, fail)
+
+Platform: Android, iOS
+
+Returns the number of locations in the current session. Useful to show "X points" in the UI without loading all locations.
+
+```javascript
+BackgroundGeolocation.getSessionLocationsCount().then(function (count) {
+  console.log('Points in session:', count);
+});
 ```
 
 ## getLogEntries(limit, fromId, minLevel, success, fail)

@@ -168,6 +168,34 @@ export class BackgroundGeolocationService {
     return this.ensurePlugin().getPendingSyncCount(success, fail);
   }
 
+  startSession(
+    success?: () => void,
+    fail?: (error: any) => void
+  ): Promise<void> {
+    return this.ensurePlugin().startSession(success, fail);
+  }
+
+  getSessionLocations(
+    success?: (locations: any[]) => void,
+    fail?: (error: any) => void
+  ): Promise<any[]> {
+    return this.ensurePlugin().getSessionLocations(success, fail);
+  }
+
+  clearSession(
+    success?: () => void,
+    fail?: (error: any) => void
+  ): Promise<void> {
+    return this.ensurePlugin().clearSession(success, fail);
+  }
+
+  getSessionLocationsCount(
+    success?: (count: number) => void,
+    fail?: (error: any) => void
+  ): Promise<number> {
+    return this.ensurePlugin().getSessionLocationsCount(success, fail);
+  }
+
   getConfig(
     success?: (config: any) => void,
     fail?: (error: any) => void
