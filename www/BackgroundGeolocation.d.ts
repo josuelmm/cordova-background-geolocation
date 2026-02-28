@@ -215,6 +215,24 @@ export interface ConfigureOptions {
   notificationText?: string;
 
   /**
+   * When true, the foreground notification shows a live elapsed time (HH:mm:ss) since the session started.
+   * Requires startForeground. Updates every second.
+   *
+   * Platform: Android
+   * @default false
+   */
+  showTime?: boolean;
+
+  /**
+   * When true, the foreground notification shows accumulated distance (km) since the session started.
+   * Requires startForeground. Updates when each new location is received.
+   *
+   * Platform: Android
+   * @default false
+   */
+  showDistance?: boolean;
+
+  /**
    * Title shown in the notification while locations are syncing to the server.
    * Use this (and notificationSyncText, etc.) to localize sync notifications.
    *

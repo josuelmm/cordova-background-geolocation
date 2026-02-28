@@ -69,6 +69,8 @@ public class Config implements Parcelable
     private Integer maxLocations;
     private LocationTemplate template;
     private Boolean enableWatchdog;
+    private Boolean showTime;
+    private Boolean showDistance;
 
     public Config () {
     }
@@ -104,6 +106,8 @@ public class Config implements Parcelable
         this.httpHeaders = CloneHelper.deepCopy(config.httpHeaders);
         this.maxLocations = config.maxLocations;
         this.enableWatchdog = config.enableWatchdog;
+        this.showTime = config.showTime;
+        this.showDistance = config.showDistance;
         if (config.template instanceof AbstractLocationTemplate) {
             this.template = ((AbstractLocationTemplate)config.template).clone();
         }
@@ -138,6 +142,8 @@ public class Config implements Parcelable
         setSyncEnabled((Boolean) in.readValue(null));
         setMaxLocations(in.readInt());
         setEnableWatchdog((Boolean) in.readValue(null));
+        setShowTime((Boolean) in.readValue(null));
+        setShowDistance((Boolean) in.readValue(null));
         Bundle bundle = in.readBundle();
         setHttpHeaders((HashMap<String, String>) bundle.getSerializable("httpHeaders"));
         setTemplate((LocationTemplate) bundle.getSerializable(AbstractLocationTemplate.BUNDLE_KEY));
@@ -175,6 +181,8 @@ public class Config implements Parcelable
         config.maxLocations = 10000;
         config.template = null;
         config.enableWatchdog = false;
+        config.showTime = false;
+        config.showDistance = false;
 
         return config;
     }
@@ -213,6 +221,8 @@ public class Config implements Parcelable
         out.writeValue(getSyncEnabled());
         out.writeInt(getMaxLocations());
         out.writeValue(getEnableWatchdog());
+        out.writeValue(getShowTime());
+        out.writeValue(getShowDistance());
         Bundle bundle = new Bundle();
         bundle.putSerializable("httpHeaders", getHttpHeaders());
         bundle.putSerializable(AbstractLocationTemplate.BUNDLE_KEY, (AbstractLocationTemplate) getTemplate());
@@ -609,6 +619,32 @@ public class Config implements Parcelable
         this.enableWatchdog = enableWatchdog;
     }
 
+    public boolean hasShowTime() {
+        return showTime != null;
+    }
+
+    @Nullable
+    public Boolean getShowTime() {
+        return showTime;
+    }
+
+    public void setShowTime(Boolean showTime) {
+        this.showTime = showTime;
+    }
+
+    public boolean hasShowDistance() {
+        return showDistance != null;
+    }
+
+    @Nullable
+    public Boolean getShowDistance() {
+        return showDistance;
+    }
+
+    public void setShowDistance(Boolean showDistance) {
+        this.showDistance = showDistance;
+    }
+
     @Override
     public String toString () {
         return new StringBuffer()
@@ -637,6 +673,8 @@ public class Config implements Parcelable
                 .append(" httpHeaders=").append(getHttpHeaders().toString())
                 .append(" maxLocations=").append(getMaxLocations())
                 .append(" postTemplate=").append(hasTemplate() ? getTemplate().toString() : null)
+                .append(" showTime=").append(getShowTime())
+                .append(" showDistance=").append(getShowDistance())
                 .append("]")
                 .toString();
     }
@@ -743,6 +781,12 @@ public class Config implements Parcelable
         }
         if (config2.hasTemplate()) {
             merger.setTemplate(config2.getTemplate());
+        }
+        if (config2.hasShowTime()) {
+            merger.setShowTime(config2.getShowTime());
+        }
+        if (config2.hasShowDistance()) {
+            merger.setShowDistance(config2.getShowDistance());
         }
 
         return merger;

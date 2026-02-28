@@ -29,6 +29,19 @@ cordova plugin add @josuelmm/cordova-background-geolocation
 
 ---
 
+## Build (ng serve / browser)
+
+The plugin uses `cordova/exec` and `cordova/channel`, which only exist in the Cordova runtime. To allow `ng serve` or browser builds, the package ships **browser stubs** and a `browser` field in `package.json`, so webpack resolves those modules to stubs and the build succeeds. On a real device or emulator, the stubs delegate to the real Cordova API.
+
+If you still see **"Can't resolve 'cordova/exec'"** or **"Can't resolve 'cordova/channel'"**, ensure you use a plugin version that includes the stubs (3.1.1+). If your bundler ignores the `browser` field, add a resolve alias in your app (e.g. in `angular.json` custom webpack or `project.json`):
+
+- `cordova/exec` → `node_modules/@josuelmm/cordova-background-geolocation/www/cordova-exec-stub.js`
+- `cordova/channel` → `node_modules/@josuelmm/cordova-background-geolocation/www/cordova-channel-stub.js`
+
+**Windows / types:** From 3.1.1 the published package emits type paths that resolve from `angular/dist/` to the package root `www/`, so you should **not** need to create a junction `angular/www` → `www` for TypeScript to find the types. If you had such a workaround, you can remove it.
+
+---
+
 ## Import
 
 **One import (service + types):**
@@ -57,6 +70,8 @@ export class AppModule {}  // or your feature module
 ```
 
 Then inject `BackgroundGeolocationService` in your components or services as usual.
+
+**Lazy-loaded modules:** In a component that lives in a **lazy-loaded** module, injecting the class directly can fail with **NG0202** (no provider). That happens because the lazy chunk may get a different reference to `BackgroundGeolocationService` than the one used when registering the provider, so Angular’s DI doesn’t match. Use the **token** instead: import `BACKGROUND_GEOLOCATION_SERVICE` and inject with `@Inject(BACKGROUND_GEOLOCATION_SERVICE)`; the type is still `BackgroundGeolocationService`. If that works, you are done. **If you get "token must be defined"** or **NG0202: "dependency at index N is invalid"** (e.g. in `CrearPage_Factory`): in the lazy chunk the plugin token can arrive as `undefined` or the class reference can be wrong, so Angular treats that constructor parameter as invalid. Define a token in your app instead: e.g. `BACKGROUND_GEOLOCATION_TOKEN = new InjectionToken<BackgroundGeolocationService>('BackgroundGeolocation')` in a shared file, provide it in the root with `useExisting: BackgroundGeolocationService`, and inject that token in the lazy component. The app token is always defined and the same reference in every chunk. Example: in `injection-tokens.ts` define `BACKGROUND_GEOLOCATION_TOKEN = new InjectionToken<BackgroundGeolocationService>('BackgroundGeolocation')`; in the root module add `{ provide: BACKGROUND_GEOLOCATION_TOKEN, useExisting: BackgroundGeolocationService }`; in the lazy component inject `@Inject(BACKGROUND_GEOLOCATION_TOKEN) private bg: BackgroundGeolocationService`.
 
 **If you are migrating from @awesome-cordova-plugins/background-geolocation:** there the wrapper is an injectable class named `BackgroundGeolocation`. In this package, `BackgroundGeolocation` is the **global plugin object**, not a class, so you cannot inject it. Use `BackgroundGeolocationService` instead and keep the same usage:
 

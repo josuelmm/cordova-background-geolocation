@@ -1,5 +1,31 @@
 # Changelog
 
+## [3.1.1](https://github.com/josuelmm/cordova-background-geolocation/tree/3.1.1) (2026-02-27)
+
+### Added
+
+- **Browser / `ng serve` support** — The plugin uses `cordova/exec` and `cordova/channel`, which only exist in the Cordova runtime. To allow Angular (and other webpack-based) builds to succeed when running `ng serve` or building for browser, the package now ships:
+  - **Stub modules:** `www/cordova-exec-stub.js` and `www/cordova-channel-stub.js`. When running in the browser they avoid crashes; when running inside Cordova they delegate to the real `cordova.exec` and `cordova/channel`.
+  - **`browser` field in `package.json`** so bundlers (e.g. webpack) resolve `cordova/exec` and `cordova/channel` to these stubs. No app-side webpack config is required in normal setups.
+
+### Fixed
+
+- **Angular types on Windows** — The emitted `.d.ts` in `angular/dist/` used `from '../www/BackgroundGeolocation'`, which resolves (relative to `dist/`) to `angular/www/`, a folder that does not exist in the published package. Some apps worked around this by creating a junction `angular/www` → `www`. The build now runs a post-step (`scripts/fix-angular-dts-paths.js`) that rewrites these paths to `../../www/BackgroundGeolocation` in the emitted declarations, so types resolve to the package root `www/` and the junction is no longer needed.
+
+### Documentation
+
+- **docs/angular.md** — New section *"Build (ng serve / browser)"*: explains why the stubs exist, that webpack uses the `browser` field, and how to add resolve aliases in the app if a bundler does not respect it (e.g. "Can't resolve 'cordova/exec'"). Note that from 3.1.1 the junction workaround for types is unnecessary.
+
+- **README.md** — Angular section and "New in" updated to mention 3.1.1 and browser/ng serve compatibility.
+
+### Changed
+
+- Version bump to 3.1.1.
+
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/3.1.0...3.1.1)
+
+---
+
 ## [3.1.0](https://github.com/josuelmm/cordova-background-geolocation/tree/3.1.0) (2026-02-21)
 
 ### Added

@@ -39,7 +39,7 @@ cordova plugin add @josuelmm/cordova-background-geolocation \
 
 ## Usage
 
-**TypeScript / Angular:** For TypeScript you can use the built-in types (native or Awesome-style aliases and enums). In **Angular / Ionic**, use a **single import** from `@josuelmm/cordova-background-geolocation/angular` for the injectable service and common types; do not inject the global `BackgroundGeolocation`. See the [README TypeScript section](https://github.com/josuelmm/cordova-background-geolocation#typescript-imports) and [Angular](angular).
+**TypeScript / Angular:** For TypeScript you can use the built-in types (native or Awesome-style aliases and enums). In **Angular / Ionic**, use a **single import** from `@josuelmm/cordova-background-geolocation/angular` for the injectable service and common types; do not inject the global `BackgroundGeolocation`. For `ng serve` and browser builds, the package includes browser stubs (see [Angular — Build (ng serve / browser)](angular#build-ng-serve--browser)). See the [README TypeScript section](https://github.com/josuelmm/cordova-background-geolocation#typescript-imports) and [Angular](angular).
 
 First, configure the plugin with the settings you require.
 

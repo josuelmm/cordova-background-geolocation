@@ -22,6 +22,7 @@ import android.content.ComponentName;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.Manifest;
+import android.location.Location;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Binder;
@@ -66,6 +67,8 @@ import com.marianhello.logging.UncaughtExceptionLogger;
 
 import org.chromium.content.browser.ThreadUtils;
 import org.json.JSONException;
+
+import java.util.Locale;
 
 import static com.marianhello.bgloc.service.LocationServiceIntentBuilder.containsCommand;
 import static com.marianhello.bgloc.service.LocationServiceIntentBuilder.containsMessage;
@@ -153,6 +156,30 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 }
             }
             mMainHandler.postDelayed(this, WATCHDOG_INTERVAL_MS);
+        }
+    };
+
+    /** Session start time for notification elapsed time (showTime). */
+    private volatile long mSessionStartTime = 0L;
+    /** Accumulated distance in meters for notification (showDistance). */
+    private volatile double mSessionDistanceMeters = 0.0;
+    private volatile double mLastLat = 0.0;
+    private volatile double mLastLon = 0.0;
+    private volatile boolean mHasLastLocation = false;
+    private static final long NOTIFICATION_UPDATE_INTERVAL_MS = 1000L;
+    private final Runnable mNotificationUpdateRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!sIsRunning || !mIsInForeground || mConfig == null) {
+                return;
+            }
+            boolean showTime = Boolean.TRUE.equals(mConfig.getShowTime());
+            boolean showDistance = Boolean.TRUE.equals(mConfig.getShowDistance());
+            if (!showTime && !showDistance) {
+                return;
+            }
+            updateForegroundNotification();
+            mMainHandler.postDelayed(this, NOTIFICATION_UPDATE_INTERVAL_MS);
         }
     };
 
@@ -418,6 +445,12 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             mMainHandler.postDelayed(mWatchdogRunnable, WATCHDOG_INTERVAL_MS);
         }
 
+        mSessionStartTime = System.currentTimeMillis();
+        mSessionDistanceMeters = 0.0;
+        mLastLat = 0.0;
+        mLastLon = 0.0;
+        mHasLastLocation = false;
+
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
@@ -447,6 +480,7 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         }
 
         mMainHandler.removeCallbacks(mWatchdogRunnable);
+        mMainHandler.removeCallbacks(mNotificationUpdateRunnable);
 
         if (mWakeLock != null && mWakeLock.isHeld()) {
             try {
@@ -461,6 +495,7 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             mProvider.onStop();
         }
 
+        mIsInForeground = false;
         stopForeground(true);
         stopSelf();
 
@@ -530,9 +565,10 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 return;
             }
             Config config = getConfig();
+            String contentText = buildNotificationContentText(config);
             Notification notification = new NotificationHelper.NotificationFactory(this).getNotification(
                     config.getNotificationTitle(),
-                    config.getNotificationText(),
+                    contentText,
                     config.getLargeNotificationIcon(),
                     config.getSmallNotificationIcon(),
                     config.getNotificationIconColor());
@@ -548,18 +584,84 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 super.startForeground(NOTIFICATION_ID, notification);
             }
             mIsInForeground = true;
+            scheduleNotificationUpdater();
         }
     }
 
     @Override
     public synchronized void stopForeground() {
         if (sIsRunning && mIsInForeground) {
+            mMainHandler.removeCallbacks(mNotificationUpdateRunnable);
             stopForeground(true);
             if (mProvider != null) {
                 mProvider.onCommand(LocationProvider.CMD_SWITCH_MODE,
                         LocationProvider.BACKGROUND_MODE);
             }
             mIsInForeground = false;
+        }
+    }
+
+    /** Resource names for optional app-localized notification labels (showTime / showDistance). */
+    private static final String RES_NOTIFICATION_TIME_LABEL = "plugin_bgloc_notification_time_label";
+    private static final String RES_NOTIFICATION_DISTANCE_LABEL = "plugin_bgloc_notification_distance_label";
+
+    private String getNotificationLabel(String resourceName, String defaultValue) {
+        Context app = getApplicationContext();
+        int id = app.getResources().getIdentifier(resourceName, "string", app.getPackageName());
+        return (id != 0) ? app.getString(id) : defaultValue;
+    }
+
+    private String buildNotificationContentText(Config config) {
+        String base = config.getNotificationText() != null ? config.getNotificationText() : "ENABLED";
+        if (Boolean.TRUE.equals(config.getShowTime())) {
+            String timeLabel = getNotificationLabel(RES_NOTIFICATION_TIME_LABEL, "Time");
+            base += "\n" + timeLabel + ": " + formatElapsed(mSessionStartTime);
+        }
+        if (Boolean.TRUE.equals(config.getShowDistance())) {
+            String distanceLabel = getNotificationLabel(RES_NOTIFICATION_DISTANCE_LABEL, "Distance");
+            base += "\n" + distanceLabel + ": " + formatDistance(mSessionDistanceMeters);
+        }
+        return base;
+    }
+
+    private static String formatElapsed(long startTimeMs) {
+        long elapsed = Math.max(0L, System.currentTimeMillis() - startTimeMs);
+        long s = (elapsed / 1000L) % 60L;
+        long m = (elapsed / 60000L) % 60L;
+        long h = elapsed / 3600000L;
+        return String.format(Locale.US, "%02d:%02d:%02d", h, m, s);
+    }
+
+    private static String formatDistance(double meters) {
+        return String.format(Locale.US, "%.2f km", meters / 1000.0);
+    }
+
+    private void updateForegroundNotification() {
+        if (!sIsRunning || !mIsInForeground || mConfig == null) {
+            return;
+        }
+        String contentText = buildNotificationContentText(mConfig);
+        Notification notification = new NotificationHelper.NotificationFactory(this).getNotification(
+                mConfig.getNotificationTitle(),
+                contentText,
+                mConfig.getLargeNotificationIcon(),
+                mConfig.getSmallNotificationIcon(),
+                mConfig.getNotificationIconColor());
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) {
+            nm.notify(NOTIFICATION_ID, notification);
+        }
+    }
+
+    private void scheduleNotificationUpdater() {
+        mMainHandler.removeCallbacks(mNotificationUpdateRunnable);
+        if (mConfig == null) {
+            return;
+        }
+        boolean showTime = Boolean.TRUE.equals(mConfig.getShowTime());
+        boolean showDistance = Boolean.TRUE.equals(mConfig.getShowDistance());
+        if ((showTime || showDistance) && sIsRunning && mIsInForeground) {
+            mMainHandler.postDelayed(mNotificationUpdateRunnable, NOTIFICATION_UPDATE_INTERVAL_MS);
         }
     }
 
@@ -580,7 +682,7 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             public void run() {
                 if (sIsRunning) {
                     if (currentConfig.getStartForeground() == true && mConfig.getStartForeground() == false) {
-                        stopForeground(true);
+                        stopForeground();
                     }
 
                     if (mConfig.getStartForeground() == true) {
@@ -589,15 +691,17 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                             startForeground();
                         } else {
                             // was running in foreground, so just update existing notification
+                            String contentText = buildNotificationContentText(mConfig);
                             Notification notification = new NotificationHelper.NotificationFactory(LocationServiceImpl.this).getNotification(
                                     mConfig.getNotificationTitle(),
-                                    mConfig.getNotificationText(),
+                                    contentText,
                                     mConfig.getLargeNotificationIcon(),
                                     mConfig.getSmallNotificationIcon(),
                                     mConfig.getNotificationIconColor());
 
                             NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
                             notificationManager.notify(NOTIFICATION_ID, notification);
+                            scheduleNotificationUpdater();
                         }
                     }
                 }
@@ -661,6 +765,26 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     @Override
     public void onLocation(BackgroundLocation location) {
         mLastLocationTime = System.currentTimeMillis();
+        if (Boolean.TRUE.equals(mConfig != null ? mConfig.getShowDistance() : null)) {
+            double lat = location.getLatitude();
+            double lon = location.getLongitude();
+            if (mHasLastLocation) {
+                float[] dist = new float[1];
+                Location.distanceBetween(mLastLat, mLastLon, lat, lon, dist);
+                mSessionDistanceMeters += (double) dist[0];
+            }
+            mLastLat = lat;
+            mLastLon = lon;
+            mHasLastLocation = true;
+            if (mIsInForeground && mConfig != null && (Boolean.TRUE.equals(mConfig.getShowTime()) || Boolean.TRUE.equals(mConfig.getShowDistance()))) {
+                mMainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        updateForegroundNotification();
+                    }
+                });
+            }
+        }
         logger.debug("New location {}", location.toString());
 
         location = transformLocation(location);

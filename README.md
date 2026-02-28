@@ -95,6 +95,22 @@ If your app’s merged manifest ends up with a `foregroundServiceType` other tha
 <string name="plugin_bgloc_content_authority">site.seelight.client.bgloc</string>
 ```
 
+**Notification labels (showTime / showDistance):** If you use `showTime: true` or `showDistance: true`, the notification shows a line for elapsed time and one for distance. **By default the labels are in English** ("Time" and "Distance"). If you want Spanish or another language, add these optional strings in your app so the plugin uses them; if you don’t define them, English is used.
+
+Example — English (default, optional in `res/values/strings.xml`):
+
+```xml
+<string name="plugin_bgloc_notification_time_label">Time</string>
+<string name="plugin_bgloc_notification_distance_label">Distance</string>
+```
+
+Example — Spanish: add in `res/values-es/strings.xml` (or your locale folder):
+
+```xml
+<string name="plugin_bgloc_notification_time_label">Tiempo</string>
+<string name="plugin_bgloc_notification_distance_label">Distancia</string>
+```
+
 This makes your app enforce the correct foreground service type and defines the strings the plugin needs for the sync account.
 
 ---
@@ -252,7 +268,18 @@ BackgroundGeolocation.stop();
 
 ### 5. Sync queue (syncUrl): pending count, force sync, clear queue
 
-When you use `syncUrl`, locations that fail to post to `url` (or that are only queued for sync) are sent in batch to `syncUrl`. You can:
+When you use `syncUrl`, locations that fail to post to `url` (or that are only queued for sync) are sent in batch to `syncUrl`.
+
+**How sync sends data (Content-Type):** It depends on the `Content-Type` you set in `httpHeaders`. Many people assume “one request per location”; that is only true for form encoding.
+
+| Content-Type | Sync to `syncUrl` |
+|--------------|-------------------|
+| **`application/json`** (default) | **One POST** with a JSON **array** of all locations in the batch. |
+| **`application/x-www-form-urlencoded`** | **One POST per location** (same flat `key=value&...` as real-time to `url`). Same endpoint can handle both. |
+
+So: with **JSON** you get one request per batch (e.g. 100 locations in one body). With **form-urlencoded** you get one request per location (one record per POST). For headers, retries, `postTemplate` and full behaviour see [HTTP posting](docs/http_posting.md) and [API](docs/api.md).
+
+You can:
 
 - **Get pending count** — `getPendingSyncCount()` returns how many locations are waiting to be synced.
 - **Force sync now** — `forceSync()` sends all pending locations immediately (ignores `syncThreshold`). No-op if `sync: false`.
@@ -277,6 +304,8 @@ BackgroundGeolocation.clearSync().then(function () {
 });
 ```
 
+More on sync (headers, retries, postTemplate): [HTTP posting](docs/http_posting.md). Full options and methods: [API](docs/api.md).
+
 ### 6. Other methods (summary)
 
 | Method | Description |
@@ -287,7 +316,7 @@ BackgroundGeolocation.clearSync().then(function () {
 | `deleteLocation(id, success, fail)` | Delete one location by id. |
 | `deleteAllLocations(success, fail)` | Delete all stored locations. |
 | `getCurrentLocation(success, fail, options)` | One-shot location (e.g. timeout, maximumAge). |
-| `getPluginVersion(success, fail)` | Plugin version string (e.g. "3.1.0"). |
+| `getPluginVersion(success, fail)` | Plugin version string (e.g. "3.1.1"). |
 | `checkStatus(success, fail)` | Service status (isRunning, authorization, etc.). |
 | `showAppSettings()` / `openSettings()` | Open app settings. |
 | `showLocationSettings()` | Open system location settings. |
@@ -313,6 +342,10 @@ Subscribe with `BackgroundGeolocation.on(eventName, callback)`. Unsubscribe with
 | `abort_requested` | — | Server returned 285 (updates not required). |
 
 Full event payloads and options: [Events](docs/events.md). Full API (all options, all methods): [API](docs/api.md).
+
+### New in 3.1.1
+
+- **Browser / `ng serve` builds** — The plugin can now be bundled by webpack without "Can't resolve 'cordova/exec'" or "Can't resolve 'cordova/channel'". The package ships stub modules and a `browser` field so `ng serve` and browser builds succeed; on device/emulator the stubs delegate to the real Cordova API. See [docs/angular.md](docs/angular.md#build-ng-serve--browser).
 
 ### New in 3.1.0
 
@@ -370,6 +403,10 @@ export class MyService {
 
 **You must import `BackgroundGeolocationModule`** in your `AppModule` (or feature module) so the service is provided and AOT builds work. Then inject `BackgroundGeolocationService` as in the example above. See [docs/angular.md](docs/angular.md) for the full snippet.
 
+**`ng serve` / browser:** From 3.1.1 the plugin includes browser stubs so `ng serve` and web builds complete without "Can't resolve 'cordova/exec'" — see [docs/angular.md](docs/angular.md#build-ng-serve--browser).
+
+**Lazy-loaded pages:** If you see **NG0202** or *"dependency at index N is invalid"* when opening a page that injects this service, use an app-defined token and inject by that token (the plugin token can be undefined in the lazy chunk). See [docs/angular.md](docs/angular.md) (Lazy-loaded modules).
+
 **Migrating from @awesome-cordova-plugins/background-geolocation:** there you inject a class named `BackgroundGeolocation`. In this package, `BackgroundGeolocation` is the **global plugin object**, not an injectable class. Use `BackgroundGeolocationService` instead (same API). See [docs/angular.md](docs/angular.md) for details.
 
 ### Summary
@@ -394,13 +431,16 @@ No extra wrapper (e.g. Awesome Cordova Plugins) is required.
 
 ## Documentation and changelog
 
-- **[Documentation](https://josuelmm.github.io/cordova-background-geolocation/)** — Full docs (API, options, examples).
-- **[API reference](docs/api.md)** — All `configure` options, every method (`configure`, `start`, `stop`, `getPendingSyncCount`, `forceSync`, `clearSync`, `getConfig`, `getLocations`, etc.), TypeScript types.
-- **[HTTP posting](docs/http_posting.md)** — `url` vs `syncUrl`, headers, Content-Type (JSON vs form-urlencoded), sync batch behaviour, `getPendingSyncCount` / `forceSync` / `clearSync`.
-- **[Events](docs/events.md)** — All events (`location`, `error`, `stationary`, `activity`, `http_authorization`, etc.) and payloads.
-- **[Angular / Ionic](docs/angular.md)** — Injectable service, module, same API.
-- **[Example](docs/example.md)** — Full example with events and sync.
-- **[CHANGELOG](CHANGELOG.md)** — Version history.
+This README is the main entry point. For more detail, edge cases and examples use the docs below (and the [online documentation](https://josuelmm.github.io/cordova-background-geolocation/)).
+
+| Doc | What you’ll find |
+|-----|------------------|
+| **[API reference](docs/api.md)** | Every `configure` option, every method (`configure`, `start`, `stop`, `getPendingSyncCount`, `forceSync`, `clearSync`, `getConfig`, `getLocations`, etc.), TypeScript types. |
+| **[HTTP posting](docs/http_posting.md)** | `url` vs `syncUrl`, Content-Type (JSON = one POST with array; form-urlencoded = one POST per location), headers, retries, `postTemplate`, sync behaviour. |
+| **[Events](docs/events.md)** | All events (`location`, `error`, `stationary`, `activity`, `http_authorization`, etc.) and payloads. |
+| **[Angular / Ionic](docs/angular.md)** | Injectable service, module, lazy-loaded modules and token “must be defined”, `ng serve` / browser build. |
+| **[Example](docs/example.md)** | Full example with events and sync. |
+| **[CHANGELOG](CHANGELOG.md)** | Version history. |
 
 This project is based on [@mauron85/cordova-plugin-background-geolocation](https://github.com/mauron85/cordova-plugin-background-geolocation) and the original by [christocracy](https://github.com/christocracy). Maintained at [josuelmm/cordova-background-geolocation](https://github.com/josuelmm/cordova-background-geolocation). Issues and PRs welcome.
 

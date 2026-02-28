@@ -116,6 +116,12 @@ public class ConfigMapper {
         if (jObject.has("enableWatchdog")) {
             config.setEnableWatchdog(jObject.getBoolean("enableWatchdog"));
         }
+        if (jObject.has("showTime")) {
+            config.setShowTime(jObject.getBoolean("showTime"));
+        }
+        if (jObject.has("showDistance")) {
+            config.setShowDistance(jObject.getBoolean("showDistance"));
+        }
 
         return config;
     }
@@ -151,6 +157,8 @@ public class ConfigMapper {
         json.put("httpHeaders", new JSONObject(config.getHttpHeaders()));
         json.put("maxLocations", config.getMaxLocations());
         json.put("enableWatchdog", Boolean.TRUE.equals(config.getEnableWatchdog()));
+        json.put("showTime", Boolean.TRUE.equals(config.getShowTime()));
+        json.put("showDistance", Boolean.TRUE.equals(config.getShowDistance()));
         LocationTemplate tpl = config.getTemplate();
         Object template = JSONObject.NULL;
         if (tpl instanceof HashMapLocationTemplate) {

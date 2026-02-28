@@ -61,7 +61,9 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
       ConfigurationEntry.COLUMN_NAME_SYNC_ENABLED,
       ConfigurationEntry.COLUMN_NAME_HEADERS,
       ConfigurationEntry.COLUMN_NAME_MAX_LOCATIONS,
-      ConfigurationEntry.COLUMN_NAME_TEMPLATE
+      ConfigurationEntry.COLUMN_NAME_TEMPLATE,
+      ConfigurationEntry.COLUMN_NAME_SHOW_TIME,
+      ConfigurationEntry.COLUMN_NAME_SHOW_DISTANCE
     };
 
     String whereClause = null;
@@ -142,6 +144,14 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
     config.setHttpHeaders(new JSONObject(c.getString(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_HEADERS))));
     config.setMaxLocations(c.getInt(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_MAX_LOCATIONS)));
     config.setTemplate(LocationTemplateFactory.fromJSONString(c.getString(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_TEMPLATE))));
+    int idxShowTime = c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_SHOW_TIME);
+    if (idxShowTime >= 0 && !c.isNull(idxShowTime)) {
+      config.setShowTime(c.getInt(idxShowTime) == 1);
+    }
+    int idxShowDistance = c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_SHOW_DISTANCE);
+    if (idxShowDistance >= 0 && !c.isNull(idxShowDistance)) {
+      config.setShowDistance(c.getInt(idxShowDistance) == 1);
+    }
 
     return config;
   }
@@ -178,6 +188,8 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
     values.put(ConfigurationEntry.COLUMN_NAME_HEADERS, new JSONObject(config.getHttpHeaders()).toString());
     values.put(ConfigurationEntry.COLUMN_NAME_MAX_LOCATIONS, config.getMaxLocations());
     values.put(ConfigurationEntry.COLUMN_NAME_TEMPLATE, config.hasTemplate() ? config.getTemplate().toString() : null);
+    values.put(ConfigurationEntry.COLUMN_NAME_SHOW_TIME, Boolean.TRUE.equals(config.getShowTime()) ? 1 : 0);
+    values.put(ConfigurationEntry.COLUMN_NAME_SHOW_DISTANCE, Boolean.TRUE.equals(config.getShowDistance()) ? 1 : 0);
 
     return values;
   }
