@@ -15,6 +15,18 @@ This project is based on [@mauron85/cordova-plugin-background-geolocation](https
 
 The NPM package can be found at [@josuelmm/cordova-background-geolocation](https://www.npmjs.com/package/@josuelmm/cordova-background-geolocation).
 
+## Planning docs
+
+> **Plugin global y backend-agnóstico.** Sin lógica hardcodeada de proveedores. Cualquier backend (Traccar, GPSWox, Laravel, Node, Firebase, n8n, API propia) se conecta vía HTTP transport personalizable.
+
+- [Roadmap](ROADMAP.md) — fases de desarrollo: 1) Auto-start, 2) HTTP, 3) Diagnóstico, 4) Battery/OEM, 5) Driving.
+- [Auto-start tras reinicio (Fase 1)](auto-start.md) — comportamiento Android/iOS al encender el dispositivo.
+- [HTTP transport personalizable (Fase 2)](http-transport.md) — GET/POST/PUT/PATCH + URL templating + body templating.
+- [Diagnóstico, heartbeat, sync events, mockLocationPolicy (Fase 3)](ROADMAP.md#v35--diagnóstico-fase-3).
+- [Battery / OEM helpers (Fase 4)](ROADMAP.md#v36--battery--oem-helpers-fase-4).
+- [Driving events (Fase 5, v4.0)](driving-events.md).
+- [Traccar como ejemplo de integración](traccar.md) — backend opcional para geocercas, eventos, historial; nunca hardcodeado en el plugin.
+
 ## Installing the plugin
 
 ```bash
