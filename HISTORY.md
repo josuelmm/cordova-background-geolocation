@@ -13,11 +13,16 @@
 - iOS `MAURDistanceFilterLocationProvider`: added `locationManagerDidChangeAuthorization:` (iOS 14+) alongside the legacy callback; short-circuit legacy on iOS 14+ to avoid double notifications.
 - iOS `MAURConfig` + `MAURDistanceFilterLocationProvider`: new `showsBackgroundLocationIndicator` config (iOS 11+).
 - TypeScript: `showsBackgroundLocationIndicator?: boolean` added to `ConfigureOptions`.
-- `cordova-ios >= 11.0.0` required for `3.4.0`.
+- `cordova-ios >= 6.2.0` required for `3.4.0` (runtime `@available` checks gate iOS 11/14 APIs).
 
-Pending in Phase 3 (follow-up):
-- Full Android `DistanceFilterLocationProvider` migration (Criteria removal + `getCurrentLocation` + new `requestLocationUpdates` overload).
-- Replace `AlarmManager.setInexactRepeating` stationary sampling with FGS-driven `LocationCallback`.
+- Android `DistanceFilterLocationProvider`: `Criteria` API fully removed; `getBestProvider(criteria, true)` replaced by explicit `pickProvider()`; `requestSingleUpdate(criteria, ...)` replaced by the provider-string overload.
+- Bug: iOS `activitiesInterval` parsing in `MAURConfig.fromDictionary` had inverted `isNull` check; fixed.
+- Bug: Android `Content-Length` used `String.length()` (chars) instead of UTF-8 byte length; fixed in `HttpPostService.postJSONString`.
+
+Notes (still legacy but functional):
+- `LocationManager.getLastKnownLocation` kept (not deprecated).
+- `LocationManager.requestSingleUpdate(String, PendingIntent)` kept (modern `getCurrentLocation` does not accept `PendingIntent`).
+- `AlarmManager.setInexactRepeating` kept for stationary polling; planned FGS-driven replacement.
 
 ## [3.3.0] - 2026-05-07
 

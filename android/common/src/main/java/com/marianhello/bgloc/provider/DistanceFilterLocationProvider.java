@@ -6,7 +6,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.location.Criteria;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -54,8 +53,6 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
     private PendingIntent stationaryRegionPI;
     private PendingIntent singleUpdatePI;
     private Integer scaledDistanceFilter;
-
-    private Criteria criteria;
 
     private LocationManager locationManager;
     private AlarmManager alarmManager;
@@ -110,12 +107,20 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
         singleUpdatePI = PendingIntent.getBroadcast(mContext, 9003, singleLocationUpdateIntent, cancelCurrentFlag);
         registerReceiver(singleUpdateReceiver, new IntentFilter(SINGLE_LOCATION_UPDATE_ACTION));
 
-        // Location criteria
-        criteria = new Criteria();
-        criteria.setAltitudeRequired(false);
-        criteria.setBearingRequired(false);
-        criteria.setSpeedRequired(true);
-        criteria.setCostAllowed(true);
+        // v3.4 Phase 3: Criteria API removed (deprecated since Android 12 / API 31).
+        // Provider selection is now explicit (GPS-first / Network-fallback) via pickProvider().
+    }
+
+    /** v3.4 Phase 3: replaces getBestProvider(criteria, true). */
+    private String pickProvider() {
+        if (locationManager == null) return null;
+        if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            return LocationManager.GPS_PROVIDER;
+        }
+        if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            return LocationManager.NETWORK_PROVIDER;
+        }
+        return null;
     }
 
     @Override
@@ -209,9 +214,6 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
 
         try {
             locationManager.removeUpdates(this);
-            criteria.setAccuracy(Criteria.ACCURACY_FINE);
-            criteria.setHorizontalAccuracy(translateDesiredAccuracy(mConfig.getDesiredAccuracy()));
-            criteria.setPowerRequirement(Criteria.POWER_HIGH);
 
             if (isMoving) {
                 // setPace can be called while moving, after distanceFilter has been recalculated.  We don't want to re-acquire velocity in this case.
@@ -228,18 +230,15 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
                 // Turn on each provider aggressively for a short period of time
                 List<String> matchingProviders = locationManager.getAllProviders();
                 for (String provider: matchingProviders) {
-                    if (provider != LocationManager.PASSIVE_PROVIDER) {
+                    if (!LocationManager.PASSIVE_PROVIDER.equals(provider)) {
                         logger.info("Requesting location updates from provider {}", provider);
                         locationManager.requestLocationUpdates(provider, 0, 0, this);
                     }
                 }
             } else {
-                String provider = locationManager.getBestProvider(criteria, true);
-                if (Build.VERSION.SDK_INT > 30 && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                    provider = LocationManager.GPS_PROVIDER;
-                }
+                String provider = pickProvider();
                 if (provider == null) {
-                    logger.warn("No best provider available");
+                    logger.warn("No location provider available (GPS and Network disabled)");
                     return;
                 }
                 logger.info("Requesting location updates from provider {}", provider);
@@ -251,23 +250,8 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
         }
     }
 
-    /**
-     * Translates a number representing desired accuracy of Geolocation system from set [0, 10, 100, 1000].
-     * 0:  most aggressive, most accurate, worst battery drain
-     * 1000:  least aggressive, least accurate, best for battery.
-     */
-    private int translateDesiredAccuracy(Integer accuracy) {
-        if (accuracy == null) {
-            return Criteria.ACCURACY_MEDIUM;
-        }
-        if (accuracy >= 1000) {
-            return Criteria.ACCURACY_LOW;
-        }
-        if (accuracy >= 100) {
-            return Criteria.ACCURACY_MEDIUM;
-        }
-        return Criteria.ACCURACY_HIGH;
-    }
+    // v3.4 Phase 3: translateDesiredAccuracy(...) returning Criteria.ACCURACY_* removed.
+    // Provider selection no longer depends on Criteria; pickProvider() chooses GPS-first.
 
     /**
      * Returns the most accurate and timely previously detected location.
@@ -533,14 +517,19 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
             logger.info("Stationary location monitor fired");
             playDebugTone(Tone.DIALTONE);
 
-            criteria.setAccuracy(Criteria.ACCURACY_FINE);
-            criteria.setHorizontalAccuracy(Criteria.ACCURACY_HIGH);
-            criteria.setPowerRequirement(Criteria.POWER_HIGH);
-
+            // v3.4 Phase 3: Criteria-based requestSingleUpdate removed (deprecated since API 31).
+            // Use the provider-string overload, which is still supported and stable.
+            String provider = pickProvider();
+            if (provider == null) {
+                logger.warn("Stationary monitor: no provider available");
+                return;
+            }
             try {
-                locationManager.requestSingleUpdate(criteria, singleUpdatePI);
+                locationManager.requestSingleUpdate(provider, singleUpdatePI);
             } catch (SecurityException e) {
                 logger.error("Security exception: {}", e.getMessage());
+            } catch (IllegalArgumentException e) {
+                logger.warn("requestSingleUpdate failed: {}", e.getMessage());
             }
         }
     }

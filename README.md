@@ -193,15 +193,19 @@ Set your preferred provider, accuracy, intervals, and optional server URLs. All 
 | `syncUrl` | Server URL where **pending** locations are sent in batch (when count reaches `syncThreshold` or on `forceSync()`) |
 | `syncThreshold` | Number of pending locations before automatic batch sync (default 100) |
 | `sync` | When `true` (default), automatic sync and `forceSync()` run. When `false`, sync is disabled (locations are still stored). |
-| `httpHeaders` | Headers for every POST (e.g. `{ 'Content-Type': 'application/json', 'Authorization': 'Bearer TOKEN' }`) |
-| `postTemplate` | Object or array of properties to send (use `@latitude`, `@longitude`, etc.). See [Custom post template](docs/api.md#custom-post-template). |
+| `httpHeaders` / `headers` | Headers for every request (e.g. `{ 'Content-Type': 'application/json', 'Authorization': 'Bearer TOKEN' }`). `headers` is the alias added in 3.3.0; both are supported. |
+| `httpMethod` | **Since 3.3.0.** HTTP method for `url`. `POST` (default) `| GET | PUT | PATCH`. Use `GET` together with URL templating to deliver positions through the query string. |
+| `syncHttpMethod` | **Since 3.3.0.** HTTP method for `syncUrl`. Same values as `httpMethod`. |
+| `httpMode` / `syncMode` | **Since 3.3.0.** `batch` (default) or `single` (one HTTP request per location). `single` is required when the corresponding method is `GET`. |
+| `queryParams` | **Since 3.3.0.** Static placeholder values for URL/body templating (e.g. `{ device_id: 'USER_123' }`). See [HTTP transport](docs/api.md#http-transport-since-330). |
+| `postTemplate` / `bodyTemplate` | Object or array of properties to send. Supports `@latitude`, `@longitude`, ... and the new `{latitude}`, `{lon}`, `{timestamp_iso}`, ... placeholders on string values. `bodyTemplate` is the alias added in 3.3.0. |
 | `maxLocations` | Max locations kept in DB (default 10000). Should be &gt; `syncThreshold`. |
 
 **Android-only:** `notificationSyncTitle`, `notificationSyncText`, `notificationSyncCompletedText`, `notificationSyncFailedText` — texts shown in the notification while syncing (defaults in English; set for localization). `startForeground`, `notificationsEnabled`, `startOnBoot`, `stopOnTerminate`, `enableWatchdog`.
 
-**iOS-only:** `activityType`, `pauseLocationUpdates`, `saveBatteryOnBackground`.
+**iOS-only:** `activityType`, `pauseLocationUpdates`, `saveBatteryOnBackground`, `showsBackgroundLocationIndicator` (since 3.4.0; iOS 11+, shows the blue background indicator).
 
-Example:
+Example (default POST + JSON):
 
 ```js
 BackgroundGeolocation.configure({
@@ -215,6 +219,8 @@ BackgroundGeolocation.configure({
   interval: 10000,
   fastestInterval: 5000,
   activitiesInterval: 10000,
+  startOnBoot: true,
+  stopOnTerminate: false,
   url: 'https://yourserver.com/location',
   syncUrl: 'https://yourserver.com/location',
   syncThreshold: 5,
@@ -230,6 +236,21 @@ BackgroundGeolocation.configure({
   }
 });
 ```
+
+Example (since 3.3.0, GET with URL templating — works against Traccar OsmAnd, GPSWox, custom REST, etc.):
+
+```js
+BackgroundGeolocation.configure({
+  url: 'https://your-backend/track?uid={uid}&lat={latitude}&lon={longitude}&t={timestamp_iso}&spd={speed}',
+  httpMethod: 'GET',
+  httpMode: 'single',
+  queryParams: { uid: 'USER_DEVICE_123' },
+  startOnBoot: true,
+  stopOnTerminate: false
+});
+```
+
+> **Android runtime permissions.** With `startOnBoot: true`, the app must request `ACCESS_FINE_LOCATION` first, then `POST_NOTIFICATIONS` (Android 13+), and finally `ACCESS_BACKGROUND_LOCATION` (Android 10+, the user must pick **Allow all the time**). Without the background permission the plugin will skip the start on boot. iOS does **not** allow auto-start on device boot (Apple restriction). See [Auto-start on Android boot](docs/api.md#auto-start-on-android-boot-since-330) for the full flow.
 
 ### 2. Start tracking
 
@@ -347,6 +368,19 @@ Subscribe with `BackgroundGeolocation.on(eventName, callback)`. Unsubscribe with
 
 Full event payloads and options: [Events](docs/events.md). Full API (all options, all methods): [API](docs/api.md).
 
+### New in 3.4.0
+
+- **Location API modernization (Phase 3).** The Android Activity provider now uses `LocationRequest.Builder` + `Priority.PRIORITY_*` (replaces the deprecated `LocationRequest.create()` / `setPriority` / `setInterval` / `LocationRequest.PRIORITY_*` family from `play-services-location 21.0.0+`). The Distance Filter and Raw providers no longer use the deprecated `Criteria` API; provider selection is now an explicit GPS-first / Network-fallback. iOS migrates `[NSURLConnection sendSynchronousRequest:]` (deprecated since iOS 9) to `NSURLSession + dispatch_semaphore`, and adds the iOS 14+ `locationManagerDidChangeAuthorization:` callback alongside the legacy one.
+- **`showsBackgroundLocationIndicator`** (iOS 11+). Set to `true` to display the blue status indicator while the app uses location in the background.
+- **Bug fixes:** iOS `activitiesInterval` is now correctly read from the dictionary (the previous `isNull` check was inverted, dropping user input). Android `Content-Length` is computed in UTF-8 byte length instead of `String.length()`, so multi-byte characters (`ñ`, `é`, emoji) no longer mismatch the body size.
+- **Default `GOOGLE_PLAY_SERVICES_VERSION`** raised to `21.0.1`. Apps that override it via `--variable` keep their override.
+
+### New in 3.3.0
+
+- **Auto-start Android (Phase 1).** The plugin's boot receiver now also handles `QUICKBOOT_POWERON` (HTC, MIUI / Xiaomi), `com.htc.intent.action.QUICKBOOT_POWERON`, and `MY_PACKAGE_REPLACED` (the service relaunches after a Play Store update). Added `ACCESS_BACKGROUND_LOCATION` to the manifest with runtime validation on Android 10+. `ForegroundServiceStartNotAllowedException` (Android 12+) is caught with clear logging — WorkManager is **not** used as a fallback for tracking. The `foregroundServiceType` is now `"location"` only (dropped `dataSync`); the runtime type is read dynamically from the merged manifest. `<uses-library org.apache.http.legacy>` and `useLibrary 'org.apache.http.legacy'` are removed (the plugin uses `HttpURLConnection`). `jcenter()` → `mavenCentral()`.
+- **Backend-agnostic HTTP transport (Phase 2).** New `httpMethod`, `syncHttpMethod`, `httpMode`, `syncMode`, `queryParams`, `headers` (alias of `httpHeaders`), `bodyTemplate` (alias of `postTemplate`). URL templating with `{latitude}`, `{longitude}`, `{lat}`, `{lon}`, `{time}`, `{timestamp}`, `{timestamp_iso}`, `{speed}`, `{altitude}`, `{bearing}`, `{accuracy}`, `{provider}` and any keys from `queryParams`. The plugin no longer hardcodes `POST` on Android (`HttpPostService`) or iOS (`MAURPostLocationTask`, `MAURBackgroundSync`). Compatibility is fully preserved — apps that only set `url` + `httpHeaders` + `postTemplate` keep working unchanged. See [HTTP transport](docs/api.md#http-transport-since-330) for backend examples (REST, GET single, form-urlencoded, Firebase, n8n).
+- **Engines:** `cordova-android >= 12.0.0` is now the minimum.
+
 ### New in 3.2.0
 
 - **Session API for route/recording** — Store all locations for the *current route* in the plugin, independent of sync. When the user reopens the app without internet, you can restore the full track from the plugin (no need for `localStorage` for points).
@@ -408,6 +442,89 @@ export class MyService {
   }
 
   onLocation() {
+    return this.bg.on('location', (loc: BackgroundGeolocationResponse) => console.log(loc));
+    // subscription.unsubscribe() when done
+  }
+}
+```
+
+**You must import `BackgroundGeolocationModule`** in your `AppModule` (or feature module) so the service is provided and AOT builds work. Then inject `BackgroundGeolocationService` as in the example above. See [docs/angular.md](docs/angular.md) for the full snippet.
+
+**`ng serve` / browser:** From 3.1.1 the plugin includes browser stubs so `ng serve` and web builds complete without "Can't resolve 'cordova/exec'" — see [docs/angular.md](docs/angular.md#build-ng-serve--browser).
+
+**Lazy-loaded pages:** If you see **NG0202** or *"dependency at index N is invalid"* when opening a page that injects this service, use an app-defined token and inject by that token (the plugin token can be undefined in the lazy chunk). See [docs/angular.md](docs/angular.md) (Lazy-loaded modules).
+
+**Migrating from @awesome-cordova-plugins/background-geolocation:** there you inject a class named `BackgroundGeolocation`. In this package, `BackgroundGeolocation` is the **global plugin object**, not an injectable class. Use `BackgroundGeolocationService` instead (same API). See [docs/angular.md](docs/angular.md) for details.
+
+### Summary
+
+| Use case              | What to do |
+|-----------------------|------------|
+| **Without Angular**   | Use global `BackgroundGeolocation` after `deviceready`. Types: main package or Awesome-style aliases (see [TypeScript imports](#typescript-imports) above). |
+| **With Angular**      | Import from `@josuelmm/cordova-background-geolocation/angular`: add `BackgroundGeolocationModule` to your module `imports`, then inject `BackgroundGeolocationService`. Do **not** inject the global `BackgroundGeolocation`. |
+
+No extra wrapper (e.g. Awesome Cordova Plugins) is required.
+
+---
+
+## Compatibility
+
+| Plugin version | Cordova CLI | Cordova Android | Cordova iOS |
+|----------------|-------------|-----------------|-------------|
+| 1.x            | ≥ 8.0.0     | ≥ 8.0.0         | ≥ 6.0.0     |
+| 2.x            | ≥ 10.0.0    | ≥ 10.0.0        | ≥ 6.0.0     |
+| 3.0.x – 3.2.x  | ≥ 10.0.0    | ≥ 10.0.0        | ≥ 6.0.0     |
+| 3.3.x – 3.4.x  | ≥ 10.0.0    | ≥ 12.0.0        | ≥ 6.2.0     |
+
+> 3.3.0+: `cordova-android >= 12` is required for `targetSdk 34+` and the modernised foreground-service handling. The new iOS APIs (`showsBackgroundLocationIndicator` iOS 11+, `locationManagerDidChangeAuthorization:` iOS 14+) are gated by runtime `@available` checks, so older iOS versions still link and run.
+
+---
+
+## Documentation and changelog
+
+This README is the main entry point. For more detail, edge cases and examples use the docs below (and the [online documentation](https://josuelmm.github.io/cordova-background-geolocation/)).
+
+| Doc | What you'll find |
+|-----|------------------|
+| **[API reference](docs/api.md)** | Every `configure` option, every method (`configure`, `start`, `stop`, `getPendingSyncCount`, `forceSync`, `clearSync`, `startSession`, `getSessionLocations`, `clearSession`, `getSessionLocationsCount`, `getConfig`, `getLocations`, etc.), TypeScript types. Also covers the **HTTP transport (3.3.0)** and **auto-start on Android boot (3.3.0)**. |
+| **[HTTP transport (3.3.0)](docs/http-transport.md)** | `httpMethod`, `httpMode`, URL templating, `bodyTemplate`, `queryParams`, examples for REST, GET single, form-urlencoded, Firebase, n8n, Traccar. |
+| **[Auto-start on boot (3.3.0)](docs/auto-start.md)** | Android receiver actions, `ACCESS_BACKGROUND_LOCATION` runtime flow, OEM caveats, iOS limitation. |
+| **[Traccar integration example](docs/traccar.md)** | Optional backend: how to deliver positions to Traccar (or Firebase, n8n, custom REST) via the HTTP transport. The plugin is backend-agnostic. |
+| **[Location modernization (3.4.0)](docs/location-modernization.md)** | What was modernised in Phase 3 (LocationRequest.Builder, NSURLSession, iOS 14+ auth callback) and what is still legacy. |
+| **[Roadmap](docs/ROADMAP.md)** | Phases 1–6, what's released, what's next. |
+| **[HTTP posting](docs/http_posting.md)** | `url` vs `syncUrl`, Content-Type (JSON = one POST with array; form-urlencoded = one POST per location), headers, retries, `postTemplate`, sync behaviour. |
+| **[Events](docs/events.md)** | All events (`location`, `error`, `stationary`, `activity`, `http_authorization`, etc.) and payloads. |
+| **[Angular / Ionic](docs/angular.md)** | Injectable service, module, lazy-loaded modules and token "must be defined", `ng serve` / browser build. |
+| **[Example](docs/example.md)** | Full example with events and sync. |
+| **[CHANGELOG](CHANGELOG.md)** | Version history. |
+
+This project is based on [@mauron85/cordova-plugin-background-geolocation](https://github.com/mauron85/cordova-plugin-background-geolocation) and the original by [christocracy](https://github.com/christocracy). Maintained at [josuelmm/cordova-background-geolocation](https://github.com/josuelmm/cordova-background-geolocation). Issues and PRs welcome.
+
+---
+
+## Licence
+
+[Apache License](http://www.apache.org/licenses/LICENSE-2.0)
+
+Copyright (c) 2013 Christopher Scott, Transistor Software
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
     return this.bg.on('location', (loc: BackgroundGeolocationResponse) => console.log(loc));
     // subscription.unsubscribe() when done
   }

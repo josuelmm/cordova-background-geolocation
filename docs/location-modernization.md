@@ -7,16 +7,20 @@ Objetivo: actualizar los providers Android/iOS a las APIs modernas, eliminar dep
 
 - ✅ Android `ActivityRecognitionLocationProvider`: `LocationRequest.Builder` + `Priority.PRIORITY_*`.
 - ✅ Android `RawLocationProvider`: sin `Criteria`; selección GPS-first / Network-fallback explícita.
+- ✅ Android `DistanceFilterLocationProvider`: sin `Criteria` (eliminado el campo, init e import); reemplazado `getBestProvider(criteria, true)` por `pickProvider()` (GPS-first / Network-fallback); `requestSingleUpdate(criteria, ...)` reemplazado por la sobrecarga `(String provider, PendingIntent)` + try/catch ampliado.
 - ✅ `plugin.xml`: `GOOGLE_PLAY_SERVICES_VERSION` default `21.0.1`.
+- ✅ Android `HttpPostService`: `Content-Length` calculado en bytes UTF-8 (no `String.length()`), corrigiendo desajustes con caracteres no ASCII.
 - ✅ iOS `MAURPostLocationTask`: `NSURLConnection` → `NSURLSession + dispatch_semaphore`.
+- ✅ iOS `MAURConfig.fromDictionary`: corregido `isNull` → `isNotNull` en `activitiesInterval` (bug pre-existente que impedía aplicar el valor enviado por la app).
 - ✅ iOS `MAURDistanceFilterLocationProvider`: callback iOS 14+ `locationManagerDidChangeAuthorization:`.
 - ✅ iOS `showsBackgroundLocationIndicator` config option.
 - ✅ TS types `showsBackgroundLocationIndicator?: boolean`.
 
-## Pendiente (3.4.1+)
+## Pendiente (3.4.1+ / Fase 4)
 
-- ⏳ Android `DistanceFilterLocationProvider.java`: eliminar `Criteria`, migrar `getLastKnownLocation` → `getCurrentLocation`, `requestLocationUpdates` con `LocationRequest.Builder` (API 31+) + fallback. Refactor grande del path stationary y stop-detection.
-- ⏳ Stationary detection: retirar `AlarmManager.setInexactRepeating` y dejar el FGS tomando muestras vía `LocationCallback` con interval grande durante stationary.
+- ⏳ `LocationManager.getLastKnownLocation(provider)` se mantiene (no está deprecated; el deprecado era `getBestProvider(Criteria)`). Migración opcional a `getCurrentLocation(provider, null, executor, consumer)` (API 30+) cuando convenga reescribir `getLastBestLocation`.
+- ⏳ `LocationManager.requestSingleUpdate(String, PendingIntent)` (deprecated API 30) se conserva por dependencia del patrón PendingIntent que despierta la app desde background. La alternativa moderna `getCurrentLocation` no acepta PendingIntent y requeriría rediseñar el receptor de `SingleUpdateReceiver`.
+- ⏳ Stationary detection: `AlarmManager.setInexactRepeating` se conserva. Por Doze el muestreo se difiere a ventanas ≥9-15 min en background prolongado. Mejora futura: dejar el FGS tomando muestras vía `LocationCallback` con interval grande durante stationary, retirando el scheduler externo.
 
 > Esta fase es **previa al diagnóstico** (Fase 4, v3.5) porque sin las APIs modernas el `getDiagnostics()` reportaría datos sobre un stack que ya está marcado como obsoleto por Google y Apple.
 

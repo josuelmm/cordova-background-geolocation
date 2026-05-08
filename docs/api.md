@@ -62,6 +62,14 @@ Configure options:
 | `maxLocations`            | `Number`          | all          | Limit maximum number of locations stored into db                                                                                                                                                                                                                                                                                                   | all         | 10000                      |
 | `enableWatchdog`          | `Boolean`         | Android      | If true, when no location update is received for ~60s the provider is restarted (helps on some devices).                                                                                                                                                                                                                                          | all         | false                      |
 | `postTemplate`            | `Object\|Array`   | all          | Customization post template **@see** [Custom post template](#custom-post-template)                                                                                                                                                                                                                                                                 | all         |                            |
+| `httpMethod`              | `String`          | Android, iOS | **Since 3.3.0.** HTTP method for `url`. One of `POST`, `GET`, `PUT`, `PATCH`. Use `GET` together with URL templating to deliver positions through the query string. **@see** [HTTP transport](#http-transport).                                                                                                                                       | all         | `POST`                     |
+| `syncHttpMethod`          | `String`          | Android, iOS | **Since 3.3.0.** HTTP method for `syncUrl` (the offline queue). Same values as `httpMethod`.                                                                                                                                                                                                                                                       | all         | `POST`                     |
+| `httpMode`                | `String`          | Android, iOS | **Since 3.3.0.** `batch` (one HTTP request with an array of locations) or `single` (one request per location). `single` is required when `httpMethod` is `GET`.                                                                                                                                                                                    | all         | `batch`                    |
+| `syncMode`                | `String`          | Android, iOS | **Since 3.3.0.** Same values as `httpMode` but for the sync queue.                                                                                                                                                                                                                                                                                 | all         | `batch`                    |
+| `headers`                 | `Object`          | Android, iOS | **Since 3.3.0.** Alias of `httpHeaders`. If both are present, `headers` takes precedence.                                                                                                                                                                                                                                                          | all         |                            |
+| `bodyTemplate`            | `Object\|Array`   | Android, iOS | **Since 3.3.0.** Alias of `postTemplate`. Same syntax (`@latitude`, `@longitude`, ...) and the new placeholder syntax (`{latitude}`, `{lon}`, ...) is supported on string values.                                                                                                                                                                  | all         |                            |
+| `queryParams`             | `Object`          | Android, iOS | **Since 3.3.0.** Static placeholder values used by URL/body templating. Built-in placeholders resolved from each location: `{latitude}`, `{longitude}`, `{lat}`, `{lon}`, `{time}`, `{timestamp}`, `{timestamp_iso}`, `{speed}`, `{altitude}`, `{bearing}`, `{accuracy}`, `{provider}`. Any extra keys here are also available (e.g. `{device_id}`). | all         |                            |
+| `showsBackgroundLocationIndicator` | `Boolean` | iOS         | **Since 3.4.0.** iOS 11+. When `true`, iOS shows the blue status bar / pill while the app uses location in the background. Apple recommends this for transparency in apps that track continuously.                                                                                                                                                | all         | `false`                    |
 
 \*
 DIS = DISTANCE\_FILTER\_PROVIDER
@@ -381,3 +389,106 @@ Format of log entry:
 ## removeAllListeners(event)
 
 Unregister all event listeners for given event. If parameter `event` is not provided then all event listeners will be removed.
+
+## HTTP transport (since 3.3.0)
+
+The plugin is **backend-agnostic**. There is no `traccarMode`, `osmandMode` or similar — instead you compose `httpMethod`, `httpMode`, URL templating, headers and body templating to match any backend.
+
+### Options
+
+- `httpMethod`: `POST` (default) `| GET | PUT | PATCH`. Same for `syncHttpMethod` (sync queue).
+- `httpMode`: `batch` (default) or `single`. `single` is required when `httpMethod` is `GET`. Same for `syncMode`.
+- `url`, `syncUrl`: support placeholders.
+- `headers`: alias of `httpHeaders`.
+- `bodyTemplate`: alias of `postTemplate`. Supports both the legacy `@latitude` syntax and the new `{latitude}` placeholder syntax on string values.
+- `queryParams`: static map used to fill placeholders that don't come from a location (`{device_id}`, `{token}`, ...).
+
+### Placeholders
+
+Available in `url`, `syncUrl`, and string values inside `bodyTemplate` / `postTemplate`:
+
+`{latitude}`, `{longitude}`, `{lat}`, `{lon}`, `{time}` (ms), `{timestamp}` (ms), `{timestamp_iso}` (ISO 8601 UTC), `{speed}`, `{altitude}`, `{bearing}`, `{accuracy}`, `{provider}`, `{is_moving}` — plus any key from `queryParams`.
+
+Unknown placeholders are left as-is, so partial templates keep working (e.g. only static keys for batch mode).
+
+### Examples
+
+**REST JSON batch (default):**
+
+```javascript
+BackgroundGeolocation.configure({
+  url: 'https://api.example.com/locations',
+  httpMethod: 'POST',
+  httpMode: 'batch',
+  headers: { 'Authorization': 'Bearer TOKEN', 'Content-Type': 'application/json' },
+  bodyTemplate: { lat: '{latitude}', lon: '{longitude}', t: '{time}', acc: '{accuracy}' }
+});
+```
+
+**GET with URL templating (single):**
+
+```javascript
+BackgroundGeolocation.configure({
+  url: 'https://api.example.com/track?uid={uid}&lat={latitude}&lon={longitude}&t={timestamp_iso}',
+  httpMethod: 'GET',
+  httpMode: 'single',
+  queryParams: { uid: 'USER_DEVICE_123' }
+});
+```
+
+**Form-urlencoded:**
+
+```javascript
+BackgroundGeolocation.configure({
+  url: 'https://legacy.example.com/track.php',
+  httpMethod: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  bodyTemplate: { lat: '{latitude}', lng: '{longitude}', t: '{time}' }
+});
+```
+
+### Backward compatibility
+
+Apps that only set `url` + `httpHeaders` + `postTemplate` continue to work without changes. Defaults are `httpMethod: 'POST'` and `httpMode: 'batch'`.
+
+For more examples (Firebase, n8n, GraphQL, Traccar) see [http-transport.md](http-transport.md) and [traccar.md](traccar.md).
+
+## Auto-start on Android boot (since 3.3.0)
+
+To restart tracking automatically after the device reboots, set `startOnBoot: true` and request `ACCESS_BACKGROUND_LOCATION` at runtime.
+
+### Required permissions
+
+The plugin already declares these in its manifest:
+
+- `ACCESS_FINE_LOCATION`
+- `ACCESS_COARSE_LOCATION`
+- `ACCESS_BACKGROUND_LOCATION` (Android 10+)
+- `POST_NOTIFICATIONS` (Android 13+)
+- `RECEIVE_BOOT_COMPLETED`
+- `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`
+
+You must request the runtime ones from the app — the plugin only declares them.
+
+### Recommended runtime flow
+
+1. Request `ACCESS_FINE_LOCATION` (foreground).
+2. Request `POST_NOTIFICATIONS` (Android 13+).
+3. Show an explanation, then request `ACCESS_BACKGROUND_LOCATION`. Android 11+ may redirect to Settings; the user must choose **Allow all the time**.
+4. Configure with `startOnBoot: true` and `stopOnTerminate: false`.
+
+```javascript
+BackgroundGeolocation.configure({
+  startOnBoot: true,
+  stopOnTerminate: false,
+  notificationsEnabled: true,
+  notificationTitle: 'Tracking active',
+  notificationText: 'Sending your location'
+});
+```
+
+The plugin's boot receiver listens to `BOOT_COMPLETED`, `QUICKBOOT_POWERON` (HTC, MIUI), `com.htc.intent.action.QUICKBOOT_POWERON`, and `MY_PACKAGE_REPLACED` (so the service also relaunches after a Play Store update).
+
+If `ACCESS_BACKGROUND_LOCATION` is not granted on Android 10+, the receiver logs a warning and skips the start. iOS does **not** allow auto-start on device boot (Apple restriction); the app must be opened at least once.
+
+For OEM-specific tweaks (Xiaomi/Huawei AutoStart, battery optimization), see [auto-start.md](auto-start.md).

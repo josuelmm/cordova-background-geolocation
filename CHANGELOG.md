@@ -22,12 +22,22 @@
 
 #### Versions
 
-- `cordovaDependencies."3.4.0"`: requires `cordova-ios >= 11.0.0` (needed for the new `showsBackgroundLocationIndicator` and the iOS 14+ auth callback).
+- `cordovaDependencies."3.4.0"`: requires `cordova-ios >= 6.2.0`. The new APIs use runtime availability checks (`@available(iOS 11.0, *)` for `showsBackgroundLocationIndicator`, `API_AVAILABLE(ios(14.0))` for `locationManagerDidChangeAuthorization:`), so older iOS versions still link and run.
 
-### Pending in Phase 3 (deferred to a follow-up release)
+### Bug fixes
 
-- `DistanceFilterLocationProvider.java`: full `Criteria` removal, `getCurrentLocation` migration, `requestLocationUpdates` with `LocationRequest.Builder` (API 31+) + legacy fallback. This is a larger refactor of stationary detection and stop-detection paths.
-- Stationary detection: replace `AlarmManager.setInexactRepeating` with FGS-driven sampling.
+- **iOS `MAURConfig.fromDictionary`:** corrected `isNull(config[@"activitiesInterval"])` → `isNotNull(...)`. The inverted check meant a value sent by the app was assigned only when the dictionary entry was missing/null, effectively dropping user input. Pre-existing bug.
+- **Android `HttpPostService.postJSONString`:** `Content-Length` now uses UTF-8 byte length instead of `String.length()`. Multi-byte characters (`ñ`, `é`, emoji, ...) now match the body sent. Pre-existing bug.
+
+### Phase 3 also closed
+
+- **Android `DistanceFilterLocationProvider`:** the legacy `Criteria` API is fully removed. The `criteria` field, its init in `onCreate()`, and the `translateDesiredAccuracy(...)` helper are gone. `LocationManager.getBestProvider(criteria, true)` is replaced by an explicit `pickProvider()` (GPS-first, Network-fallback). `requestSingleUpdate(criteria, ...)` in `StationaryLocationMonitorReceiver` is replaced by the provider-string overload plus a wider `try/catch` that also handles `IllegalArgumentException`.
+
+### Notes (still legacy but functional)
+
+- `LocationManager.getLastKnownLocation(provider)` is **not** deprecated; only `getBestProvider(Criteria, ...)` is. Kept as-is in `getLastBestLocation()`.
+- `LocationManager.requestSingleUpdate(String, PendingIntent)` is deprecated since API 30 but is the only PendingIntent-based path; the modern `getCurrentLocation` does not accept a `PendingIntent` and would require redesigning the receiver pattern that wakes the app from background.
+- `AlarmManager.setInexactRepeating` retained for stationary polling. Doze defers it to ≥9-15 min windows; an FGS-driven `LocationCallback` interval is the planned replacement.
 
 [Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/3.3.0...3.4.0)
 

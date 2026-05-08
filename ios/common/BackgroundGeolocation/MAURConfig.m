@@ -62,7 +62,7 @@
     if (isNotNull(config[@"activityType"])) {
         instance.activityType = config[@"activityType"];
     }
-    if (isNull(config[@"activitiesInterval"])) {
+    if (isNotNull(config[@"activitiesInterval"])) {
         instance.activitiesInterval = config[@"activitiesInterval"];
     }
     if (isNotNull(config[@"stopOnTerminate"])) {

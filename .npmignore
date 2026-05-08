@@ -4,6 +4,10 @@
 # only include project files
 !/.npmignore
 !/*.md
+# exclude internal/development markdown (audit, release notes, internal docs)
+/REVIEW_*.md
+/RELEASE.MD
+/NPM_PUBLISH.md
 !/plugin.xml
 !/package.json
 !/www

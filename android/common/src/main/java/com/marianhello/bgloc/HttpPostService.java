@@ -21,7 +21,6 @@ import org.json.JSONTokener;
 
 import java.net.URL;
 import java.net.HttpURLConnection;
-import java.io.OutputStreamWriter;
 import java.net.URLEncoder;
 
 public class HttpPostService {
@@ -150,13 +149,16 @@ public class HttpPostService {
             }
         }
 
+        // Use byte length, not String.length(), so multi-byte UTF-8 characters
+        // (ñ, é, emoji, ...) match the Content-Length the server expects.
+        byte[] outputBytes = finalBody.getBytes(StandardCharsets.UTF_8);
         conn.setDoOutput(true);
-        conn.setFixedLengthStreamingMode(finalBody.length());
+        conn.setFixedLengthStreamingMode(outputBytes.length);
 
-        OutputStreamWriter os = null;
+        java.io.OutputStream os = null;
         try {
-            os = new OutputStreamWriter(conn.getOutputStream());
-            os.write(finalBody);
+            os = conn.getOutputStream();
+            os.write(outputBytes);
         } finally {
             if (os != null) {
                 os.flush();
