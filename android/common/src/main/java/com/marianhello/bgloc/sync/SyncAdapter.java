@@ -140,7 +140,12 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         }
         httpHeaders.put("x-batch-id", String.valueOf(batchStartMillis));
 
-        if (uploadLocations(file, url, httpHeaders)) {
+        // For URL templating in sync mode we can only resolve static queryParams keys; per-location
+        // placeholders (like {lat}) cannot apply to a multi-location batch. If the user wants per-location
+        // URL substitution they should use httpMode="single" + url= ... (real-time) or syncMode="single".
+        String resolvedUrl = com.marianhello.bgloc.http.UrlTemplateResolver.resolve(url, null, config.getQueryParams());
+        String syncMethod = config.getSyncHttpMethod();
+        if (uploadLocations(file, resolvedUrl, httpHeaders, syncMethod)) {
             logger.info("Batch sync successful");
             batchManager.setBatchCompleted(batchStartMillis);
             if (file.delete()) {
@@ -154,7 +159,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         }
     }
 
-    private boolean uploadLocations(File file, String url, HashMap httpHeaders) {
+    private boolean uploadLocations(File file, String url, HashMap httpHeaders, String method) {
         NotificationCompat.Builder builder = null;
 
         if (notificationsEnabled) {
@@ -167,7 +172,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         }
 
         try {
-            int responseCode = HttpPostService.postJSONFile(url, file, httpHeaders, this);
+            int responseCode = HttpPostService.postJSONFile(url, file, httpHeaders, this, method);
 
             // All 2xx statuses are okay
             boolean isStatusOkay = responseCode >= 200 && responseCode < 300;

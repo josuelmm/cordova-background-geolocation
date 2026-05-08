@@ -54,7 +54,7 @@ División correcta:
 
 - Tracking background fiable Android/iOS (ya existe).
 - Cola offline con `forceSync` / `clearSync` (ya existe).
-- HTTP genérico GET/POST/PUT/PATCH + URL templating (v3.4) — habilita cualquier backend, Traccar incluido.
+- HTTP genérico GET/POST/PUT/PATCH + URL templating (v3.3.0, Fase 2) — habilita cualquier backend, Traccar incluido.
 - Limpieza Android moderno: `foregroundServiceType="location"` simple, sin `dataSync` ni `org.apache.http.legacy`, `mavenCentral` (v3.3).
 - `ACCESS_BACKGROUND_LOCATION` + flujo runtime (v3.3).
 - Auto-start tras reinicio Android completo (v3.3).
@@ -66,7 +66,7 @@ División correcta:
 
 ---
 
-## Ejemplo de integración con Traccar (tras v3.4)
+## Ejemplo de integración con Traccar (v3.3.0+)
 
 Traccar acepta posiciones en múltiples protocolos. El más simple desde móvil es el **protocolo OsmAnd** (HTTP GET al puerto 5055 por defecto). El plugin lo cubre **sin código específico**, usando `httpMethod: 'GET'` y URL templating.
 
@@ -110,9 +110,9 @@ BackgroundGeolocation.start();
 
 ---
 
-## Workaround con v3.2.0 (sin GET nativo)
+## Workaround con v3.2.0 o anterior (sin GET nativo)
 
-Hasta que v3.4 esté disponible, hay dos opciones:
+Si el proyecto sigue en **v3.2.0 o anterior** (POST fijo, sin URL templating), hay dos opciones. Desde **v3.3.0** usa el ejemplo de la sección anterior.
 
 ### Opción A: gateway intermedio
 

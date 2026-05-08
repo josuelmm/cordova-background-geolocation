@@ -2,7 +2,7 @@
 <plugin xmlns="http://www.phonegap.com/ns/plugins/1.0"
     xmlns:android="http://schemas.android.com/apk/res/android"
     id="cordova-background-geolocation"
-    version="3.3.0">
+    version="3.4.0">
     <name>cordova-background-geolocation</name>
     <description>Cordova Background Geolocation Plugin</description>
     <license>Apache-2.0</license>
@@ -23,7 +23,7 @@
 
     <!-- android -->
     <platform name="android">
-        <preference name="GOOGLE_PLAY_SERVICES_VERSION" default="17+"/>
+        <preference name="GOOGLE_PLAY_SERVICES_VERSION" default="21.0.1"/>
         <preference name="ICON" default="@mipmap/ic_launcher" />
         <preference name="SMALL_ICON" default="@mipmap/ic_launcher" />
         <preference name="ACCOUNT_NAME" default="@string/app_name" />
@@ -84,6 +84,7 @@
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/headless/TaskRunnerFactory.java" target-dir="src/com/marianhello/bgloc/headless" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/headless/TaskRunner.java" target-dir="src/com/marianhello/bgloc/headless" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/HttpPostService.java" target-dir="src/com/marianhello/bgloc" />
+        <source-file src="android/common/src/main/java/com/marianhello/bgloc/http/UrlTemplateResolver.java" target-dir="src/com/marianhello/bgloc/http" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/LocationManager.java" target-dir="src/com/marianhello/bgloc" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/PluginDelegate.java" target-dir="src/com/marianhello/bgloc" />
         <source-file src="android/common/src/main/java/com/marianhello/bgloc/PluginException.java" target-dir="src/com/marianhello/bgloc" />
@@ -327,6 +328,8 @@
         <header-file src="ios/common/BackgroundGeolocation/MAURLogging.h" />
         <header-file src="ios/common/BackgroundGeolocation/MAURPostLocationTask.h" />
         <source-file src="ios/common/BackgroundGeolocation/MAURPostLocationTask.m" />
+        <header-file src="ios/common/BackgroundGeolocation/MAURUrlTemplateResolver.h" />
+        <source-file src="ios/common/BackgroundGeolocation/MAURUrlTemplateResolver.m" />
         <header-file src="ios/common/BackgroundGeolocation/MAURProviderDelegate.h" />
         <header-file src="ios/common/BackgroundGeolocation/MAURRawLocationProvider.h" />
         <source-file src="ios/common/BackgroundGeolocation/MAURRawLocationProvider.m" />

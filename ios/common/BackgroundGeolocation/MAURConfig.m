@@ -12,7 +12,7 @@
 
 @implementation MAURConfig 
 
-@synthesize stationaryRadius, distanceFilter, desiredAccuracy, _debug, activityType, activitiesInterval, _stopOnTerminate, url, syncUrl, syncThreshold, syncEnabled, httpHeaders, _saveBatteryOnBackground, maxLocations, _pauseLocationUpdates, locationProvider, _template;
+@synthesize stationaryRadius, distanceFilter, desiredAccuracy, _debug, activityType, activitiesInterval, _stopOnTerminate, url, syncUrl, syncThreshold, syncEnabled, httpHeaders, httpMethod, syncHttpMethod, httpMode, syncMode, queryParams, _showsBackgroundLocationIndicator, _saveBatteryOnBackground, maxLocations, _pauseLocationUpdates, locationProvider, _template;
 
 -(instancetype) initWithDefaults {
     self = [super init];
@@ -34,8 +34,12 @@
     syncEnabled = [NSNumber numberWithBool:YES];
     _pauseLocationUpdates = [NSNumber numberWithBool:NO];
     locationProvider = [NSNumber numberWithInt:DISTANCE_FILTER_PROVIDER];
+    httpMethod = @"POST";
+    syncHttpMethod = @"POST";
+    httpMode = @"batch";
+    syncMode = @"batch";
 //    template =
-    
+
     return self;
 }
 
@@ -79,6 +83,29 @@
     if (config[@"httpHeaders"] != nil) {
         instance.httpHeaders = config[@"httpHeaders"];
     }
+    // headers (alias of httpHeaders)
+    if (config[@"headers"] != nil) {
+        instance.httpHeaders = config[@"headers"];
+    }
+    // v3.3 Phase 2: HTTP transport
+    if (isNotNull(config[@"httpMethod"])) {
+        instance.httpMethod = [(NSString*)config[@"httpMethod"] uppercaseString];
+    }
+    if (isNotNull(config[@"syncHttpMethod"])) {
+        instance.syncHttpMethod = [(NSString*)config[@"syncHttpMethod"] uppercaseString];
+    }
+    if (isNotNull(config[@"httpMode"])) {
+        instance.httpMode = [(NSString*)config[@"httpMode"] lowercaseString];
+    }
+    if (isNotNull(config[@"syncMode"])) {
+        instance.syncMode = [(NSString*)config[@"syncMode"] lowercaseString];
+    }
+    if (config[@"queryParams"] != nil) {
+        instance.queryParams = config[@"queryParams"];
+    }
+    if (isNotNull(config[@"showsBackgroundLocationIndicator"])) {
+        instance._showsBackgroundLocationIndicator = config[@"showsBackgroundLocationIndicator"];
+    }
     if (isNotNull(config[@"saveBatteryOnBackground"])) {
         instance._saveBatteryOnBackground = config[@"saveBatteryOnBackground"];
     }
@@ -93,6 +120,10 @@
     }
     if (config[@"postTemplate"] != nil) {
         instance._template = config[@"postTemplate"];
+    }
+    // bodyTemplate (alias of postTemplate)
+    if (config[@"bodyTemplate"] != nil) {
+        instance._template = config[@"bodyTemplate"];
     }
 
     return instance;
@@ -146,6 +177,24 @@
     if ([newConfig hasHttpHeaders]) {
         merger.httpHeaders = newConfig.httpHeaders;
     }
+    if (newConfig.httpMethod != nil) {
+        merger.httpMethod = newConfig.httpMethod;
+    }
+    if (newConfig.syncHttpMethod != nil) {
+        merger.syncHttpMethod = newConfig.syncHttpMethod;
+    }
+    if (newConfig.httpMode != nil) {
+        merger.httpMode = newConfig.httpMode;
+    }
+    if (newConfig.syncMode != nil) {
+        merger.syncMode = newConfig.syncMode;
+    }
+    if (newConfig.queryParams != nil) {
+        merger.queryParams = newConfig.queryParams;
+    }
+    if ([newConfig hasShowsBackgroundLocationIndicator]) {
+        merger._showsBackgroundLocationIndicator = newConfig._showsBackgroundLocationIndicator;
+    }
     if ([newConfig hasSaveBatteryOnBackground]) {
         merger._saveBatteryOnBackground = newConfig._saveBatteryOnBackground;
     }
@@ -181,6 +230,12 @@
         copy.syncThreshold = syncThreshold;
         copy.syncEnabled = syncEnabled;
         copy.httpHeaders = httpHeaders;
+        copy.httpMethod = httpMethod;
+        copy.syncHttpMethod = syncHttpMethod;
+        copy.httpMode = httpMode;
+        copy.syncMode = syncMode;
+        copy.queryParams = queryParams;
+        copy._showsBackgroundLocationIndicator = _showsBackgroundLocationIndicator;
         copy._saveBatteryOnBackground = _saveBatteryOnBackground;
         copy.maxLocations = maxLocations;
         copy._pauseLocationUpdates = _pauseLocationUpdates;
@@ -320,6 +375,16 @@
 - (BOOL) hasSaveBatteryOnBackground
 {
     return _saveBatteryOnBackground != nil;
+}
+
+- (BOOL) hasShowsBackgroundLocationIndicator
+{
+    return _showsBackgroundLocationIndicator != nil;
+}
+
+- (BOOL) showsBackgroundLocationIndicator
+{
+    return _showsBackgroundLocationIndicator != nil ? [_showsBackgroundLocationIndicator boolValue] : NO;
 }
 
 - (BOOL) hasMaxLocations
@@ -479,6 +544,12 @@
     if ([self hasUrl]) [dict setObject:self.url forKey:@"url"];
     if ([self hasSyncUrl]) [dict setObject:self.syncUrl forKey:@"syncUrl"];
     if ([self hasHttpHeaders]) [dict setObject:self.httpHeaders forKey:@"httpHeaders"];
+    if (self.httpMethod != nil) [dict setObject:self.httpMethod forKey:@"httpMethod"];
+    if (self.syncHttpMethod != nil) [dict setObject:self.syncHttpMethod forKey:@"syncHttpMethod"];
+    if (self.httpMode != nil) [dict setObject:self.httpMode forKey:@"httpMode"];
+    if (self.syncMode != nil) [dict setObject:self.syncMode forKey:@"syncMode"];
+    if (self.queryParams != nil) [dict setObject:self.queryParams forKey:@"queryParams"];
+    if ([self hasShowsBackgroundLocationIndicator]) [dict setObject:self._showsBackgroundLocationIndicator forKey:@"showsBackgroundLocationIndicator"];
     if ([self hasStationaryRadius]) [dict setObject:self.stationaryRadius forKey:@"stationaryRadius"];
     if ([self hasDistanceFilter]) [dict setObject:self.distanceFilter forKey:@"distanceFilter"];
     if ([self hasDesiredAccuracy]) [dict setObject:self.desiredAccuracy forKey:@"desiredAccuracy"];

@@ -3,10 +3,12 @@ package com.marianhello.bgloc;
 import com.marianhello.bgloc.data.BackgroundLocation;
 import com.marianhello.bgloc.data.LocationDAO;
 import com.marianhello.bgloc.data.SessionLocationDAO;
+import com.marianhello.bgloc.http.UrlTemplateResolver;
 import com.marianhello.logging.LoggerManager;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -153,21 +155,37 @@ public class PostLocationTask {
 
     private boolean postLocation(BackgroundLocation location) {
         logger.debug("Executing PostLocationTask#postLocation");
-        JSONArray jsonLocations = new JSONArray();
 
+        JSONObject jsonLocation;
         try {
-            jsonLocations.put(mConfig.getTemplate().locationToJson(location));
+            jsonLocation = mConfig.getTemplate().locationToJson(location);
         } catch (JSONException e) {
             logger.warn("Location to json failed: {}", location.toString());
             return false;
         }
 
-        String url = mConfig.getUrl();
-        logger.debug("Posting json to url: {} headers: {}", url, mConfig.getHttpHeaders());
+        String urlTemplate = mConfig.getUrl();
+        // URL templating: substitute {lat}, {lon}, {timestamp_iso}, {device_id}, ... using the
+        // current location plus any static queryParams. For "single" mode this is per-location;
+        // for "batch" mode only static queryParams placeholders apply (location-derived ones
+        // would not make sense for an array).
+        String resolvedUrl = UrlTemplateResolver.resolve(urlTemplate, location, mConfig.getQueryParams());
+
+        String method = mConfig.getHttpMethod();
+        String mode = mConfig.getHttpMode();
+        logger.debug("Posting to url: {} method: {} mode: {} headers: {}",
+                resolvedUrl, method, mode, mConfig.getHttpHeaders());
         int responseCode;
 
         try {
-            responseCode = HttpPostService.postJSON(url, jsonLocations, mConfig.getHttpHeaders());
+            if ("single".equals(mode) || "GET".equals(method)) {
+                // GET cannot carry a JSON array body; force per-location request.
+                responseCode = HttpPostService.postJSON(resolvedUrl, jsonLocation, mConfig.getHttpHeaders(), method);
+            } else {
+                JSONArray jsonLocations = new JSONArray();
+                jsonLocations.put(jsonLocation);
+                responseCode = HttpPostService.postJSON(resolvedUrl, jsonLocations, mConfig.getHttpHeaders(), method);
+            }
         } catch (Exception e) {
             mHasConnectivity = mConnectivityListener.hasConnectivity();
             logger.warn("Error while posting locations: {}", e.getMessage());

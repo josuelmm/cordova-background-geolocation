@@ -1,8 +1,8 @@
-# Driving events (Fase 5, planificado v4.0)
+# Driving events (Fase 6, planificado v4.0)
 
 Detección de eventos de conducción **dentro del plugin**, sin servicio externo. Usa GPS + acelerómetro + giroscopio + activity recognition.
 
-> Estado: **planificado, no implementado**. Es la última fase del roadmap (después de auto-start, HTTP transport, diagnóstico y battery/OEM). Ver [ROADMAP.md](ROADMAP.md).
+> Estado: **planificado, no implementado**. Es la última fase del roadmap (después de auto-start, HTTP transport, modernización de location APIs, diagnóstico y battery/OEM). Ver [ROADMAP.md](ROADMAP.md).
 > **El plugin se mantiene backend-agnóstico**: estos eventos se emiten al cliente JS y se pueden enviar a cualquier endpoint usando el HTTP transport personalizable.
 
 ---

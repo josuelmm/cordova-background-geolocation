@@ -2,13 +2,13 @@
 
 Comportamiento del plugin cuando el usuario apaga y enciende el celular o cuando el sistema reinicia.
 
-> **Esta es la Fase 1 del roadmap.** Sin auto-start fiable, el resto (HTTP transport, diagnóstico, OEM helpers, driving) tiene poco valor en producción.
+> **Esta es la Fase 1 del roadmap.** Sin auto-start fiable, el resto (HTTP transport, modernización de APIs de ubicación, diagnóstico, OEM helpers, driving) tiene poco valor en producción.
 
 ---
 
 ## Android
 
-### Soporte actual (v3.2.0)
+### Comportamiento en v3.2.0 y anteriores
 
 El plugin **sí** reinicia el servicio tras `BOOT_COMPLETED` si:
 

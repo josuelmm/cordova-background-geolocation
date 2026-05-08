@@ -99,12 +99,17 @@ public class ConfigMapper {
         if (jObject.has("sync")) {
             config.setSyncEnabled(jObject.getBoolean("sync"));
         }
+        // headers (alias of httpHeaders)
         if (jObject.has("httpHeaders")) {
             config.setHttpHeaders(jObject.getJSONObject("httpHeaders"));
+        }
+        if (jObject.has("headers")) {
+            config.setHttpHeaders(jObject.getJSONObject("headers"));
         }
         if (jObject.has("maxLocations")) {
             config.setMaxLocations(jObject.getInt("maxLocations"));
         }
+        // bodyTemplate (alias of postTemplate)
         if (jObject.has("postTemplate")) {
             if (jObject.isNull("postTemplate")) {
                 config.setTemplate(LocationTemplateFactory.getDefault());
@@ -112,6 +117,30 @@ public class ConfigMapper {
                 Object postTemplate = jObject.get("postTemplate");
                 config.setTemplate(LocationTemplateFactory.fromJSON(postTemplate));
             }
+        }
+        if (jObject.has("bodyTemplate")) {
+            if (jObject.isNull("bodyTemplate")) {
+                config.setTemplate(LocationTemplateFactory.getDefault());
+            } else {
+                Object bodyTemplate = jObject.get("bodyTemplate");
+                config.setTemplate(LocationTemplateFactory.fromJSON(bodyTemplate));
+            }
+        }
+        // v3.3 Phase 2: HTTP transport
+        if (jObject.has("httpMethod") && !jObject.isNull("httpMethod")) {
+            config.setHttpMethod(jObject.getString("httpMethod"));
+        }
+        if (jObject.has("syncHttpMethod") && !jObject.isNull("syncHttpMethod")) {
+            config.setSyncHttpMethod(jObject.getString("syncHttpMethod"));
+        }
+        if (jObject.has("httpMode") && !jObject.isNull("httpMode")) {
+            config.setHttpMode(jObject.getString("httpMode"));
+        }
+        if (jObject.has("syncMode") && !jObject.isNull("syncMode")) {
+            config.setSyncMode(jObject.getString("syncMode"));
+        }
+        if (jObject.has("queryParams") && !jObject.isNull("queryParams")) {
+            config.setQueryParams(jObject.getJSONObject("queryParams"));
         }
         if (jObject.has("enableWatchdog")) {
             config.setEnableWatchdog(jObject.getBoolean("enableWatchdog"));
@@ -174,6 +203,12 @@ public class ConfigMapper {
         }
 
         json.put("postTemplate", template);
+
+        json.put("httpMethod", config.getHttpMethod());
+        json.put("syncHttpMethod", config.getSyncHttpMethod());
+        json.put("httpMode", config.getHttpMode());
+        json.put("syncMode", config.getSyncMode());
+        json.put("queryParams", config.getQueryParams() != null ? new JSONObject(config.getQueryParams()) : JSONObject.NULL);
 
         return json;
     }

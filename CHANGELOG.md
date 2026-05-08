@@ -1,6 +1,57 @@
 # Changelog
 
+## [3.4.0](https://github.com/josuelmm/cordova-background-geolocation/tree/3.4.0) (2026-05-08)
+
+### Phase 3 — Location API modernization (Roadmap v3.4)
+
+#### Android
+
+- **`ActivityRecognitionLocationProvider.java`:** migrated to `new LocationRequest.Builder(priority, intervalMillis)` + `Priority.PRIORITY_*` (from `com.google.android.gms.location.Priority`). Replaces `LocationRequest.create()`, `setPriority()`, `setInterval()`, `setFastestInterval()` and `LocationRequest.PRIORITY_*` — all deprecated since `play-services-location 21.0.0`. Adds `setMinUpdateIntervalMillis` (replaces `fastestInterval`) and `setWaitForAccurateLocation(false)`.
+- **`RawLocationProvider.java`:** removed `Criteria` API and `LocationManager.getBestProvider(criteria, true)`. Provider selection is now explicit GPS-first / Network-fallback. Drops the historical "boost stationary" Criteria block; behaviour matches GPS-enabled path on modern Android.
+- **`plugin.xml`:** bumped `GOOGLE_PLAY_SERVICES_VERSION` default from `17+` to `21.0.1`. Apps overriding the variable continue to work.
+
+#### iOS
+
+- **`MAURPostLocationTask.m`:** migrated `[NSURLConnection sendSynchronousRequest:returningResponse:error:]` (deprecated since iOS 9) to `NSURLSession dataTaskWithRequest:completionHandler:` synchronised via `dispatch_semaphore`. Caller still receives `error` and `statusCode` with the same semantics; the call is safe because it runs on a background queue.
+- **`MAURDistanceFilterLocationProvider.m`:** added `locationManagerDidChangeAuthorization:` (iOS 14+) which is the canonical replacement for the deprecated `locationManager:didChangeAuthorizationStatus:`. Both callbacks share a private helper `handleAuthorizationStatusChange:`. The legacy callback is short-circuited on iOS 14+ to avoid double-notifying delegates.
+- **`MAURDistanceFilterLocationProvider.m` + `MAURConfig`:** new `showsBackgroundLocationIndicator` config option (iOS 11+). When `true`, iOS shows the blue status indicator while the app uses location in the background.
+
+#### TypeScript
+
+- `www/BackgroundGeolocation.d.ts`: added `showsBackgroundLocationIndicator?: boolean` (iOS) with documentation.
+
+#### Versions
+
+- `cordovaDependencies."3.4.0"`: requires `cordova-ios >= 11.0.0` (needed for the new `showsBackgroundLocationIndicator` and the iOS 14+ auth callback).
+
+### Pending in Phase 3 (deferred to a follow-up release)
+
+- `DistanceFilterLocationProvider.java`: full `Criteria` removal, `getCurrentLocation` migration, `requestLocationUpdates` with `LocationRequest.Builder` (API 31+) + legacy fallback. This is a larger refactor of stationary detection and stop-detection paths.
+- Stationary detection: replace `AlarmManager.setInexactRepeating` with FGS-driven sampling.
+
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/3.3.0...3.4.0)
+
+---
+
 ## [3.3.0](https://github.com/josuelmm/cordova-background-geolocation/tree/3.3.0) (2026-05-07)
+
+### Phase 2 — Backend-agnostic HTTP transport (Roadmap v3.3)
+
+#### Added
+
+- **`httpMethod`** and **`syncHttpMethod`** config options. Values: `POST` (default), `GET`, `PUT`, `PATCH`. Removes the previously hardcoded `POST` in Android (`HttpPostService.java`) and iOS (`MAURPostLocationTask.m`, `MAURBackgroundSync.m`).
+- **`httpMode`** and **`syncMode`** config options. Values: `batch` (default) or `single` (one HTTP request per location). `single` is required when `httpMethod === 'GET'`.
+- **URL templating.** The plugin now substitutes placeholders in `url`, `syncUrl` (and string values inside `bodyTemplate`/`postTemplate`) using the current location plus any `queryParams`. Built-in placeholders: `{latitude}`, `{longitude}`, `{lat}`, `{lon}`, `{time}`, `{timestamp}`, `{timestamp_iso}`, `{speed}`, `{altitude}`, `{bearing}`, `{accuracy}`, `{provider}`. Any extra `queryParams` keys are also available (e.g. `{device_id}`, `{token}`).
+- **`queryParams`** config option. Static dictionary used to fill placeholders not derived from a location.
+- **`headers`** config option as alias of `httpHeaders` (if both are present, `headers` wins).
+- **`bodyTemplate`** config option as alias of `postTemplate`.
+- New helpers: Android `com.marianhello.bgloc.http.UrlTemplateResolver` and iOS `MAURUrlTemplateResolver`.
+
+#### Changed
+
+- **`Config` / `MAURConfig`** extended with the new transport options. Parcelable read/write, copy constructor, defaults, `merge`, `toString`, `toDictionary` and `ConfigMapper` updated accordingly. All existing apps using only `url` + `httpHeaders` + `postTemplate` continue to work unchanged.
+- **`HttpPostService`** Android: `setRequestMethod` is now driven by the configured method. GET requests skip the body entirely. New static helpers `postJSON(url, json, headers, method)` and `postJSONFile(url, file, headers, listener, method)`.
+- **`MAURPostLocationTask` / `MAURBackgroundSync`** iOS: `setHTTPMethod` is parameterised. URL templates are resolved before each request. `single` mode posts one location per request.
 
 ### Phase 1 — Auto-start Android (Roadmap v3.3)
 
@@ -35,10 +86,11 @@
 #### Documentation
 
 - **`docs/auto-start.md`** — full guide for boot/restart behavior (Android current state, gaps, v3.3 plan with concrete diffs; iOS limitations).
-- **`docs/http-transport.md`** — backend-agnostic HTTP transport plan (Phase 2, v3.4).
+- **`docs/http-transport.md`** — backend-agnostic HTTP transport (Phase 2, v3.3.0).
 - **`docs/traccar.md`** — Traccar as an optional backend example (geofences, events, history); plugin remains backend-agnostic.
-- **`docs/driving-events.md`** — driving events plan (Phase 5, v4.0).
-- **`docs/ROADMAP.md`** — phases 1→5.
+- **`docs/driving-events.md`** — driving events plan (Phase 6, v4.0).
+- **`docs/location-modernization.md`** — location API modernization plan (Phase 3, v3.4).
+- **`docs/ROADMAP.md`** — phases 1→6.
 - **`REVIEW_3.2.0.md`** — full audit and rationale for the roadmap.
 
 [Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/3.2.0...3.3.0)

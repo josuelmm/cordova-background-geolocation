@@ -32,6 +32,7 @@ public class HttpPostService {
     private static final int READ_TIMEOUT_MS = 120_000;
 
     private String mUrl;
+    private String mMethod = "POST";
     private HttpURLConnection mHttpURLConnection;
 
     public interface UploadingProgressListener {
@@ -42,8 +43,29 @@ public class HttpPostService {
         mUrl = url;
     }
 
+    public HttpPostService(String url, String method) {
+        mUrl = url;
+        mMethod = normalizeMethod(method);
+    }
+
     public HttpPostService(final HttpURLConnection httpURLConnection) {
         mHttpURLConnection = httpURLConnection;
+    }
+
+    public void setMethod(String method) {
+        mMethod = normalizeMethod(method);
+    }
+
+    private static String normalizeMethod(String method) {
+        if (method == null || method.isEmpty()) return "POST";
+        String m = method.trim().toUpperCase();
+        if (m.equals("POST") || m.equals("GET") || m.equals("PUT") || m.equals("PATCH")) return m;
+        return "POST";
+    }
+
+    /** Returns true when the HTTP method has no request body (GET). */
+    private boolean isBodyless() {
+        return "GET".equals(mMethod);
     }
 
     private HttpURLConnection openConnection() throws IOException {
@@ -84,7 +106,7 @@ public class HttpPostService {
         if (headers == null) {
             headers = new HashMap();
         }
-        
+
         String contentType = null;
         for (Object keyObj : headers.keySet()) {
             String key = (String) keyObj;
@@ -96,7 +118,29 @@ public class HttpPostService {
         if (contentType == null) {
             contentType = "application/json";
         }
-        // Prepare body according to Content-Type so header and body always match
+
+        HttpURLConnection conn = this.openConnection();
+        conn.setRequestMethod(mMethod);
+
+        // Set headers (including Content-Type) up-front; needed for both bodyless and body requests.
+        if (!isBodyless()) {
+            conn.setRequestProperty("Content-Type", contentType);
+        }
+        Iterator<Map.Entry<String, String>> it = headers.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, String> pair = it.next();
+            if (!pair.getKey().equalsIgnoreCase("Content-Type")) {
+                conn.setRequestProperty(pair.getKey(), pair.getValue());
+            }
+        }
+
+        // GET: no body; data is expected to live in the URL (URL templating).
+        if (isBodyless()) {
+            conn.setDoOutput(false);
+            return conn.getResponseCode();
+        }
+
+        // Prepare body according to Content-Type so header and body always match.
         String finalBody = body;
         if (contentType.equalsIgnoreCase("application/x-www-form-urlencoded")) {
             try {
@@ -105,21 +149,10 @@ public class HttpPostService {
                 finalBody = body;
             }
         }
-        
-        HttpURLConnection conn = this.openConnection();
+
         conn.setDoOutput(true);
         conn.setFixedLengthStreamingMode(finalBody.length());
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("Content-Type", contentType);
-        
-        Iterator<Map.Entry<String, String>> it = headers.entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry<String, String> pair = it.next();
-            if (!pair.getKey().equalsIgnoreCase("Content-Type")) {
-                conn.setRequestProperty(pair.getKey(), pair.getValue());
-            }
-        }
-        
+
         OutputStreamWriter os = null;
         try {
             os = new OutputStreamWriter(conn.getOutputStream());
@@ -251,6 +284,20 @@ public class HttpPostService {
         }
 
         HttpURLConnection conn = this.openConnection();
+        conn.setRequestMethod(mMethod);
+        if (isBodyless()) {
+            conn.setDoOutput(false);
+            // No headers loop / body for GET; we just consume the response.
+            Iterator<Map.Entry<String, String>> hit = headers.entrySet().iterator();
+            while (hit.hasNext()) {
+                Map.Entry<String, String> pair = hit.next();
+                if (!pair.getKey().equalsIgnoreCase("Content-Type")) {
+                    conn.setRequestProperty(pair.getKey(), pair.getValue());
+                }
+            }
+            if (listener != null) listener.onProgress(100);
+            return conn.getResponseCode();
+        }
         conn.setDoInput(false);
         conn.setDoOutput(true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
@@ -258,7 +305,6 @@ public class HttpPostService {
         } else {
             conn.setChunkedStreamingMode(0);
         }
-        conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", contentType);
         Iterator<Map.Entry<String, String>> it = headers.entrySet().iterator();
         while (it.hasNext()) {
@@ -286,17 +332,29 @@ public class HttpPostService {
     }
 
     public static int postJSON(String url, JSONObject json, Map headers) throws IOException {
-        HttpPostService service = new HttpPostService(url);
-        return service.postJSON(json, headers);
+        return postJSON(url, json, headers, "POST");
     }
 
     public static int postJSON(String url, JSONArray json, Map headers) throws IOException {
-        HttpPostService service = new HttpPostService(url);
-        return service.postJSON(json, headers);
+        return postJSON(url, json, headers, "POST");
     }
 
     public static int postJSONFile(String url, File file, Map headers, UploadingProgressListener listener) throws IOException {
-        HttpPostService service = new HttpPostService(url);
+        return postJSONFile(url, file, headers, listener, "POST");
+    }
+
+    public static int postJSON(String url, JSONObject json, Map headers, String method) throws IOException {
+        HttpPostService service = new HttpPostService(url, method);
+        return service.postJSON(json, headers);
+    }
+
+    public static int postJSON(String url, JSONArray json, Map headers, String method) throws IOException {
+        HttpPostService service = new HttpPostService(url, method);
+        return service.postJSON(json, headers);
+    }
+
+    public static int postJSONFile(String url, File file, Map headers, UploadingProgressListener listener, String method) throws IOException {
+        HttpPostService service = new HttpPostService(url, method);
         return service.postJSONFile(file, headers, listener);
     }
 }

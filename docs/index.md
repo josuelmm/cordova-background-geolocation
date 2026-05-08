@@ -19,12 +19,13 @@ The NPM package can be found at [@josuelmm/cordova-background-geolocation](https
 
 > **Plugin global y backend-agnóstico.** Sin lógica hardcodeada de proveedores. Cualquier backend (Traccar, GPSWox, Laravel, Node, Firebase, n8n, API propia) se conecta vía HTTP transport personalizable.
 
-- [Roadmap](ROADMAP.md) — fases de desarrollo: 1) Auto-start, 2) HTTP, 3) Diagnóstico, 4) Battery/OEM, 5) Driving.
-- [Auto-start tras reinicio (Fase 1)](auto-start.md) — comportamiento Android/iOS al encender el dispositivo.
-- [HTTP transport personalizable (Fase 2)](http-transport.md) — GET/POST/PUT/PATCH + URL templating + body templating.
-- [Diagnóstico, heartbeat, sync events, mockLocationPolicy (Fase 3)](ROADMAP.md#v35--diagnóstico-fase-3).
-- [Battery / OEM helpers (Fase 4)](ROADMAP.md#v36--battery--oem-helpers-fase-4).
-- [Driving events (Fase 5, v4.0)](driving-events.md).
+- [Roadmap](ROADMAP.md) — fases: 1) Auto-start ✅, 2) HTTP ✅, 3) Modernización location APIs, 4) Diagnóstico, 5) Battery/OEM, 6) Driving.
+- [Auto-start tras reinicio (Fase 1)](auto-start.md) — entregado en v3.3.0.
+- [HTTP transport personalizable (Fase 2)](http-transport.md) — entregado en v3.3.0.
+- [Modernización location APIs (Fase 3, v3.4)](location-modernization.md) — `LocationRequest.Builder`, eliminar `Criteria`, `NSURLSession`, etc.
+- [Diagnóstico, heartbeat, sync events, mockLocationPolicy (Fase 4, v3.5)](ROADMAP.md#v35--diagnóstico-fase-4).
+- [Battery / OEM helpers (Fase 5, v3.6)](ROADMAP.md#v36--battery--oem-helpers-fase-5).
+- [Driving events (Fase 6, v4.0)](driving-events.md).
 - [Traccar como ejemplo de integración](traccar.md) — backend opcional para geocercas, eventos, historial; nunca hardcodeado en el plugin.
 
 ## Installing the plugin

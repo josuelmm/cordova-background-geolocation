@@ -364,6 +364,67 @@ export interface ConfigureOptions {
   httpHeaders?: any;
 
   /**
+   * Alias of `httpHeaders` introduced for the v3.3 backend-agnostic transport.
+   * If both are provided, `headers` takes precedence.
+   *
+   * Platform: Android, iOS
+   * @since 3.3.0
+   */
+  headers?: { [key: string]: string };
+
+  /**
+   * HTTP method used to post each location to `url`. Default `POST`.
+   * Use `GET` together with URL templating for backends that expect query-string transport.
+   *
+   * Platform: Android, iOS
+   * @since 3.3.0
+   */
+  httpMethod?: 'POST' | 'GET' | 'PUT' | 'PATCH';
+
+  /**
+   * HTTP method used by the sync queue when posting failed locations to `syncUrl`. Default `POST`.
+   *
+   * Platform: Android, iOS
+   * @since 3.3.0
+   */
+  syncHttpMethod?: 'POST' | 'GET' | 'PUT' | 'PATCH';
+
+  /**
+   * How real-time locations are delivered to `url`.
+   *  - `batch` (default): one HTTP request with an array of locations.
+   *  - `single`: one HTTP request per location.
+   * `single` is required when `httpMethod` is `GET` (no body).
+   *
+   * Platform: Android, iOS
+   * @since 3.3.0
+   */
+  httpMode?: 'batch' | 'single';
+
+  /**
+   * How sync-queue locations are delivered to `syncUrl`. Default `batch`.
+   *
+   * Platform: Android, iOS
+   * @since 3.3.0
+   */
+  syncMode?: 'batch' | 'single';
+
+  /**
+   * Static placeholder values used by URL/body templating. The plugin replaces
+   * `{key}` occurrences in `url`, `syncUrl` and string values inside `bodyTemplate`/`postTemplate`.
+   *
+   * Built-in placeholders resolved from each location:
+   * `{latitude}`, `{longitude}`, `{lat}`, `{lon}`, `{time}`, `{timestamp}`, `{timestamp_iso}`,
+   * `{speed}`, `{altitude}`, `{bearing}`, `{accuracy}`, `{provider}`.
+   * Any extra keys in `queryParams` are also available (e.g. `{device_id}`, `{token}`).
+   *
+   * Placeholders not found are left as-is so partial templates keep working.
+   *
+   * Platform: Android, iOS
+   * @since 3.3.0
+   */
+  queryParams?: { [key: string]: string | number };
+
+  /**
    * Limit maximum number of locations stored into db.
    *
    * Platform: all
@@ -380,6 +441,25 @@ export interface ConfigureOptions {
    * Provider: all
    */
   postTemplate?: any;
+
+  /**
+   * Alias of `postTemplate` introduced for the v3.3 backend-agnostic transport.
+   * If both are provided, `bodyTemplate` takes precedence.
+   *
+   * Platform: Android, iOS
+   * @since 3.3.0
+   */
+  bodyTemplate?: any;
+
+  /**
+   * iOS 11+ only. When `true`, iOS shows the blue status bar / pill while the app uses
+   * location in the background. Apple recommends `true` for user transparency in apps that
+   * track continuously. Default: system default (`false`).
+   *
+   * Platform: iOS
+   * @since 3.4.0
+   */
+  showsBackgroundLocationIndicator?: boolean;
 }
 
 export interface LocationOptions {

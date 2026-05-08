@@ -2,7 +2,34 @@
 
 **for cordova-plugin-background-geolocation**
 
+## [3.4.0] - 2026-05-08
+
+### Phase 3 — Location API modernization
+
+- Android `ActivityRecognitionLocationProvider`: `LocationRequest.Builder` + `Priority.PRIORITY_*` (replaces deprecated `LocationRequest.create()`, `setPriority/setInterval/setFastestInterval`, `LocationRequest.PRIORITY_*`).
+- Android `RawLocationProvider`: removed `Criteria` and `getBestProvider`; explicit GPS-first / Network-fallback selection.
+- `plugin.xml`: `GOOGLE_PLAY_SERVICES_VERSION` default raised to `21.0.1`.
+- iOS `MAURPostLocationTask`: `NSURLConnection` (deprecated iOS 9) replaced with `NSURLSession dataTaskWithRequest:` + `dispatch_semaphore` for the synchronous post path.
+- iOS `MAURDistanceFilterLocationProvider`: added `locationManagerDidChangeAuthorization:` (iOS 14+) alongside the legacy callback; short-circuit legacy on iOS 14+ to avoid double notifications.
+- iOS `MAURConfig` + `MAURDistanceFilterLocationProvider`: new `showsBackgroundLocationIndicator` config (iOS 11+).
+- TypeScript: `showsBackgroundLocationIndicator?: boolean` added to `ConfigureOptions`.
+- `cordova-ios >= 11.0.0` required for `3.4.0`.
+
+Pending in Phase 3 (follow-up):
+- Full Android `DistanceFilterLocationProvider` migration (Criteria removal + `getCurrentLocation` + new `requestLocationUpdates` overload).
+- Replace `AlarmManager.setInexactRepeating` stationary sampling with FGS-driven `LocationCallback`.
+
 ## [3.3.0] - 2026-05-07
+
+### Phase 2 — Backend-agnostic HTTP transport
+
+- Added: `httpMethod`, `syncHttpMethod` (`POST` default, also `GET`, `PUT`, `PATCH`).
+- Added: `httpMode`, `syncMode` (`batch` default, `single` for one request per location). `single` is required with `GET`.
+- Added: URL templating with placeholders `{latitude}`, `{longitude}`, `{lat}`, `{lon}`, `{time}`, `{timestamp}`, `{timestamp_iso}`, `{speed}`, `{altitude}`, `{bearing}`, `{accuracy}`, `{provider}` plus any keys from `queryParams`.
+- Added: `queryParams`, `headers` (alias of `httpHeaders`), `bodyTemplate` (alias of `postTemplate`).
+- Added: helpers `com.marianhello.bgloc.http.UrlTemplateResolver` (Android) and `MAURUrlTemplateResolver` (iOS).
+- Changed: `HttpPostService` (Android), `MAURPostLocationTask` and `MAURBackgroundSync` (iOS) no longer hardcode POST.
+- Compatibility: existing apps using only `url` + `httpHeaders` + `postTemplate` keep working.
 
 ### Phase 1 — Auto-start Android
 
@@ -16,7 +43,7 @@
 - Removed: `<uses-library org.apache.http.legacy>` and `useLibrary 'org.apache.http.legacy'` (no longer used; the plugin uses `HttpURLConnection`).
 - Removed: dead constant `FOREGROUND_SERVICE_TYPE_LOCATION = 4` in `LocationServiceImpl.java` (incorrect value; never referenced).
 - Build: `jcenter()` → `mavenCentral()` in `android/build.gradle`.
-- Docs: new planning docs `docs/auto-start.md`, `docs/http-transport.md`, `docs/traccar.md`, `docs/driving-events.md`, `docs/ROADMAP.md`. Audit in `REVIEW_3.2.0.md`.
+- Docs: planning docs `docs/auto-start.md`, `docs/http-transport.md`, `docs/traccar.md`, `docs/driving-events.md`, `docs/ROADMAP.md`, `docs/location-modernization.md` (Fase 3 / v3.4). Audit in `REVIEW_3.2.0.md` (§8–§9 alineados al roadmap vigente).
 
 ## [3.2.0] - 2026-02-28
 

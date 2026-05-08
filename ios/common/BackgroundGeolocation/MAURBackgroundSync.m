@@ -56,6 +56,11 @@
 
 - (void) sync:(NSString * _Nonnull)url withTemplate:(id)locationTemplate withHttpHeaders:(NSMutableDictionary * _Nullable)httpHeaders
 {
+    [self sync:url withTemplate:locationTemplate withHttpHeaders:httpHeaders withMethod:@"POST"];
+}
+
+- (void) sync:(NSString * _Nonnull)url withTemplate:(id)locationTemplate withHttpHeaders:(NSMutableDictionary * _Nullable)httpHeaders withMethod:(NSString * _Nullable)method
+{
     MAURSQLiteLocationDAO* locationDAO = [MAURSQLiteLocationDAO sharedInstance];
     NSArray *locations = [locationDAO getLocationsForSync];
     
@@ -77,7 +82,8 @@
     uint64_t bytesTotalForThisFile = [[[NSFileManager defaultManager] attributesOfItemAtPath:jsonUrl.path error:nil] fileSize];
     
     NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:[NSURL URLWithString:url]];
-    [request setHTTPMethod:@"POST"];
+    NSString *resolvedMethod = (method != nil && method.length > 0) ? [method uppercaseString] : @"POST";
+    [request setHTTPMethod:resolvedMethod];
     [request setTimeoutInterval:120]; // Prevents sync from hanging indefinitely if server does not respond
     [request setValue:[NSString stringWithFormat:@"%llu", bytesTotalForThisFile] forHTTPHeaderField:@"Content-Length"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];

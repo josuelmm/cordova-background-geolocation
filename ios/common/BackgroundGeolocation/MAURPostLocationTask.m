@@ -15,6 +15,7 @@
 #import "MAURPostLocationTask.h"
 #import "MAURSQLiteLocationDAO.h"
 #import "MAURSessionLocationDAO.h"
+#import "MAURUrlTemplateResolver.h"
 
 static NSString * const TAG = @"MAURPostLocationTask";
 
@@ -117,28 +118,47 @@ static MAURLocationTransform s_locationTransform = nil;
     });
 }
 
-- (BOOL) post:(MAURLocation*)location 
-         toUrl:(NSString*)url 
-    withTemplate:(id)locationTemplate 
- withHttpHeaders:(NSMutableDictionary*)httpHeaders 
+- (BOOL) post:(MAURLocation*)location
+         toUrl:(NSString*)url
+    withTemplate:(id)locationTemplate
+ withHttpHeaders:(NSMutableDictionary*)httpHeaders
          error:(NSError * __autoreleasing *)outError
 {
-    NSArray *locations = [[NSArray alloc] initWithObjects:[location toResultFromTemplate:locationTemplate], nil];
-    NSData *data = [NSJSONSerialization dataWithJSONObject:locations options:0 error:outError];
-    if (!data) {
-        return NO;
+    // v3.3 Phase 2: backend-agnostic transport.
+    // Resolve URL template using current location + queryParams (for both single and batch modes).
+    NSString *resolvedUrl = [MAURUrlTemplateResolver resolve:url location:location queryParams:self.config.queryParams];
+
+    NSString *method = self.config.httpMethod ?: @"POST";
+    NSString *mode = self.config.httpMode ?: @"batch";
+    BOOL isBodyless = [@"GET" isEqualToString:method];
+    BOOL singleMode = isBodyless || [@"single" isEqualToString:mode];
+
+    NSData *data = nil;
+    if (!isBodyless) {
+        // For single mode (or body methods that prefer one location per request) send a JSONObject;
+        // for batch send the array (current behaviour).
+        if (singleMode) {
+            data = [NSJSONSerialization dataWithJSONObject:[location toResultFromTemplate:locationTemplate] options:0 error:outError];
+        } else {
+            NSArray *locations = [[NSArray alloc] initWithObjects:[location toResultFromTemplate:locationTemplate], nil];
+            data = [NSJSONSerialization dataWithJSONObject:locations options:0 error:outError];
+        }
+        if (!data) {
+            return NO;
+        }
     }
-    
-    NSString *jsonStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    
+
+    NSString *jsonStr = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
     NSString *contentType = [httpHeaders objectForKey:@"Content-Type"];
     if (!contentType) {
         contentType = @"application/json";
     }
-    
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
-    [request setValue:contentType forHTTPHeaderField:@"Content-Type"];
-    [request setHTTPMethod:@"POST"];
+
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:resolvedUrl]];
+    [request setHTTPMethod:method];
+    if (!isBodyless) {
+        [request setValue:contentType forHTTPHeaderField:@"Content-Type"];
+    }
     if (httpHeaders != nil) {
         for (id key in httpHeaders) {
             if (![key isEqualToString:@"Content-Type"]) {
@@ -147,36 +167,54 @@ static MAURLocationTransform s_locationTransform = nil;
             }
         }
     }
-    
-    if ([contentType isEqualToString:@"application/x-www-form-urlencoded"]) {
-        id jsonObject = [NSJSONSerialization JSONObjectWithData:data options:0 error:outError];
-        NSDictionary *dict = nil;
-        if ([jsonObject isKindOfClass:[NSArray class]] && [jsonObject count] == 1) {
-            dict = [jsonObject firstObject];
-        } else if ([jsonObject isKindOfClass:[NSDictionary class]]) {
-            dict = jsonObject;
-        }
-        if (dict) {
-            NSMutableArray *parts = [NSMutableArray array];
-            for (NSString *key in dict) {
-                NSString *value = [NSString stringWithFormat:@"%@", dict[key]];
-                NSString *encodedKey = [key stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
-                NSString *encodedValue = [value stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
-                NSString *part = [NSString stringWithFormat:@"%@=%@", encodedKey, encodedValue];
-                [parts addObject:part];
+
+    if (!isBodyless) {
+        if ([contentType isEqualToString:@"application/x-www-form-urlencoded"]) {
+            id jsonObject = [NSJSONSerialization JSONObjectWithData:data options:0 error:outError];
+            NSDictionary *dict = nil;
+            if ([jsonObject isKindOfClass:[NSArray class]] && [jsonObject count] == 1) {
+                dict = [jsonObject firstObject];
+            } else if ([jsonObject isKindOfClass:[NSDictionary class]]) {
+                dict = jsonObject;
             }
-            NSString *encodedString = [parts componentsJoinedByString:@"&"];
-            [request setHTTPBody:[encodedString dataUsingEncoding:NSUTF8StringEncoding]];
+            if (dict) {
+                NSMutableArray *parts = [NSMutableArray array];
+                for (NSString *key in dict) {
+                    NSString *value = [NSString stringWithFormat:@"%@", dict[key]];
+                    NSString *encodedKey = [key stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+                    NSString *encodedValue = [value stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+                    NSString *part = [NSString stringWithFormat:@"%@=%@", encodedKey, encodedValue];
+                    [parts addObject:part];
+                }
+                NSString *encodedString = [parts componentsJoinedByString:@"&"];
+                [request setHTTPBody:[encodedString dataUsingEncoding:NSUTF8StringEncoding]];
+            } else {
+                [request setHTTPBody:[jsonStr dataUsingEncoding:NSUTF8StringEncoding]];
+            }
         } else {
             [request setHTTPBody:[jsonStr dataUsingEncoding:NSUTF8StringEncoding]];
         }
-    } else {
-        [request setHTTPBody:[jsonStr dataUsingEncoding:NSUTF8StringEncoding]];
     }
-    
-    NSHTTPURLResponse* urlResponse = nil;
-    [NSURLConnection sendSynchronousRequest:request returningResponse:&urlResponse error:outError];
-    
+
+    // v3.4: NSURLSession (iOS 7+) replaces deprecated [NSURLConnection sendSynchronousRequest:].
+    // We run on a background queue (see -add: dispatch_async) so a semaphore-based wait is safe.
+    __block NSHTTPURLResponse *urlResponse = nil;
+    __block NSError *taskError = nil;
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *dataTask = [[NSURLSession sharedSession]
+        dataTaskWithRequest:request
+          completionHandler:^(NSData * _Nullable d, NSURLResponse * _Nullable response, NSError * _Nullable err) {
+            urlResponse = (NSHTTPURLResponse *)response;
+            taskError = err;
+            dispatch_semaphore_signal(sema);
+        }];
+    [dataTask resume];
+    // 120s ceiling to mirror the previous synchronous timeout; URLSession also enforces its own.
+    dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_SEC)));
+    if (taskError != nil && outError != NULL) {
+        *outError = taskError;
+    }
+
     NSInteger statusCode = urlResponse.statusCode;
     
     if (statusCode == 285)
@@ -220,7 +258,11 @@ static MAURLocationTransform s_locationTransform = nil;
     if (![self.config syncEnabled] || ![self.config hasValidSyncUrl]) {
         return;
     }
-    [uploader sync:self.config.syncUrl withTemplate:self.config._template withHttpHeaders:self.config.httpHeaders];
+    // For sync (batch) only static queryParams placeholders apply; per-location templating
+    // belongs in real-time post (httpMode="single" + httpMethod=GET) instead.
+    NSString *resolvedSyncUrl = [MAURUrlTemplateResolver resolve:self.config.syncUrl location:nil queryParams:self.config.queryParams];
+    NSString *syncMethod = self.config.syncHttpMethod ?: @"POST";
+    [uploader sync:resolvedSyncUrl withTemplate:self.config._template withHttpHeaders:self.config.httpHeaders withMethod:syncMethod];
 }
 
 #pragma mark - Location transform

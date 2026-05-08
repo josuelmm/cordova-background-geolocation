@@ -1,20 +1,21 @@
 # Roadmap
 
-Estado actual: **v3.2.0** (2026-02-28).
+Estado actual: **v3.3.0** (Fase 1 + Fase 2 completadas).
 
 > **Principio de diseño.** Este es un plugin **global y backend-agnóstico**. No incorpora lógica de Traccar, GPSWox, OsmAnd ni de ninguna API propietaria. La compatibilidad con cualquier backend se logra mediante **transporte HTTP personalizable** (URL templating + body templating + métodos HTTP genéricos). Traccar y similares solo se documentan como **ejemplos de integración**, nunca como modo interno.
 
 Orden de implementación (de mayor a menor impacto):
 
-1. Auto-start Android
-2. HTTP transport personalizable
-3. Diagnóstico
-4. Battery / OEM helpers
-5. Driving / crash / SOS
+1. ✅ Auto-start Android (Fase 1, v3.3)
+2. ✅ HTTP transport personalizable (Fase 2, v3.3)
+3. Modernización location APIs Android/iOS (Fase 3, v3.4)
+4. Diagnóstico (Fase 4, v3.5)
+5. Battery / OEM helpers (Fase 5, v3.6)
+6. Driving / crash / SOS (Fase 6, v4.0)
 
 ---
 
-## v3.3 — Auto-start Android (Fase 1)
+## v3.3 (Fase 1, ya entregada en 3.3.0) — Auto-start Android
 
 Prioridad: alta. Sin auto-start fiable, el resto da igual.
 
@@ -50,7 +51,7 @@ Detalle: ver [auto-start.md](auto-start.md).
 
 ---
 
-## v3.4 — HTTP transport personalizable (Fase 2)
+## v3.3 (Fase 2, ya entregada en 3.3.0) — HTTP transport personalizable
 
 Prioridad: alta. Habilita integración con **cualquier backend** sin modo dedicado por proveedor.
 
@@ -94,7 +95,46 @@ Detalle y ejemplos: ver [http-transport.md](http-transport.md).
 
 ---
 
-## v3.5 — Diagnóstico (Fase 3)
+## v3.4 — Modernización location APIs (Fase 3)
+
+Prioridad: alta. Antes del diagnóstico, sanea las APIs nativas para que el diagnóstico no reporte sobre stack obsoleto y para evitar que Google/Apple rompan el plugin con cualquier release mayor.
+
+### Android
+
+- `ActivityRecognitionLocationProvider.java`: migrar `LocationRequest.create()` → `new LocationRequest.Builder(priority, intervalMillis)` y `Priority.PRIORITY_*` (sustituye `LocationRequest.PRIORITY_*` deprecated en `play-services-location 21.0.0`).
+- `DistanceFilterLocationProvider.java`:
+  - Eliminar `Criteria` (deprecated API 31+).
+  - Reemplazar `LocationManager.getBestProvider(criteria, true)` por selección explícita GPS/Network.
+  - Reemplazar `LocationManager.getLastKnownLocation(provider)` por `LocationManager.getCurrentLocation(provider, null, executor, consumer)`.
+  - Reemplazar `requestLocationUpdates(String, long, float, LocationListener)` por la sobrecarga con `LocationRequest.Builder` (API 31+) con fallback al método clásico.
+- `RawLocationProvider.java`: misma migración.
+- Stationary detection: retirar `AlarmManager.setInexactRepeating` (Doze lo difiere a 9-15 min). El FGS ya está vivo; mantener `LocationCallback` con interval grande durante stationary en lugar del scheduler externo.
+- Bump `play-services-location` default a 21.x.
+
+### iOS
+
+- `MAURPostLocationTask.m`: migrar `[NSURLConnection sendSynchronousRequest:returningResponse:error:]` (deprecated iOS 9+) a `NSURLSession dataTaskWithRequest:completionHandler:` con `dispatch_semaphore` para mantener sincronía en thread de background.
+- `MAURDistanceFilterLocationProvider.m` / `MAURConfig`:
+  - Exponer `showsBackgroundLocationIndicator` en config.
+  - Documentar `pausesLocationUpdatesAutomatically` y `activityType` en `.d.ts`.
+- Implementar `locationManagerDidChangeAuthorization:` (iOS 14+) manteniendo el legacy.
+- Persistir `accuracyAuthorization` (Precise vs Reduced) para exponerlo en Fase 4.
+
+### TypeScript
+
+- `www/BackgroundGeolocation.d.ts`: añadir `showsBackgroundLocationIndicator?: boolean` y documentar valores válidos de `activityType`.
+
+### Compatibilidad
+
+- Backward-compatible: `desiredAccuracy` (0/10/100/1000) sigue funcionando, solo cambia el mapeo interno a `Priority.*`.
+- Min Android: `getCurrentLocation` requiere API 30+; las APIs deprecated se conservan tras `Build.VERSION.SDK_INT` checks como fallback.
+- Min iOS: `NSURLSession` (iOS 7+) ya disponible; `locationManagerDidChangeAuthorization:` requiere iOS 14+ con fallback al legacy.
+
+Detalle y diff por archivo: ver [location-modernization.md](location-modernization.md).
+
+---
+
+## v3.5 — Diagnóstico (Fase 4)
 
 - `getDiagnostics()` extendido:
   - Android: `isRunning`, `locationServicesEnabled`, `fineLocationGranted`, `coarseLocationGranted`, `backgroundLocationGranted`, `notificationPermissionGranted`, `activityRecognitionGranted`, `batteryOptimizationIgnored`, `manufacturer`, `lastLocationAt`, `pendingSyncCount`, `startOnBoot`, `foregroundServiceType`.
@@ -105,7 +145,7 @@ Detalle y ejemplos: ver [http-transport.md](http-transport.md).
 
 ---
 
-## v3.6 — Battery / OEM helpers (Fase 4)
+## v3.6 — Battery / OEM helpers (Fase 5)
 
 - Helpers batería: `isIgnoringBatteryOptimizations`, `requestIgnoreBatteryOptimizations`, `openBatterySettings`.
 - `openAutoStartSettings()` por fabricante (Xiaomi MIUI, Huawei EMUI, Oppo ColorOS, Vivo FunTouch, Samsung One UI).
@@ -114,7 +154,7 @@ Detalle y ejemplos: ver [http-transport.md](http-transport.md).
 
 ---
 
-## v4.0 — Driver insights (Fase 5)
+## v4.0 — Driver insights (Fase 6)
 
 Detección dentro del plugin usando GPS + acelerómetro + giroscopio + activity recognition.
 
@@ -129,4 +169,4 @@ Detalle: ver [driving-events.md](driving-events.md).
 
 ## Backend layer (opcional, fuera del plugin)
 
-Si la app necesita geocercas, eventos espaciales, historial server-side, viajes/paradas o reportes, esa lógica vive en una capa backend, **no** en el plugin. Traccar es una opción razonable; ver [traccar.md](traccar.md) como ejemplo de integración HTTP. El plugin se conecta a Traccar (o a cualquier otra API) usando únicamente el HTTP transport personalizable de v3.4.
+Si la app necesita geocercas, eventos espaciales, historial server-side, viajes/paradas o reportes, esa lógica vive en una capa backend, **no** en el plugin. Traccar es una opción razonable; ver [traccar.md](traccar.md) como ejemplo de integración HTTP. El plugin se conecta a Traccar (o a cualquier otra API) usando únicamente el HTTP transport personalizable entregado en v3.3.

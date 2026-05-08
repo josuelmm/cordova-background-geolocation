@@ -31,6 +31,14 @@ enum {
 @property NSNumber *syncThreshold;
 @property NSNumber *syncEnabled;
 @property NSMutableDictionary* httpHeaders;
+// v3.3 Phase 2: backend-agnostic HTTP transport
+@property NSString *httpMethod;        // POST | GET | PUT | PATCH (default POST)
+@property NSString *syncHttpMethod;    // POST | GET | PUT | PATCH (default POST)
+@property NSString *httpMode;          // batch | single (default batch)
+@property NSString *syncMode;          // batch | single (default batch)
+@property NSMutableDictionary* queryParams; // static placeholder values for URL templating
+// v3.4 Phase 3: location API modernization
+@property NSNumber *_showsBackgroundLocationIndicator; // iOS 11+: show blue bar when app uses location in background
 @property NSNumber *_saveBatteryOnBackground;
 @property NSNumber *maxLocations;
 @property NSNumber *_pauseLocationUpdates;
@@ -57,6 +65,8 @@ enum {
 - (BOOL) syncEnabled;
 - (BOOL) hasHttpHeaders;
 - (BOOL) hasSaveBatteryOnBackground;
+- (BOOL) hasShowsBackgroundLocationIndicator;
+- (BOOL) showsBackgroundLocationIndicator;
 - (BOOL) hasMaxLocations;
 - (BOOL) hasPauseLocationUpdates;
 - (BOOL) hasLocationProvider;

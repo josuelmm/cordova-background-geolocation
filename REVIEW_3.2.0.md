@@ -4,6 +4,8 @@ Fecha: 2026-05-07
 Repo: `@josuelmm/cordova-background-geolocation`
 Plugin: `@josuelmm/cordova-background-geolocation` — global y backend-agnóstico. Casos como Life360 con backend Traccar son solo ejemplos referenciales; cualquier backend se conecta vía el HTTP transport personalizable.
 
+> **Nota post-v3.3.0:** Las secciones **1–7** conservan el snapshot de auditoría sobre **v3.2.0** (gaps y “estado actual” de entonces). Parte del contenido quedó obsoleto tras **v3.3.0** (Fases 1–2: auto-start Android + HTTP transport). Para el estado real del código y del roadmap usar **`CHANGELOG.md`**, **`docs/ROADMAP.md`** y las secciones **8–9** de este documento.
+
 ---
 
 ## 1. Estado actual (lo que ya cumple)
@@ -222,11 +224,12 @@ BackgroundGeolocation.on('drivingEvent', (event) => {
 
 ### 4.4 Versionado
 
-- v3.3 (Fase 1): Auto-start Android.
-- v3.4 (Fase 2): HTTP transport personalizable.
-- v3.5 (Fase 3): Diagnóstico, heartbeat, sync events, mockLocationPolicy.
-- v3.6 (Fase 4): Battery / OEM helpers.
-- v4.0 (Fase 5): Driving events + crash detection + sensor fusion + SOS helper.
+- v3.3 (Fase 1, entregada): Auto-start Android.
+- v3.3 (Fase 2, entregada): HTTP transport personalizable.
+- v3.4 (Fase 3, próxima): Modernización location APIs Android/iOS.
+- v3.5 (Fase 4): Diagnóstico, heartbeat, sync events, mockLocationPolicy.
+- v3.6 (Fase 5): Battery / OEM helpers.
+- v4.0 (Fase 6): Driving events + crash detection + sensor fusion + SOS helper.
 
 ---
 
@@ -313,11 +316,12 @@ Orden:
 
 1. Auto-start Android
 2. HTTP transport personalizable
-3. Diagnóstico
-4. Battery / OEM helpers
-5. Driving / crash / SOS
+3. Modernización location APIs Android/iOS
+4. Diagnóstico
+5. Battery / OEM helpers
+6. Driving / crash / SOS
 
-### v3.3 — Auto-start Android (Fase 1)
+### v3.3 — Auto-start Android (Fase 1, ✅ entregada)
 
 - `plugin.xml`:
   - Añadir `ACCESS_BACKGROUND_LOCATION`.
@@ -338,7 +342,7 @@ Orden:
 - iOS: documentar limitación. `Significant Location Changes` y `allowsBackgroundLocationUpdates` ya implementados.
 - Versiones: `cordova-android >=12`, `androidx.core` 1.13.x, `androidx.appcompat` 1.7.x, `play-services-location` 21.x, peer Angular `>=16`.
 
-### v3.4 — HTTP transport personalizable (Fase 2)
+### v3.3 — HTTP transport personalizable (Fase 2, ✅ entregada en 3.3.0)
 
 API agnóstica de backend:
 
@@ -367,20 +371,39 @@ Cambios:
 - `PostLocationTask.java` / `SyncAdapter.java`: respetar `httpMode` / `syncMode`.
 - `www/BackgroundGeolocation.d.ts` + Angular service: tipos.
 
-### v3.5 — Diagnóstico (Fase 3)
+### v3.4 — Modernización location APIs (Fase 3)
+
+Antes del diagnóstico, sanea las APIs nativas: ya hay deprecations Google/Apple que pueden romper el plugin con cualquier release mayor.
+
+- **Android:**
+  - Migrar `LocationRequest.create()` + `setPriority/setInterval/setFastestInterval` → `LocationRequest.Builder(priority, intervalMillis)` + `Priority.PRIORITY_*` (deprecated en `play-services-location 21.0.0`).
+  - Eliminar `Criteria` API + `getBestProvider` en `DistanceFilterLocationProvider.java` (deprecated API 31).
+  - Reemplazar `getLastKnownLocation(provider)` por `getCurrentLocation(...)` (API 30+).
+  - Reemplazar `requestLocationUpdates(String, long, float, LocationListener)` por la sobrecarga con `LocationRequest.Builder` (API 31+) con fallback al método clásico.
+  - Stationary detection: retirar `AlarmManager.setInexactRepeating` (Doze lo difiere a 9-15 min). Mantener FGS con `LocationCallback` interval grande.
+- **iOS:**
+  - Migrar `[NSURLConnection sendSynchronousRequest:returningResponse:error:]` (deprecated iOS 9+) a `NSURLSession dataTaskWithRequest:completionHandler:` con `dispatch_semaphore` en `MAURPostLocationTask.m`.
+  - Exponer `showsBackgroundLocationIndicator` en `MAURConfig` y `.d.ts`.
+  - Implementar `locationManagerDidChangeAuthorization:` (iOS 14+) con fallback al legacy.
+  - Persistir `accuracyAuthorization` para exponerlo en Fase 4.
+- **Build:** bump `play-services-location` default a 21.x; `compileSdk` 34+ obligatorio.
+
+Detalle por archivo y línea: ver [docs/location-modernization.md](docs/location-modernization.md).
+
+### v3.5 — Diagnóstico (Fase 4)
 
 - `getDiagnostics()` extendido (Android e iOS).
 - Evento `heartbeat`.
 - Eventos sync: `syncStart`, `syncProgress`, `syncSuccess`, `syncError`.
 - `mockLocationPolicy: 'allow' | 'flag' | 'drop'` (detección ya existe).
 
-### v3.6 — Battery / OEM helpers (Fase 4)
+### v3.6 — Battery / OEM helpers (Fase 5)
 
 - `isIgnoringBatteryOptimizations`, `requestIgnoreBatteryOptimizations`, `openBatterySettings`.
 - `openAutoStartSettings()` por fabricante (Xiaomi MIUI, Huawei EMUI, Oppo ColorOS, Vivo FunTouch, Samsung One UI).
 - `getManufacturerHelp()` con instrucciones por OEM.
 
-### v4.0 — Driver insights (Fase 5)
+### v4.0 — Driver insights (Fase 6)
 
 - Eventos `tripStart` / `tripEnd` / `moving` / `stopped` / `providerChange`.
 - Driving events: `hardBrake`, `rapidAcceleration`, `sharpTurn`, `speeding`, `phoneUsageWhileDriving`.
@@ -392,8 +415,9 @@ Cambios:
 ## 9. Veredicto
 
 - Cumple como **motor GPS background base** Android/iOS con cola offline, HTTP posting y session API.
-- El plugin se mantiene **global y backend-agnóstico**. No se incorpora lógica de Traccar / GPSWox / OsmAnd / etc.; cualquier backend se conecta vía el HTTP transport personalizable (v3.4).
-- Prioridad inmediata: **Auto-start Android completo** (Fase 1) y **HTTP transport personalizable** (Fase 2).
+- El plugin se mantiene **global y backend-agnóstico**. No se incorpora lógica de Traccar / GPSWox / OsmAnd / etc.; cualquier backend se conecta vía el HTTP transport personalizable (entregado en v3.3).
+- Fases 1 y 2 (auto-start + HTTP) entregadas en v3.3.0.
+- Prioridad inmediata: **Modernización location APIs** (Fase 3, v3.4) — sanea deprecations Google/Apple antes de añadir el diagnóstico.
 - Geocercas, eventos espaciales, historial server-side, viajes, paradas y reportes son responsabilidad del **backend** (Traccar es solo un ejemplo posible). Ver [docs/traccar.md](docs/traccar.md).
 - `mockLocationPolicy` debe ir en cliente (los backends no detectan mocks).
 - Driving events / crash / SOS se difieren a v4.0 (requiere sensores adicionales y filtros).

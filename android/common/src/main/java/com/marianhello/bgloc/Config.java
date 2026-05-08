@@ -24,6 +24,7 @@ import org.json.JSONObject;
 
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Locale;
 
 /**
  * Config class
@@ -71,6 +72,12 @@ public class Config implements Parcelable
     private Boolean enableWatchdog;
     private Boolean showTime;
     private Boolean showDistance;
+    // v3.3 (Phase 2): backend-agnostic HTTP transport
+    private String httpMethod;       // POST | GET | PUT | PATCH (default POST)
+    private String syncHttpMethod;   // POST | GET | PUT | PATCH (default POST)
+    private String httpMode;         // batch | single (default batch)
+    private String syncMode;         // batch | single (default batch)
+    private HashMap queryParams;     // static placeholder values for URL templating
 
     public Config () {
     }
@@ -108,6 +115,11 @@ public class Config implements Parcelable
         this.enableWatchdog = config.enableWatchdog;
         this.showTime = config.showTime;
         this.showDistance = config.showDistance;
+        this.httpMethod = config.httpMethod;
+        this.syncHttpMethod = config.syncHttpMethod;
+        this.httpMode = config.httpMode;
+        this.syncMode = config.syncMode;
+        this.queryParams = CloneHelper.deepCopy(config.queryParams);
         if (config.template instanceof AbstractLocationTemplate) {
             this.template = ((AbstractLocationTemplate)config.template).clone();
         }
@@ -144,8 +156,13 @@ public class Config implements Parcelable
         setEnableWatchdog((Boolean) in.readValue(null));
         setShowTime((Boolean) in.readValue(null));
         setShowDistance((Boolean) in.readValue(null));
+        setHttpMethod(in.readString());
+        setSyncHttpMethod(in.readString());
+        setHttpMode(in.readString());
+        setSyncMode(in.readString());
         Bundle bundle = in.readBundle();
         setHttpHeaders((HashMap<String, String>) bundle.getSerializable("httpHeaders"));
+        setQueryParams((HashMap<String, String>) bundle.getSerializable("queryParams"));
         setTemplate((LocationTemplate) bundle.getSerializable(AbstractLocationTemplate.BUNDLE_KEY));
     }
 
@@ -183,6 +200,11 @@ public class Config implements Parcelable
         config.enableWatchdog = false;
         config.showTime = false;
         config.showDistance = false;
+        config.httpMethod = "POST";
+        config.syncHttpMethod = "POST";
+        config.httpMode = "batch";
+        config.syncMode = "batch";
+        config.queryParams = null;
 
         return config;
     }
@@ -223,8 +245,13 @@ public class Config implements Parcelable
         out.writeValue(getEnableWatchdog());
         out.writeValue(getShowTime());
         out.writeValue(getShowDistance());
+        out.writeString(getHttpMethod());
+        out.writeString(getSyncHttpMethod());
+        out.writeString(getHttpMode());
+        out.writeString(getSyncMode());
         Bundle bundle = new Bundle();
         bundle.putSerializable("httpHeaders", getHttpHeaders());
+        bundle.putSerializable("queryParams", getQueryParams());
         bundle.putSerializable(AbstractLocationTemplate.BUNDLE_KEY, (AbstractLocationTemplate) getTemplate());
         out.writeBundle(bundle);
     }
@@ -645,6 +672,70 @@ public class Config implements Parcelable
         this.showDistance = showDistance;
     }
 
+    /** HTTP method for the main `url`. Default POST. */
+    @Nullable
+    public String getHttpMethod() {
+        return httpMethod != null ? httpMethod : "POST";
+    }
+
+    public void setHttpMethod(@Nullable String httpMethod) {
+        this.httpMethod = (httpMethod == null || httpMethod.isEmpty()) ? null : httpMethod.toUpperCase(Locale.US);
+    }
+
+    /** HTTP method for the `syncUrl`. Default POST. */
+    @Nullable
+    public String getSyncHttpMethod() {
+        return syncHttpMethod != null ? syncHttpMethod : "POST";
+    }
+
+    public void setSyncHttpMethod(@Nullable String syncHttpMethod) {
+        this.syncHttpMethod = (syncHttpMethod == null || syncHttpMethod.isEmpty()) ? null : syncHttpMethod.toUpperCase(Locale.US);
+    }
+
+    /** Real-time post mode. "batch" (default) or "single". */
+    @Nullable
+    public String getHttpMode() {
+        return httpMode != null ? httpMode : "batch";
+    }
+
+    public void setHttpMode(@Nullable String httpMode) {
+        this.httpMode = (httpMode == null || httpMode.isEmpty()) ? null : httpMode.toLowerCase(Locale.US);
+    }
+
+    /** Sync queue mode. "batch" (default) or "single". */
+    @Nullable
+    public String getSyncMode() {
+        return syncMode != null ? syncMode : "batch";
+    }
+
+    public void setSyncMode(@Nullable String syncMode) {
+        this.syncMode = (syncMode == null || syncMode.isEmpty()) ? null : syncMode.toLowerCase(Locale.US);
+    }
+
+    public boolean hasQueryParams() {
+        return queryParams != null && !queryParams.isEmpty();
+    }
+
+    public HashMap<String, String> getQueryParams() {
+        return queryParams;
+    }
+
+    public void setQueryParams(HashMap queryParams) {
+        this.queryParams = queryParams;
+    }
+
+    public void setQueryParams(JSONObject queryParams) throws JSONException {
+        this.queryParams = new HashMap<String, String>();
+        if (queryParams == null) return;
+        Iterator<?> it = queryParams.keys();
+        while (it.hasNext()) {
+            String key = (String) it.next();
+            // queryParams accepts string | number (per d.ts). Convert numbers to string.
+            Object value = queryParams.get(key);
+            this.queryParams.put(key, value == null || value == JSONObject.NULL ? "" : String.valueOf(value));
+        }
+    }
+
     @Override
     public String toString () {
         return new StringBuffer()
@@ -675,6 +766,11 @@ public class Config implements Parcelable
                 .append(" postTemplate=").append(hasTemplate() ? getTemplate().toString() : null)
                 .append(" showTime=").append(getShowTime())
                 .append(" showDistance=").append(getShowDistance())
+                .append(" httpMethod=").append(getHttpMethod())
+                .append(" syncHttpMethod=").append(getSyncHttpMethod())
+                .append(" httpMode=").append(getHttpMode())
+                .append(" syncMode=").append(getSyncMode())
+                .append(" queryParams=").append(hasQueryParams() ? getQueryParams().toString() : null)
                 .append("]")
                 .toString();
     }
@@ -787,6 +883,21 @@ public class Config implements Parcelable
         }
         if (config2.hasShowDistance()) {
             merger.setShowDistance(config2.getShowDistance());
+        }
+        if (config2.httpMethod != null) {
+            merger.setHttpMethod(config2.getHttpMethod());
+        }
+        if (config2.syncHttpMethod != null) {
+            merger.setSyncHttpMethod(config2.getSyncHttpMethod());
+        }
+        if (config2.httpMode != null) {
+            merger.setHttpMode(config2.getHttpMode());
+        }
+        if (config2.syncMode != null) {
+            merger.setSyncMode(config2.getSyncMode());
+        }
+        if (config2.hasQueryParams()) {
+            merger.setQueryParams(config2.getQueryParams());
         }
 
         return merger;

@@ -1,14 +1,12 @@
 package com.marianhello.bgloc.provider;
 
 import android.content.Context;
-import android.location.Criteria;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Bundle;
 
 import com.marianhello.bgloc.Config;
-import com.marianhello.logging.LoggerManager;
 
 public class RawLocationProvider extends AbstractLocationProvider implements LocationListener {
     private LocationManager locationManager;
@@ -39,21 +37,10 @@ public class RawLocationProvider extends AbstractLocationProvider implements Loc
             logger.warn("RawLocationProvider started without config");
             return;
         }
-        String provider = LocationManager.GPS_PROVIDER;
-        boolean gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
-        if (!gpsEnabled) {
-            Criteria criteria = new Criteria();
-            criteria.setAltitudeRequired(false);
-            criteria.setBearingRequired(false);
-            criteria.setSpeedRequired(true);
-            criteria.setCostAllowed(true);
-            criteria.setAccuracy(Criteria.ACCURACY_FINE);
-            criteria.setHorizontalAccuracy(translateDesiredAccuracy(mConfig.getDesiredAccuracy()));
-            criteria.setPowerRequirement(Criteria.POWER_HIGH);
-            provider = locationManager.getBestProvider(criteria, true);
-        }
+        // v3.4 Phase 3: explicit GPS/Network selection. Drops the deprecated Criteria + getBestProvider.
+        String provider = pickProvider();
         if (provider == null) {
-            logger.warn("No location provider available (GPS disabled and getBestProvider returned null)");
+            logger.warn("No location provider available (GPS and Network disabled)");
             return;
         }
         try {
@@ -64,6 +51,17 @@ public class RawLocationProvider extends AbstractLocationProvider implements Loc
             logger.error("Security exception: {}", e.getMessage());
             this.handleSecurityException(e);
         }
+    }
+
+    /** GPS first, fall back to Network. */
+    private String pickProvider() {
+        if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            return LocationManager.GPS_PROVIDER;
+        }
+        if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            return LocationManager.NETWORK_PROVIDER;
+        }
+        return null;
     }
 
     @Override
@@ -116,24 +114,6 @@ public class RawLocationProvider extends AbstractLocationProvider implements Loc
     @Override
     public void onProviderDisabled(String provider) {
         logger.debug("Provider {} was disabled", provider);
-    }
-
-    /**
-     * Translates a number representing desired accuracy of Geolocation system from set [0, 10, 100, 1000].
-     * 0:  most aggressive, most accurate, worst battery drain
-     * 1000:  least aggressive, least accurate, best for battery.
-     */
-    private int translateDesiredAccuracy(Integer accuracy) {
-        if (accuracy == null) {
-            return Criteria.ACCURACY_MEDIUM;
-        }
-        if (accuracy >= 1000) {
-            return Criteria.ACCURACY_LOW;
-        }
-        if (accuracy >= 100) {
-            return Criteria.ACCURACY_MEDIUM;
-        }
-        return Criteria.ACCURACY_HIGH;
     }
 
     @Override

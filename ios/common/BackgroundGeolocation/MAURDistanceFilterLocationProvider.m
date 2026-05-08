@@ -87,6 +87,12 @@ enum {
     _config = config;
 
     locationManager.pausesLocationUpdatesAutomatically = [_config pauseLocationUpdates];
+    // v3.4 Phase 3: showsBackgroundLocationIndicator (iOS 11+).
+    if (@available(iOS 11.0, *)) {
+        if ([_config hasShowsBackgroundLocationIndicator]) {
+            locationManager.showsBackgroundLocationIndicator = [_config showsBackgroundLocationIndicator];
+        }
+    }
     locationManager.activityType = [_config decodeActivityType];
     locationManager.distanceFilter = _config.distanceFilter.integerValue; // meters
     locationManager.desiredAccuracy = [_config decodeDesiredAccuracy];
@@ -376,13 +382,34 @@ enum {
     }
 }
 
+// v3.4 Phase 3: iOS 14+ delegate callback. Replaces the legacy `didChangeAuthorizationStatus:`
+// (which is deprecated in iOS 14 but still delivered). On iOS 14+ this is the canonical entry
+// point and exposes accuracyAuthorization (Precise vs Reduced).
+- (void) locationManagerDidChangeAuthorization:(CLLocationManager *)manager API_AVAILABLE(ios(14.0))
+{
+    CLAuthorizationStatus status = manager.authorizationStatus;
+    DDLogInfo(@"LocationManager didChangeAuthorization (iOS 14+) status=%d accuracy=%ld",
+              (int)status, (long)manager.accuracyAuthorization);
+    [self handleAuthorizationStatusChange:status];
+}
+
 - (void) locationManager:(CLLocationManager *)manager didChangeAuthorizationStatus:(CLAuthorizationStatus)status
 {
-    DDLogInfo(@"LocationManager didChangeAuthorizationStatus %u", status);
+    // On iOS 14+ the system also delivers `locationManagerDidChangeAuthorization:`; ignore this
+    // legacy callback there to avoid double-notifying delegates.
+    if (@available(iOS 14.0, *)) {
+        return;
+    }
+    DDLogInfo(@"LocationManager didChangeAuthorizationStatus (legacy) %u", status);
+    [self handleAuthorizationStatusChange:status];
+}
+
+- (void) handleAuthorizationStatusChange:(CLAuthorizationStatus)status
+{
     if ([_config isDebugging]) {
         [self notify:[NSString stringWithFormat:@"Authorization status changed %u", status]];
     }
-    
+
     switch(status) {
         case kCLAuthorizationStatusRestricted:
         case kCLAuthorizationStatusDenied:

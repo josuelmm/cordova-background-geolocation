@@ -6,7 +6,7 @@ Backends compatibles vía configuración (ejemplos de uso, no integración hardc
 
 ---
 
-## Soporte actual (v3.2.0)
+## Comportamiento en v3.2.0 y anteriores
 
 | Aspecto | Estado |
 |---|---|
@@ -26,7 +26,7 @@ Hardcodes confirmados:
 
 ---
 
-## API propuesta v3.4
+## API de configuración (v3.3.0, Fase 2 — entregada)
 
 ```ts
 BackgroundGeolocation.configure({

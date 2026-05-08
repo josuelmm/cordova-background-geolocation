@@ -21,6 +21,7 @@ import com.google.android.gms.location.LocationCallback;
 import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
 import com.marianhello.bgloc.Config;
 import com.marianhello.bgloc.data.BackgroundActivity;
 
@@ -136,10 +137,12 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
         if (fusedLocationClient == null || mConfig == null) { return; }
 
         int priority = translateDesiredAccuracy(mConfig.getDesiredAccuracy());
-        LocationRequest locationRequest = LocationRequest.create()
-                .setPriority(priority)
-                .setFastestInterval(mConfig.getFastestInterval())
-                .setInterval(mConfig.getInterval());
+        // v3.4: LocationRequest.Builder (play-services-location 21.0.0+) replaces deprecated
+        // LocationRequest.create() + setPriority/setInterval/setFastestInterval.
+        LocationRequest locationRequest = new LocationRequest.Builder(priority, mConfig.getInterval())
+                .setMinUpdateIntervalMillis(mConfig.getFastestInterval())
+                .setWaitForAccurateLocation(false)
+                .build();
 
         try {
             fusedLocationClient.requestLocationUpdates(
@@ -213,19 +216,20 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
      * 1000:  least aggressive, least accurate, best for battery.
      */
     private int translateDesiredAccuracy(Integer accuracy) {
+        // v3.4: Priority.* (play-services-location 21.0.0+) replaces deprecated LocationRequest.PRIORITY_*.
         if (accuracy == null) {
-            return LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY;
+            return Priority.PRIORITY_BALANCED_POWER_ACCURACY;
         }
         if (accuracy >= 10000) {
-            return LocationRequest.PRIORITY_NO_POWER;
+            return Priority.PRIORITY_PASSIVE;
         }
         if (accuracy >= 1000) {
-            return LocationRequest.PRIORITY_LOW_POWER;
+            return Priority.PRIORITY_LOW_POWER;
         }
         if (accuracy >= 100) {
-            return LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY;
+            return Priority.PRIORITY_BALANCED_POWER_ACCURACY;
         }
-        return LocationRequest.PRIORITY_HIGH_ACCURACY;
+        return Priority.PRIORITY_HIGH_ACCURACY;
     }
 
     public static DetectedActivity getProbableActivity(List<DetectedActivity> detectedActivities) {
