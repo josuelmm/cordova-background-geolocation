@@ -1,5 +1,50 @@
 # Changelog
 
+## [3.3.0](https://github.com/josuelmm/cordova-background-geolocation/tree/3.3.0) (2026-05-07)
+
+### Phase 1 — Auto-start Android (Roadmap v3.3)
+
+#### Added
+
+- **Android `ACCESS_BACKGROUND_LOCATION` permission** declared in `plugin.xml`. Required for Android 10+ when starting the foreground location service from background (boot, app update). Apps must request it at runtime with the proper flow (foreground → explanation → "Allow all the time").
+- **Boot/replace receiver expanded.** `BootCompletedReceiver` now also handles:
+  - `android.intent.action.QUICKBOOT_POWERON` (HTC, MIUI / Xiaomi).
+  - `com.htc.intent.action.QUICKBOOT_POWERON`.
+  - `android.intent.action.MY_PACKAGE_REPLACED` — service is restarted after the app is updated via Play Store, with no need for the user to re-open the app.
+- **Background location permission validated** in `BootCompletedReceiver` (Android 10+ only) and in `LocationServiceProxy.startForegroundService()`.
+- **`ForegroundServiceStartNotAllowedException` handled** (Android 12+). Both `BootCompletedReceiver` and `LocationServiceProxy.startForegroundService()` now wrap `startForegroundService()` in try/catch with clear logging. WorkManager is **not** used as a fallback for tracking — it is only suitable for deferred sync, not for continuous GPS.
+
+#### Changed
+
+- **`foregroundServiceType` simplified to `"location"`** (was `"location|dataSync"`). The service does not perform `dataSync`; declaring it added unnecessary scrutiny in Play Console.
+- **`LocationServiceImpl.startForeground()`** now reads `foregroundServiceType` dynamically from the merged manifest via `getManifestForegroundServiceType()` instead of using a hardcoded `0x8`. If the manifest type cannot be read (returns 0), the service refuses to start in foreground and logs an error rather than calling `startForeground` with an invalid type.
+- **`LocationServiceProxy.startForegroundService()`** no longer falls back to a non-foreground `startService()` when the location permission is missing. It now logs and exits, avoiding zombie services.
+- **`engines`** raised in both `package.json` and `plugin.xml`: `cordova >= 10.0.0`, `cordova-android >= 12.0.0`. Required for `targetSdk 34+` and modern foreground service handling.
+
+#### Removed
+
+- **`FOREGROUND_SERVICE_DATA_SYNC` permission** removed from `plugin.xml`. Pair of the `dataSync` foreground type cleanup above.
+- **`<uses-library android:name="org.apache.http.legacy" />`** removed from `plugin.xml`. The plugin's HTTP client uses `HttpURLConnection`; no `org.apache.http.*` imports exist in the codebase.
+- **`useLibrary 'org.apache.http.legacy'`** removed from `android/dependencies.gradle`. Same reason.
+- **Dead constant `FOREGROUND_SERVICE_TYPE_LOCATION = 4`** removed from `LocationServiceImpl.java`. Its value was incorrect (real value is `0x00000008 = 8`; `4` is `PHONE_CALL`) and the constant was never referenced.
+
+#### Build
+
+- **`jcenter()` replaced with `mavenCentral()`** in `android/build.gradle` (both `buildscript` and `allprojects` blocks). JCenter has been deprecated since 2022.
+
+#### Documentation
+
+- **`docs/auto-start.md`** — full guide for boot/restart behavior (Android current state, gaps, v3.3 plan with concrete diffs; iOS limitations).
+- **`docs/http-transport.md`** — backend-agnostic HTTP transport plan (Phase 2, v3.4).
+- **`docs/traccar.md`** — Traccar as an optional backend example (geofences, events, history); plugin remains backend-agnostic.
+- **`docs/driving-events.md`** — driving events plan (Phase 5, v4.0).
+- **`docs/ROADMAP.md`** — phases 1→5.
+- **`REVIEW_3.2.0.md`** — full audit and rationale for the roadmap.
+
+[Full Changelog](https://github.com/josuelmm/cordova-background-geolocation/compare/3.2.0...3.3.0)
+
+---
+
 ## [3.2.0](https://github.com/josuelmm/cordova-background-geolocation/tree/3.2.0) (2026-02-28)
 
 ### Added

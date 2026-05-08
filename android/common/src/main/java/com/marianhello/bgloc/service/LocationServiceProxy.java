@@ -5,10 +5,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.util.Log;
 
 import com.marianhello.bgloc.Config;
 
 public class LocationServiceProxy implements LocationService, LocationServiceInfo {
+    private static final String TAG = LocationServiceProxy.class.getSimpleName();
     private final Context mContext;
     private final LocationServiceIntentBuilder mIntentBuilder;
 
@@ -78,9 +80,19 @@ public class LocationServiceProxy implements LocationService, LocationServiceInf
         Intent intent = mIntentBuilder.setCommand(CommandId.START_FOREGROUND_SERVICE).build();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (!hasLocationPermission()) {
-                mContext.startService(intent);
-            } else {
+                // Do NOT fall back to startService(): would create a non-foreground service that crashes
+                // on first location update. Caller must request the permission first.
+                Log.w(TAG, "Cannot start foreground service: ACCESS_FINE_LOCATION/COARSE_LOCATION not granted");
+                return;
+            }
+            // Note: ACCESS_BACKGROUND_LOCATION is only required when the service is started from
+            // background (e.g. BootCompletedReceiver). When called from foreground, the OS allows
+            // a location-typed FGS to run with only fine/coarse location and inherit "while-in-use".
+            try {
                 mContext.startForegroundService(intent);
+            } catch (Exception e) {
+                // Android 12+ may throw ForegroundServiceStartNotAllowedException.
+                Log.e(TAG, "startForegroundService blocked: " + e.getClass().getSimpleName() + ": " + e.getMessage(), e);
             }
         } else {
             mContext.startService(intent);

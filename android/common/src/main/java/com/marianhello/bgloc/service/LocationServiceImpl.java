@@ -516,13 +516,10 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
-    /** FOREGROUND_SERVICE_TYPE_LOCATION = 4 when compileSdk >= 34. */
-    private static final int FOREGROUND_SERVICE_TYPE_LOCATION = 4;
-
     /**
      * Reads this service's foregroundServiceType from the merged AndroidManifest (API 34+).
      * Uses ComponentInfoFlags.of(0) (not GET_META_DATA) so getServiceInfo returns complete ServiceInfo.
-     * Returns the real value; never invents 0x4. If unknown, returns 0 so callers must not call startForeground.
+     * Returns the real value; never invents a hardcoded type. If unknown, returns 0 so callers must not call startForeground.
      * Requires compileSdk 33+ (ComponentInfoFlags); 34+ for ServiceInfo.foregroundServiceType.
      */
     private int getManifestForegroundServiceType() {
@@ -581,9 +578,14 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 mProvider.onCommand(LocationProvider.CMD_SWITCH_MODE,
                         LocationProvider.FOREGROUND_MODE);
             }
-            // Android 14+ (API 34): type must match the merged manifest. If we get 0, do not start (avoid crash from invented type).
+            // Android 14+ (API 34): type must match the merged manifest. Read it dynamically; if unknown, do not start.
             if (Build.VERSION.SDK_INT >= 34) {
-                super.startForeground(NOTIFICATION_ID, notification, 0x8);
+                int type = getManifestForegroundServiceType();
+                if (type == 0) {
+                    logger.error("Cannot start foreground: manifest foregroundServiceType missing or unreadable");
+                    return;
+                }
+                super.startForeground(NOTIFICATION_ID, notification, type);
             } else {
                 super.startForeground(NOTIFICATION_ID, notification);
             }

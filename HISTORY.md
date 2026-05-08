@@ -2,6 +2,22 @@
 
 **for cordova-plugin-background-geolocation**
 
+## [3.3.0] - 2026-05-07
+
+### Phase 1 — Auto-start Android
+
+- Added: `ACCESS_BACKGROUND_LOCATION` permission, validated at runtime on Android 10+ before starting the foreground service.
+- Added: boot receiver also handles `QUICKBOOT_POWERON` (HTC, MIUI), `com.htc.intent.action.QUICKBOOT_POWERON`, and `MY_PACKAGE_REPLACED` (service is relaunched after app updates).
+- Added: `ForegroundServiceStartNotAllowedException` (Android 12+) is now caught with clear logging in `BootCompletedReceiver` and `LocationServiceProxy`. WorkManager is not used as a tracking fallback (only for deferred sync).
+- Changed: `foregroundServiceType` simplified to `"location"`; `LocationServiceImpl.startForeground()` reads the type dynamically from the manifest instead of hardcoding `0x8`.
+- Changed: `LocationServiceProxy.startForegroundService()` no longer falls back to `startService()` when location permission is missing — it logs and exits.
+- Changed: `engines` raised to `cordova >= 10.0.0` and `cordova-android >= 12.0.0`.
+- Removed: `FOREGROUND_SERVICE_DATA_SYNC` permission and `dataSync` from `foregroundServiceType`.
+- Removed: `<uses-library org.apache.http.legacy>` and `useLibrary 'org.apache.http.legacy'` (no longer used; the plugin uses `HttpURLConnection`).
+- Removed: dead constant `FOREGROUND_SERVICE_TYPE_LOCATION = 4` in `LocationServiceImpl.java` (incorrect value; never referenced).
+- Build: `jcenter()` → `mavenCentral()` in `android/build.gradle`.
+- Docs: new planning docs `docs/auto-start.md`, `docs/http-transport.md`, `docs/traccar.md`, `docs/driving-events.md`, `docs/ROADMAP.md`. Audit in `REVIEW_3.2.0.md`.
+
 ## [3.2.0] - 2026-02-28
 
 ### Added
