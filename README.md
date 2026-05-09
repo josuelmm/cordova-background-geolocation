@@ -368,6 +368,12 @@ Subscribe with `BackgroundGeolocation.on(eventName, callback)`. Unsubscribe with
 
 Full event payloads and options: [Events](docs/events.md). Full API (all options, all methods): [API](docs/api.md).
 
+### New in 4.2.2
+
+- Build hotfixes — required when consuming the plugin via Capacitor (Gradle 8.x):
+  - `PostLocationTask.postLocation`: cast `LocationTemplate.locationToJson` (returns `Object`) to the right `HttpPostService.postJSON` overload.
+  - `BackgroundGeolocationPlugin.buildDiagnostics`: wrap `facade.locationServicesEnabled()` in `try/catch (PluginException)`.
+
 ### New in 4.2.0
 
 - **Real sensor fusion (Phase 8).** Optional accelerometer + gyroscope pipeline (`drivingEvents.sensorFusion: true`). On Android uses `Sensor.TYPE_LINEAR_ACCELERATION` + `Sensor.TYPE_GYROSCOPE`; on iOS uses `CMMotionManager.startDeviceMotionUpdatesToQueue` at 50 Hz.

@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.2.2](https://github.com/josuelmm/cordova-background-geolocation/tree/4.2.2) (2026-05-09)
+
+### Fixed
+- `PostLocationTask.postLocation`: cast del retorno de `LocationTemplate.locationToJson` (que es `Object` — `JSONObject` para `HashMapLocationTemplate`, `JSONArray` para `ArrayListLocationTemplate`) a la sobrecarga correcta de `HttpPostService.postJSON`. Bug latente que rompía la compilación con consumidores Capacitor (Gradle 8.x).
+- `BackgroundGeolocationPlugin.buildDiagnostics`: envolver `facade.locationServicesEnabled()` en `try/catch (PluginException)`. El método declara `throws JSONException` pero no `PluginException`, lo que rompía el build cuando se invoca desde `getDiagnostics`.
+
 ## [4.2.0](https://github.com/josuelmm/cordova-background-geolocation/tree/4.2.0) (2026-05-08)
 
 ### Phase 8 — Real sensor fusion (accelerometer + gyroscope)

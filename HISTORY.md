@@ -2,6 +2,13 @@
 
 **for cordova-plugin-background-geolocation**
 
+## [4.2.2] - 2026-05-09
+
+### Fixed
+- `PostLocationTask`: handle `LocationTemplate.locationToJson` returning `Object` (JSONObject vs JSONArray) — fixed compile failure under Capacitor / Gradle 8.x.
+- `BackgroundGeolocationPlugin.buildDiagnostics`: wrap `facade.locationServicesEnabled()` in `try/catch (PluginException)` — fixed unreported-checked-exception build error.
+- Plugin version: `4.2.2`.
+
 ## [4.2.0] - 2026-05-08
 
 ### Phase 8 — Real sensor fusion (accelerometer + gyroscope)

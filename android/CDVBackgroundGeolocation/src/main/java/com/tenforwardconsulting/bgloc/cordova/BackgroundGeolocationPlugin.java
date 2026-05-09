@@ -89,7 +89,7 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     public static final String ACTION_TRIGGER_SOS                   = "triggerSOS";
 
     /** Plugin version; keep in sync with plugin.xml. */
-    public static final String PLUGIN_VERSION = "4.2.0";
+    public static final String PLUGIN_VERSION = "4.2.2";
 
     private BackgroundGeolocationFacade facade;
 
