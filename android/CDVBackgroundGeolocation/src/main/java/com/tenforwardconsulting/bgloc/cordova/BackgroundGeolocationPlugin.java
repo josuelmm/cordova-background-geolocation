@@ -519,7 +519,11 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
 
         // Common
         d.put("isRunning", facade.isRunning());
-        d.put("locationServicesEnabled", facade.locationServicesEnabled());
+        try {
+            d.put("locationServicesEnabled", facade.locationServicesEnabled());
+        } catch (PluginException e) {
+            d.put("locationServicesEnabled", JSONObject.NULL);
+        }
 
         try {
             Config cfg = facade.getConfig();

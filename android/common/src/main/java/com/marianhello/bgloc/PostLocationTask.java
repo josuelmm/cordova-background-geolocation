@@ -168,7 +168,10 @@ public class PostLocationTask {
     private boolean postLocation(BackgroundLocation location) {
         logger.debug("Executing PostLocationTask#postLocation");
 
-        JSONObject jsonLocation;
+        // LocationTemplate.locationToJson returns Object (JSONObject for HashMapLocationTemplate,
+        // JSONArray for ArrayListLocationTemplate). Resolve to the concrete type before calling
+        // the matching HttpPostService.postJSON overload.
+        Object jsonLocation;
         try {
             jsonLocation = mConfig.getTemplate().locationToJson(location);
         } catch (JSONException e) {
@@ -186,13 +189,17 @@ public class PostLocationTask {
         String method = mConfig.getHttpMethod();
         String mode = mConfig.getHttpMode();
         logger.debug("Posting to url: {} method: {} mode: {} headers: {}",
-                resolvedUrl, method, mode, mConfig.getHttpHeaders());
+                resolvedUrl, method, mConfig.getHttpHeaders());
         int responseCode;
 
         try {
             if ("single".equals(mode) || "GET".equals(method)) {
                 // GET cannot carry a JSON array body; force per-location request.
-                responseCode = HttpPostService.postJSON(resolvedUrl, jsonLocation, mConfig.getHttpHeaders(), method);
+                if (jsonLocation instanceof JSONArray) {
+                    responseCode = HttpPostService.postJSON(resolvedUrl, (JSONArray) jsonLocation, mConfig.getHttpHeaders(), method);
+                } else {
+                    responseCode = HttpPostService.postJSON(resolvedUrl, (JSONObject) jsonLocation, mConfig.getHttpHeaders(), method);
+                }
             } else {
                 JSONArray jsonLocations = new JSONArray();
                 jsonLocations.put(jsonLocation);
