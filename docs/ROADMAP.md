@@ -1,6 +1,6 @@
 # Roadmap
 
-Estado actual: **v3.3.0** (Fase 1 + Fase 2 completadas).
+Estado actual: **v4.2.0** (Fases 1-8 completadas).
 
 > **Principio de diseño.** Este es un plugin **global y backend-agnóstico**. No incorpora lógica de Traccar, GPSWox, OsmAnd ni de ninguna API propietaria. La compatibilidad con cualquier backend se logra mediante **transporte HTTP personalizable** (URL templating + body templating + métodos HTTP genéricos). Traccar y similares solo se documentan como **ejemplos de integración**, nunca como modo interno.
 
@@ -8,10 +8,12 @@ Orden de implementación (de mayor a menor impacto):
 
 1. ✅ Auto-start Android (Fase 1, v3.3)
 2. ✅ HTTP transport personalizable (Fase 2, v3.3)
-3. Modernización location APIs Android/iOS (Fase 3, v3.4)
-4. Diagnóstico (Fase 4, v3.5)
-5. Battery / OEM helpers (Fase 5, v3.6)
-6. Driving / crash / SOS (Fase 6, v4.0)
+3. ✅ Modernización location APIs Android/iOS (Fase 3, v3.4)
+4. ✅ Diagnóstico, sync events, heartbeat, mockLocationPolicy (Fase 4, v3.5)
+5. ✅ Battery / OEM helpers (Fase 5, v3.6)
+6. ✅ Driver insights GPS-only (Fase 6, v4.0)
+7. ✅ Driving events GPS-derived: hardBrake / rapidAcceleration / sharpTurn / possibleCrash (Fase 6.1, v4.1)
+8. ✅ Sensor fusion real con acelerómetro + giroscopio (Fase 8, v4.2)
 
 ---
 
@@ -164,6 +166,19 @@ Detección dentro del plugin usando GPS + acelerómetro + giroscopio + activity 
 - SOS helper local.
 
 Detalle: ver [driving-events.md](driving-events.md).
+
+---
+
+## v4.2 — Sensor fusion real (Fase 8)
+
+Acelerómetro + giroscopio reales para refinar `possibleCrash` y nuevo `phoneUsageWhileDriving`.
+
+- Android: `Sensor.TYPE_LINEAR_ACCELERATION` + `Sensor.TYPE_GYROSCOPE` a `SENSOR_DELAY_GAME` (~50 Hz) vía `SensorFusionDetector`.
+- iOS: `CMMotionManager.startDeviceMotionUpdatesToQueue` (50 Hz) vía `MAURSensorFusionDetector`.
+- Activación: `drivingEvents.sensorFusion = true` (off por defecto; coste batería moderado).
+- `possibleCrash` ahora trae `source: "gps" | "sensor"`. Sensor dispara con `|a| ≥ crashImpactG` (default 3 g) durante un trip activo — detecta impactos a baja velocidad (parking).
+- `phoneUsageWhileDriving`: jitter de acelerómetro/giroscopio sostenido durante un trip activo y con la pantalla activa.
+- Hot-reload: `configure()` reevalúa el pipeline de sensores en Android e iOS.
 
 ---
 

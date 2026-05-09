@@ -16,6 +16,26 @@
 #import "MAURLocation.h"
 #import "MAURConfig.h"
 
+// v3.5 Phase 4: heartbeat notification. userInfo[@"location"] is the latest MAURLocation
+// (may be absent if no fix has been received yet).
+extern NSString * _Nonnull const MAURHeartbeatNotification;
+
+// v4.0 Phase 6: driver-insight notifications. userInfo carries `location` and event-specific keys.
+extern NSString * _Nonnull const MAURTripStartNotification;
+extern NSString * _Nonnull const MAURTripEndNotification;       // userInfo: location, distance, durationMs
+extern NSString * _Nonnull const MAURMovingNotification;
+extern NSString * _Nonnull const MAURStoppedNotification;
+extern NSString * _Nonnull const MAURSpeedingNotification;      // userInfo: location, speedKmh, limitKmh
+extern NSString * _Nonnull const MAURProviderChangeNotification;// userInfo: provider
+extern NSString * _Nonnull const MAURSOSNotification;           // userInfo: location, payload (NSDictionary)
+// v4.1 GPS-derived sensor-like events. userInfo: location, value (double)
+extern NSString * _Nonnull const MAURHardBrakeNotification;
+extern NSString * _Nonnull const MAURRapidAccelerationNotification;
+extern NSString * _Nonnull const MAURSharpTurnNotification;
+extern NSString * _Nonnull const MAURPossibleCrashNotification;
+// v4.2 sensor fusion events. userInfo: location, source ("gps"|"sensor"), value (double)
+extern NSString * _Nonnull const MAURPhoneUsageWhileDrivingNotification;
+
 @interface MAURBackgroundGeolocationFacade : NSObject
 
 @property (weak, nonatomic) id<MAURProviderDelegate> delegate;
@@ -41,6 +61,8 @@
 - (MAURConfig*) getConfig;
 - (NSArray*) getLogEntries:(NSInteger)limit;
 - (NSArray*) getLogEntries:(NSInteger)limit fromLogEntryId:(NSInteger)entryId minLogLevelFromString:(NSString *)minLogLevel;
+/** v4.0 Phase 6 — Trigger an SOS event with the latest known location and a user payload. */
+- (void) triggerSOS:(NSDictionary * _Nullable)payload;
 - (void) forceSync;
 - (void) clearSync;
 - (NSInteger) getPendingSyncCount;

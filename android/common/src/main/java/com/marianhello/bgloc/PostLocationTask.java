@@ -92,6 +92,18 @@ public class PostLocationTask {
             return;
         }
 
+        // v3.5 Phase 4: mock location policy. Detection is already in BackgroundLocation
+        // (isFromMockProvider). Here we apply the policy.
+        if (location != null && location.isFromMockProvider()) {
+            String policy = mConfig.getMockLocationPolicy(); // "allow" | "flag" | "drop"
+            if ("drop".equals(policy)) {
+                logger.info("Mock location dropped (mockLocationPolicy=drop)");
+                return;
+            }
+            // "flag": leave it but caller can read isFromMockProvider() / mocked field.
+            // "allow": no-op.
+        }
+
         long locationId = mLocationDAO.persistLocation(location);
         location.setLocationId(locationId);
 

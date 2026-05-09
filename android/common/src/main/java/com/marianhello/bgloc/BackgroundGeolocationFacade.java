@@ -174,6 +174,117 @@ public class BackgroundGeolocationFacade {
 
                     return;
                 }
+
+                case LocationServiceImpl.MSG_ON_SYNC_START: {
+                    logger.debug("Received MSG_ON_SYNC_START");
+                    if (mDelegate != null) mDelegate.onSyncStart();
+                    return;
+                }
+
+                case LocationServiceImpl.MSG_ON_SYNC_SUCCESS: {
+                    int sent = bundle != null ? bundle.getInt("sent", 0) : 0;
+                    logger.debug("Received MSG_ON_SYNC_SUCCESS sent={}", sent);
+                    if (mDelegate != null) mDelegate.onSyncSuccess(sent);
+                    return;
+                }
+
+                case LocationServiceImpl.MSG_ON_SYNC_ERROR: {
+                    int status = bundle != null ? bundle.getInt("httpStatus", 0) : 0;
+                    String msg = bundle != null ? bundle.getString("message", "") : "";
+                    logger.debug("Received MSG_ON_SYNC_ERROR status={} message={}", status, msg);
+                    if (mDelegate != null) mDelegate.onSyncError(status, msg);
+                    return;
+                }
+
+                case LocationServiceImpl.MSG_ON_SYNC_PROGRESS: {
+                    int progress = bundle != null ? bundle.getInt("progress", 0) : 0;
+                    if (mDelegate != null) mDelegate.onSyncProgress(progress);
+                    return;
+                }
+
+                case LocationServiceImpl.MSG_ON_HEARTBEAT: {
+                    if (bundle != null) {
+                        bundle.setClassLoader(LocationServiceImpl.class.getClassLoader());
+                    }
+                    BackgroundLocation hb = bundle != null ? (BackgroundLocation) bundle.getParcelable("payload") : null;
+                    if (mDelegate != null) mDelegate.onHeartbeat(hb);
+                    return;
+                }
+
+                // v4.0 Phase 6: driver-insights events
+                case LocationServiceImpl.MSG_ON_TRIP_START:
+                case LocationServiceImpl.MSG_ON_TRIP_END:
+                case LocationServiceImpl.MSG_ON_MOVING:
+                case LocationServiceImpl.MSG_ON_STOPPED:
+                case LocationServiceImpl.MSG_ON_SPEEDING:
+                case LocationServiceImpl.MSG_ON_SOS: {
+                    if (bundle != null) bundle.setClassLoader(LocationServiceImpl.class.getClassLoader());
+                    BackgroundLocation loc = bundle != null ? (BackgroundLocation) bundle.getParcelable("payload") : null;
+                    if (mDelegate == null) return;
+                    switch (action) {
+                        case LocationServiceImpl.MSG_ON_TRIP_START:
+                            mDelegate.onTripStart(loc); break;
+                        case LocationServiceImpl.MSG_ON_TRIP_END:
+                            double dist = bundle != null ? bundle.getDouble("distance", 0.0) : 0.0;
+                            long durMs = bundle != null ? bundle.getLong("durationMs", 0L) : 0L;
+                            mDelegate.onTripEnd(loc, dist, durMs); break;
+                        case LocationServiceImpl.MSG_ON_MOVING:
+                            mDelegate.onMoving(loc); break;
+                        case LocationServiceImpl.MSG_ON_STOPPED:
+                            mDelegate.onStopped(loc); break;
+                        case LocationServiceImpl.MSG_ON_SPEEDING:
+                            double sKmh = bundle != null ? bundle.getDouble("speedKmh", 0.0) : 0.0;
+                            double lKmh = bundle != null ? bundle.getDouble("limitKmh", 0.0) : 0.0;
+                            mDelegate.onSpeeding(loc, sKmh, lKmh); break;
+                        case LocationServiceImpl.MSG_ON_SOS:
+                            org.json.JSONObject sosPayload = null;
+                            if (bundle != null) {
+                                String s = bundle.getString("sosPayload");
+                                if (s != null) {
+                                    try { sosPayload = new org.json.JSONObject(s); }
+                                    catch (org.json.JSONException ignored) { sosPayload = new org.json.JSONObject(); }
+                                }
+                            }
+                            mDelegate.onSOS(loc, sosPayload); break;
+                    }
+                    return;
+                }
+
+                case LocationServiceImpl.MSG_ON_PROVIDER_CHANGE: {
+                    String provider = bundle != null ? bundle.getString("provider", "") : "";
+                    if (mDelegate != null) mDelegate.onProviderChange(provider);
+                    return;
+                }
+
+                // v4.1 GPS-derived sensor-like events (and v4.2 sensor-driven possibleCrash)
+                case LocationServiceImpl.MSG_ON_HARD_BRAKE:
+                case LocationServiceImpl.MSG_ON_RAPID_ACCELERATION:
+                case LocationServiceImpl.MSG_ON_SHARP_TURN:
+                case LocationServiceImpl.MSG_ON_POSSIBLE_CRASH: {
+                    if (bundle != null) bundle.setClassLoader(LocationServiceImpl.class.getClassLoader());
+                    BackgroundLocation drvLoc = bundle != null ? (BackgroundLocation) bundle.getParcelable("payload") : null;
+                    double drvVal = bundle != null ? bundle.getDouble("value", 0.0) : 0.0;
+                    String drvSrc = bundle != null ? bundle.getString("source", "gps") : "gps";
+                    if (mDelegate == null) return;
+                    switch (action) {
+                        case LocationServiceImpl.MSG_ON_HARD_BRAKE:
+                            mDelegate.onHardBrake(drvLoc, drvVal); break;
+                        case LocationServiceImpl.MSG_ON_RAPID_ACCELERATION:
+                            mDelegate.onRapidAcceleration(drvLoc, drvVal); break;
+                        case LocationServiceImpl.MSG_ON_SHARP_TURN:
+                            mDelegate.onSharpTurn(drvLoc, drvVal); break;
+                        case LocationServiceImpl.MSG_ON_POSSIBLE_CRASH:
+                            mDelegate.onPossibleCrash(drvLoc, drvVal, drvSrc); break;
+                    }
+                    return;
+                }
+                // v4.2 sensor fusion: phone usage while driving
+                case LocationServiceImpl.MSG_ON_PHONE_USAGE_WHILE_DRIVING: {
+                    if (bundle != null) bundle.setClassLoader(LocationServiceImpl.class.getClassLoader());
+                    BackgroundLocation puLoc = bundle != null ? (BackgroundLocation) bundle.getParcelable("payload") : null;
+                    if (mDelegate != null) mDelegate.onPhoneUsageWhileDriving(puLoc);
+                    return;
+                }
             }
         }
     };
@@ -446,6 +557,22 @@ public class BackgroundGeolocationFacade {
         Account syncAccount = AccountHelper.CreateSyncAccount(getContext(), resolver.getAccountName(),
                 resolver.getAccountType());
         SyncService.sync(syncAccount, resolver.getAuthority(), true);
+    }
+
+    /**
+     * v4.0 Phase 6 — Trigger an SOS event. The plugin emits a single `sos` JS event
+     * carrying the latest known location and the user-supplied JSON payload.
+     */
+    public void triggerSOS(org.json.JSONObject payload) {
+        Bundle b = new Bundle();
+        b.putInt("action", LocationServiceImpl.MSG_ON_SOS);
+        BackgroundLocation last = LocationServiceImpl.getLastReceivedLocation();
+        if (last != null) b.putParcelable("payload", last);
+        b.putString("sosPayload", payload != null ? payload.toString() : "{}");
+        Intent intent = new Intent(LocationServiceImpl.ACTION_BROADCAST);
+        intent.putExtras(b);
+        androidx.localbroadcastmanager.content.LocalBroadcastManager
+                .getInstance(getContext().getApplicationContext()).sendBroadcast(intent);
     }
 
     /**

@@ -39,6 +39,11 @@ enum {
 @property NSMutableDictionary* queryParams; // static placeholder values for URL templating
 // v3.4 Phase 3: location API modernization
 @property NSNumber *_showsBackgroundLocationIndicator; // iOS 11+: show blue bar when app uses location in background
+// v3.5 Phase 4: diagnostics
+@property NSNumber *heartbeatInterval;        // ms; 0 disables (default)
+@property NSString *mockLocationPolicy;       // allow | flag | drop (default allow)
+// v4.0 Phase 6: driver insights — passed through as a dictionary; the facade reads keys at runtime.
+@property NSDictionary *drivingEvents;
 @property NSNumber *_saveBatteryOnBackground;
 @property NSNumber *maxLocations;
 @property NSNumber *_pauseLocationUpdates;

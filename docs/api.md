@@ -70,6 +70,8 @@ Configure options:
 | `bodyTemplate`            | `Object\|Array`   | Android, iOS | **Since 3.3.0.** Alias of `postTemplate`. Same syntax (`@latitude`, `@longitude`, ...) and the new placeholder syntax (`{latitude}`, `{lon}`, ...) is supported on string values.                                                                                                                                                                  | all         |                            |
 | `queryParams`             | `Object`          | Android, iOS | **Since 3.3.0.** Static placeholder values used by URL/body templating. Built-in placeholders resolved from each location: `{latitude}`, `{longitude}`, `{lat}`, `{lon}`, `{time}`, `{timestamp}`, `{timestamp_iso}`, `{speed}`, `{altitude}`, `{bearing}`, `{accuracy}`, `{provider}`. Any extra keys here are also available (e.g. `{device_id}`). | all         |                            |
 | `showsBackgroundLocationIndicator` | `Boolean` | iOS         | **Since 3.4.0.** iOS 11+. When `true`, iOS shows the blue status bar / pill while the app uses location in the background. Apple recommends this for transparency in apps that track continuously.                                                                                                                                                | all         | `false`                    |
+| `heartbeatInterval`       | `Number`          | Android, iOS | **Since 3.5.0.** Interval (ms) at which the plugin emits a `heartbeat` event with the latest known location. `0` (default) disables the heartbeat. Native emission is wired end-to-end (Android `ScheduledExecutorService`, iOS `NSTimer`). On the first ticks before any GPS fix is received the event arrives without a location payload. | all         | `0`                        |
+| `mockLocationPolicy`      | `String`          | Android, iOS | **Since 3.5.0.** Policy for mocked locations (`isFromMockProvider` Android / `simulated` iOS). One of `allow` (default, keep), `flag` (deliver with the existing mocked flag set so the app/server can filter) or `drop` (discard before persisting/posting).                                                                                       | all         | `allow`                    |
 
 \*
 DIS = DISTANCE\_FILTER\_PROVIDER
@@ -389,6 +391,168 @@ Format of log entry:
 ## removeAllListeners(event)
 
 Unregister all event listeners for given event. If parameter `event` is not provided then all event listeners will be removed.
+
+## getDiagnostics(success, fail)
+
+Platform: Android, iOS — **Since 3.5.0**
+
+Returns extended diagnostics that help explain *why* tracking may not be running in production: missing background-location permission on Android 10+, OEM that killed the foreground service, `preciseLocationEnabled: false` on iOS, etc.
+
+```javascript
+BackgroundGeolocation.getDiagnostics()
+  .then(function (d) {
+    console.log('isRunning?', d.isRunning);
+    console.log('background granted?', d.backgroundLocationGranted);    // Android
+    console.log('battery whitelist?', d.batteryOptimizationIgnored);    // Android
+    console.log('manufacturer:', d.manufacturer);                       // Android (xiaomi/huawei/...)
+    console.log('precise location?', d.preciseLocationEnabled);         // iOS 14+
+    console.log('background refresh:', d.backgroundRefreshStatus);      // iOS
+    console.log('low power mode:', d.lowPowerModeEnabled);              // iOS
+  });
+```
+
+Returned fields (all optional except `isRunning` and `locationServicesEnabled`):
+
+**Common:** `isRunning`, `locationServicesEnabled`, `startOnBoot`, `pendingSyncCount`, `lastLocationAt`.
+
+**Android only:** `fineLocationGranted`, `coarseLocationGranted`, `backgroundLocationGranted` (always `true` on Android < 10), `notificationPermissionGranted` (always `true` on Android < 13), `activityRecognitionGranted`, `batteryOptimizationIgnored`, `manufacturer`, `foregroundServiceType`.
+
+**iOS only:** `preciseLocationEnabled` (iOS 14+), `backgroundRefreshStatus`, `lowPowerModeEnabled`, `motionPermissionStatus`, `authorizationStatusText`.
+
+Use `getDiagnostics()` proactively in your app to surface a "Tracking is not active because…" message to users and link them to the right Settings screen.
+
+## Driver insights (since 4.0.0)
+
+GPS-only state machine that emits `tripStart`, `tripEnd`, `moving`, `stopped`, `speeding`, `providerChange` and `sos`. v4.1 added GPS-derived sensor-like events (`hardBrake`, `rapidAcceleration`, `sharpTurn`, `possibleCrash`) computed from speed/bearing deltas — no sensors needed. v4.2 adds **real sensor fusion** (opt-in) using accelerometer + gyroscope to refine `possibleCrash` at low speed and to detect `phoneUsageWhileDriving`.
+
+### Enable
+
+```javascript
+BackgroundGeolocation.configure({
+  // ...
+  drivingEvents: {
+    enabled: true,
+    speedLimit: 80,           // km/h; 0 disables `speeding`
+    minMovingSpeed: 1.0,      // m/s, default
+    stoppedDuration: 60000,
+    minTripSpeed: 3.0,
+    minTripDuration: 30000,
+    // v4.1 GPS-derived events — set 0 to disable any
+    hardBrakeMps2: 3.5,
+    rapidAccelMps2: 3.5,
+    sharpTurnDegPerSec: 30,
+    crashImpactKmh: 25,
+    crashWindowMs: 2000,
+    // v4.2 real sensor fusion — opt-in. Off by default.
+    sensorFusion: true,             // start accelerometer + gyroscope while a trip is active
+    crashImpactG: 3.0,              // |a| threshold in g for sensor-driven possibleCrash
+    sensorCrashCooldownMs: 10000,
+    phoneUsageWindowMs: 4000,       // sustained jitter window for phoneUsageWhileDriving
+    phoneUsageCooldownMs: 60000
+  }
+});
+
+BackgroundGeolocation.on('tripStart', function (location) { /* ... */ });
+BackgroundGeolocation.on('tripEnd',   function (data)     { /* { location, distance (m), durationMs } */ });
+BackgroundGeolocation.on('moving',    function (location) { /* ... */ });
+BackgroundGeolocation.on('stopped',   function (location) { /* ... */ });
+BackgroundGeolocation.on('speeding',  function (data)     { /* { location, speedKmh, limitKmh } */ });
+BackgroundGeolocation.on('providerChange', function (data){ /* { provider } */ });
+BackgroundGeolocation.on('sos',       function (data)     { /* user payload + { location? } */ });
+
+// v4.1 GPS-derived sensor-like events — payload `{ location, value }`
+BackgroundGeolocation.on('hardBrake',         function (d) { /* d.value: m/s² (negative) */ });
+BackgroundGeolocation.on('rapidAcceleration', function (d) { /* d.value: m/s² (positive) */ });
+BackgroundGeolocation.on('sharpTurn',         function (d) { /* d.value: deg/s */ });
+
+// v4.1+ — `source` field added in v4.2 to distinguish GPS heuristic vs accelerometer pipeline.
+BackgroundGeolocation.on('possibleCrash', function (d) {
+  // d.location, d.value (km/h drop if source==='gps', impact-g if source==='sensor'), d.source
+  if (d.source === 'sensor') {
+    // Higher confidence — accelerometer measured a real impact during an active trip.
+  } else {
+    // GPS heuristic — confirm with the user before notifying contacts.
+  }
+});
+
+// v4.2 sensor fusion — emitted only when drivingEvents.sensorFusion === true.
+BackgroundGeolocation.on('phoneUsageWhileDriving', function (location) {
+  // Sustained device interaction while a trip is active and the screen is on.
+  // Use to power "stop using your phone while driving" UX.
+});
+```
+
+### v4.2 sensor fusion — when to enable it
+
+`sensorFusion: true` registers `Sensor.TYPE_LINEAR_ACCELERATION` + `Sensor.TYPE_GYROSCOPE` on Android (50 Hz, `SENSOR_DELAY_GAME`) and `CMMotionManager.startDeviceMotionUpdatesToQueue` on iOS (50 Hz). Sampling **only happens while a trip is active** (`tripActive == true`); when the trip ends the pipeline goes idle, so battery cost is bounded by drive time.
+
+Turn it on when your app needs:
+- **High-confidence crash detection at low speed** — e.g. a parking-lot collision where GPS speed never crosses the velocity-drop threshold. Pair `crashImpactG` (default 3 g) with the existing GPS heuristic for redundancy.
+- **`phoneUsageWhileDriving`** — there is no GPS-only equivalent. Without sensor fusion this event is never emitted.
+
+Leave it off (default) if your app only needs `tripStart`/`tripEnd` plus the GPS-derived events; v4.1 covers those without touching sensors.
+
+Hot-reload: changing `drivingEvents.sensorFusion` via `configure()` while the service is running starts/stops the pipeline without restarting tracking. Current `tripActive` and `lastLocation` are re-injected so a config arriving mid-trip starts in the right mode.
+
+iOS heuristic note: `phoneUsageWhileDriving` requires the app to be **foreground active** (screen on). Background interaction by a passenger is intentionally ignored.
+
+### triggerSOS(payload?, success?, fail?)
+
+Fires a single `sos` JS event carrying the latest known location plus the supplied payload. The host app is responsible for the actual SOS workflow (notify contacts, push notification, alarm UI). This method just guarantees a single emission with the freshest fix the plugin has.
+
+```javascript
+BackgroundGeolocation.triggerSOS({
+  reason: 'panic_button',
+  user: 'USER_DEVICE_123'
+});
+```
+
+## Battery / OEM helpers (since 3.6.0)
+
+These methods help the app guide the user through the steps required for reliable background tracking on aggressive OEMs (Xiaomi/Huawei/Oppo/Vivo/Samsung). They are most useful in combination with `getDiagnostics()`: when `batteryOptimizationIgnored` is `false` or `manufacturer` matches an OEM that kills foreground services, render an actionable help screen.
+
+### isIgnoringBatteryOptimizations(success, fail)
+
+Android: returns `true` if the app is on the battery-optimisation whitelist. iOS: resolves `true`.
+
+```javascript
+BackgroundGeolocation.isIgnoringBatteryOptimizations()
+  .then(function (whitelisted) {
+    if (!whitelisted) {
+      // show banner: "Disable battery optimisation for reliable tracking"
+    }
+  });
+```
+
+### requestIgnoreBatteryOptimizations(success, fail)
+
+Android: opens the system dialog so the user can add the app to the whitelist. The user must accept; the plugin cannot grant this on its own. iOS: no-op.
+
+### openBatterySettings(success, fail)
+
+Android: opens the per-app battery settings (with fallback to app-info). iOS: opens the app's Settings entry.
+
+### openAutoStartSettings(success, fail)
+
+Android: opens the OEM-specific auto-start / background-activity screen. Returns `{ opened, manufacturer, screen }`. Supports Xiaomi (MIUI/Redmi/Poco), Huawei/Honor (EMUI), Oppo (ColorOS), Vivo (FunTouch), OnePlus, Asus. Samsung falls back to app-info because there is no stable component for "Sleeping apps". iOS: opens the app's Settings entry and reports `manufacturer: 'apple'`.
+
+```javascript
+BackgroundGeolocation.openAutoStartSettings()
+  .then(function (info) {
+    console.log('OEM:', info.manufacturer, 'opened:', info.opened);
+  });
+```
+
+### getManufacturerHelp(success, fail)
+
+Returns `{ manufacturer, steps: string[] }` with OEM-specific guidance text the app can render in a help screen. Covers Xiaomi/Huawei/Oppo/Vivo/Samsung/OnePlus/Asus and a generic Android fallback. iOS returns Apple-specific steps (Always location, Precise Location, Background App Refresh, Low Power Mode).
+
+```javascript
+BackgroundGeolocation.getManufacturerHelp()
+  .then(function (help) {
+    // render help.steps as a bulleted list, prefixed with "On " + help.manufacturer
+  });
+```
 
 ## HTTP transport (since 3.3.0)
 

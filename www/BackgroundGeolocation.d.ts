@@ -3,7 +3,7 @@
 // Definitions by: Mauron85 (@mauron85), Norbert Györög (@djereg)
 // Definitions: https://github.com/josuelmm/cordova-background-geolocation/blob/master/www/BackgroundGeolocation.d.ts
 
-export type Event = 'location' | 'stationary' | 'activity' | 'start' | 'stop' | 'error' | 'authorization' | 'foreground' | 'background' | 'abort_requested' | 'http_authorization';
+export type Event = 'location' | 'stationary' | 'activity' | 'start' | 'stop' | 'error' | 'authorization' | 'foreground' | 'background' | 'abort_requested' | 'http_authorization' | 'heartbeat' | 'syncStart' | 'syncProgress' | 'syncSuccess' | 'syncError' | 'tripStart' | 'tripEnd' | 'moving' | 'stopped' | 'speeding' | 'providerChange' | 'sos' | 'hardBrake' | 'rapidAcceleration' | 'sharpTurn' | 'possibleCrash' | 'phoneUsageWhileDriving';
 
 /** Event names enum (compatibility with @awesome-cordova-plugins style). Use e.g. BackgroundGeolocation.on(BackgroundGeolocationEvents.location, cb). */
 export enum BackgroundGeolocationEvents {
@@ -18,6 +18,27 @@ export enum BackgroundGeolocationEvents {
   activity = 'activity',
   stationary = 'stationary',
   location = 'location',
+  // v3.5 Phase 4 — diagnostics & sync events
+  heartbeat = 'heartbeat',
+  syncStart = 'syncStart',
+  syncProgress = 'syncProgress',
+  syncSuccess = 'syncSuccess',
+  syncError = 'syncError',
+  // v4.0 Phase 6 — driver insights
+  tripStart = 'tripStart',
+  tripEnd = 'tripEnd',
+  moving = 'moving',
+  stopped = 'stopped',
+  speeding = 'speeding',
+  providerChange = 'providerChange',
+  sos = 'sos',
+  // v4.1 — GPS-derived sensor-like events
+  hardBrake = 'hardBrake',
+  rapidAcceleration = 'rapidAcceleration',
+  sharpTurn = 'sharpTurn',
+  possibleCrash = 'possibleCrash',
+  // v4.2 — sensor fusion
+  phoneUsageWhileDriving = 'phoneUsageWhileDriving',
 }
 
 type HeadlessTaskEventName = 'location' | 'stationary' | 'activity';
@@ -460,6 +481,88 @@ export interface ConfigureOptions {
    * @since 3.4.0
    */
   showsBackgroundLocationIndicator?: boolean;
+
+  /**
+   * Interval in milliseconds at which the plugin emits a `heartbeat` event with the latest
+   * known location. Useful to confirm the service is alive without waiting for a fresh fix.
+   * `0` (default) disables the heartbeat.
+   *
+   * Native emission is implemented end-to-end (Android `ScheduledExecutorService`, iOS `NSTimer`).
+   * On the first ticks before any GPS fix is received the event arrives with no location payload.
+   *
+   * Platform: Android, iOS
+   * @since 3.5.0
+   */
+  heartbeatInterval?: number;
+
+  /**
+   * Policy applied to locations flagged as mocked (Android `isFromMockProvider` /
+   * iOS `simulated`). Detection has always existed; the policy controls what to do with
+   * those samples:
+   *  - `'allow'` (default): keep them as regular locations.
+   *  - `'flag'`: deliver them but tag with `mocked: true` so the app/server can filter.
+   *  - `'drop'`: discard them silently before persisting / posting.
+   *
+   * Recommended for Traccar/anti-fraud: `'flag'` — keeps history, lets the server decide.
+   *
+   * Platform: Android, iOS
+   * @since 3.5.0
+   */
+  mockLocationPolicy?: 'allow' | 'flag' | 'drop';
+
+  /**
+   * v4.0 Phase 6 — Driver insights configuration. Enables a GPS-based state machine
+   * that emits `moving`, `stopped`, `tripStart`, `tripEnd`, `speeding` and
+   * `providerChange` events without additional sensors.
+   *
+   * v4.1 adds GPS-derived hardBrake, rapidAcceleration, sharpTurn and possibleCrash
+   * (no sensors required). v4.2 adds real sensor fusion (`sensorFusion: true`)
+   * to refine `possibleCrash` at low speed via accelerometer impact and to detect
+   * `phoneUsageWhileDriving`.
+   *
+   * Platform: Android, iOS
+   * @since 4.0.0
+   */
+  drivingEvents?: {
+    /** Master switch. When `false` (default) no driver-insight events are emitted. */
+    enabled?: boolean;
+    /** Speed limit in km/h for the `speeding` event. `0` disables. Default 0. */
+    speedLimit?: number;
+    /** m/s threshold below which the user is considered stopped. Default 1.0. */
+    minMovingSpeed?: number;
+    /** ms of continuous below-threshold speed needed to confirm "stopped". Default 60000. */
+    stoppedDuration?: number;
+    /** m/s threshold to start counting a trip. Default 3.0 (~10.8 km/h). */
+    minTripSpeed?: number;
+    /** ms of continuous above-threshold speed needed to confirm `tripStart`. Default 30000. */
+    minTripDuration?: number;
+
+    // v4.1 — GPS-derived sensor-like driving events. Set 0 to disable each one.
+    /** Deceleration threshold (m/s², positive value). Triggers `hardBrake` when |Δspeed/Δt| ≥ this during an active trip. Default 3.5. */
+    hardBrakeMps2?: number;
+    /** Acceleration threshold (m/s²) for `rapidAcceleration` during a trip. Default 3.5. */
+    rapidAccelMps2?: number;
+    /** Bearing change rate (deg/s) for `sharpTurn`. Requires speed ≥ 5 m/s. Default 30. */
+    sharpTurnDegPerSec?: number;
+    /** Velocity drop in km/h within `crashWindowMs` while tripActive — triggers `possibleCrash`. Default 25. */
+    crashImpactKmh?: number;
+    /** Window in ms used to evaluate the crash impact. Default 2000. */
+    crashWindowMs?: number;
+
+    // v4.2 — Real sensor fusion (accelerometer + gyroscope).
+    /** Enable real sensor fusion. When `true` and `enabled` is `true`, the plugin samples
+     * linear acceleration + gyroscope while a trip is active and emits high-confidence
+     * `possibleCrash` and `phoneUsageWhileDriving`. Adds modest battery cost. Default false. */
+    sensorFusion?: boolean;
+    /** Crash impact threshold in g (1g = 9.81 m/s²). Triggers `possibleCrash` from the sensor pipeline. Default 3.0. */
+    crashImpactG?: number;
+    /** Cooldown ms between successive sensor-driven crash detections. Default 10000. */
+    sensorCrashCooldownMs?: number;
+    /** Sustained device-jitter window (ms) needed to fire `phoneUsageWhileDriving`. Default 4000. */
+    phoneUsageWindowMs?: number;
+    /** Cooldown ms between successive `phoneUsageWhileDriving` events. Default 60000. */
+    phoneUsageCooldownMs?: number;
+  };
 }
 
 export interface LocationOptions {
@@ -598,6 +701,59 @@ export interface ServiceStatus {
   authorization: AuthorizationStatus;
 }
 
+/**
+ * Extended diagnostics returned by `getDiagnostics()`.
+ * Helps explain why tracking may not be running in production.
+ *
+ * @since 3.5.0
+ */
+export interface Diagnostics {
+  // ---- common ----
+  /** TRUE if the native service is currently running. */
+  isRunning: boolean;
+  /** TRUE if the OS-level location services are enabled. */
+  locationServicesEnabled: boolean;
+  /** Configured `startOnBoot` flag. */
+  startOnBoot?: boolean;
+  /** Number of locations queued for sync (`getPendingSyncCount`). */
+  pendingSyncCount?: number;
+  /** UTC ms of the last received location, or `null` if none yet. */
+  lastLocationAt?: number | null;
+
+  // ---- Android ----
+  /** Android: TRUE if `ACCESS_FINE_LOCATION` is granted. */
+  fineLocationGranted?: boolean;
+  /** Android: TRUE if `ACCESS_COARSE_LOCATION` is granted. */
+  coarseLocationGranted?: boolean;
+  /** Android 10+: TRUE if `ACCESS_BACKGROUND_LOCATION` is granted. Always `true` on Android <10. */
+  backgroundLocationGranted?: boolean;
+  /** Android 13+: TRUE if `POST_NOTIFICATIONS` is granted. Always `true` on Android <13. */
+  notificationPermissionGranted?: boolean;
+  /** Android 10+: TRUE if `ACTIVITY_RECOGNITION` is granted. Always `true` on Android <10. */
+  activityRecognitionGranted?: boolean;
+  /** Android: TRUE if the app is on the battery optimisation whitelist. */
+  batteryOptimizationIgnored?: boolean;
+  /** Android: device manufacturer (`Build.MANUFACTURER`). Helps detect aggressive OEMs. */
+  manufacturer?: string;
+  /** Android: declared `foregroundServiceType` of the location service (numeric, e.g. 8 = LOCATION). */
+  foregroundServiceType?: number;
+
+  // ---- iOS ----
+  /** iOS 14+: TRUE if the user granted Precise Location ("on" in Settings). */
+  preciseLocationEnabled?: boolean;
+  /**
+   * iOS: status of system-wide Background App Refresh.
+   * One of `available | denied | restricted`.
+   */
+  backgroundRefreshStatus?: 'available' | 'denied' | 'restricted';
+  /** iOS: TRUE if Low Power Mode is currently enabled (system-wide). */
+  lowPowerModeEnabled?: boolean;
+  /** iOS: status of the Motion & Fitness permission. */
+  motionPermissionStatus?: 'authorized' | 'denied' | 'restricted' | 'notDetermined';
+  /** iOS: human-readable label of the current `CLAuthorizationStatus`. */
+  authorizationStatusText?: string;
+}
+
 export interface LogEntry {
   /** ID of log entry as stored in db. */
   id: number;
@@ -721,6 +877,100 @@ export interface BackgroundGeolocationPlugin {
     success?: (status: ServiceStatus) => void,
     fail?: (error: BackgroundGeolocationError) => void
   ): Promise<ServiceStatus>;
+
+  /**
+   * Extended diagnostics. Returns permissions, battery optimisation state,
+   * last fix age, pending sync count, OEM info and (on iOS) precise location /
+   * background refresh / low power flags.
+   *
+   * Use this to diagnose "tracking is not running" issues in production:
+   * a missing `ACCESS_BACKGROUND_LOCATION` on Android 10+, an OEM that killed
+   * the foreground service, or `preciseLocationEnabled: false` on iOS will all
+   * surface here.
+   *
+   * Platform: Android, iOS
+   * @since 3.5.0
+   */
+  getDiagnostics(
+    success?: (diagnostics: Diagnostics) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<Diagnostics>;
+
+  /**
+   * Android: returns `true` if the app is on the battery optimisation whitelist
+   * (Settings → Battery → "Don't optimize"). On iOS resolves to `true` (concept
+   * does not apply; iOS already restricts background activity by other means).
+   *
+   * @since 3.6.0
+   */
+  isIgnoringBatteryOptimizations(
+    success?: (whitelisted: boolean) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<boolean>;
+
+  /**
+   * Android: opens the system dialog to add the app to the battery optimisation
+   * whitelist. The user must accept; the app cannot grant this on its own.
+   * Resolves with the up-to-date whitelist state. iOS: resolves `true`.
+   *
+   * @since 3.6.0
+   */
+  requestIgnoreBatteryOptimizations(
+    success?: (whitelisted: boolean) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<boolean>;
+
+  /**
+   * Android: opens the battery-related settings screen for this app. iOS: no-op.
+   *
+   * @since 3.6.0
+   */
+  openBatterySettings(
+    success?: () => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<void>;
+
+  /**
+   * Android only: opens the OEM-specific "auto-start" / "background activity"
+   * settings screen on Xiaomi MIUI, Huawei EMUI, Oppo ColorOS, Vivo FunTouch,
+   * Samsung One UI. Falls back to the standard app-info screen when the OEM
+   * is unknown. Resolves with `{ opened: boolean, manufacturer: string, screen: string }`.
+   * iOS: resolves `{ opened: false, manufacturer: 'apple', screen: '' }`.
+   *
+   * @since 3.6.0
+   */
+  openAutoStartSettings(
+    success?: (info: { opened: boolean; manufacturer: string; screen: string }) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<{ opened: boolean; manufacturer: string; screen: string }>;
+
+  /**
+   * Returns OEM-specific guidance for the user. The `steps` array contains
+   * short instructions like "Settings → Apps → [your app] → Battery → Sin restricciones".
+   * Use to render an actionable help screen when `getDiagnostics()` shows the
+   * service is being killed by the OEM.
+   *
+   * @since 3.6.0
+   */
+  getManufacturerHelp(
+    success?: (info: { manufacturer: string; steps: string[] }) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<{ manufacturer: string; steps: string[] }>;
+
+  /**
+   * v4.0 Phase 6 — Trigger an SOS event from JS. The plugin emits an `sos` JS event
+   * with the latest known location plus the provided payload (anything serialisable).
+   * The host app is responsible for the actual SOS workflow (notify contacts, push,
+   * alarm UI). This method just guarantees a single emission carrying the most recent
+   * fix the plugin knows about.
+   *
+   * @since 4.0.0
+   */
+  triggerSOS(
+    payload?: { [key: string]: any },
+    success?: () => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<void>;
 
   /**
    * Show app settings to allow change of app location permissions.
@@ -1156,12 +1406,196 @@ export interface BackgroundGeolocationPlugin {
   ): Subscribable<void>;
 
   /**
+   * Register heartbeat listener.
+   *
+   * Triggered every `heartbeatInterval` ms while the service is running.
+   * The `location` argument is the latest known fix; it may be `undefined` on
+   * the very first ticks if no GPS fix has been received yet.
+   *
+   * @since 3.5.0
+   */
+  on(
+    eventName: 'heartbeat',
+    callback?: (location?: Location) => void
+  ): Subscribable<Location | void>;
+
+  /**
+   * Register sync-start listener.
+   *
+   * Triggered when a batch upload to `syncUrl` begins.
+   *
+   * @since 3.5.0
+   */
+  on(
+    eventName: 'syncStart',
+    callback?: () => void
+  ): Subscribable<void>;
+
+  /**
+   * Register sync-progress listener.
+   *
+   * Triggered with a 0..100 percentage while a sync upload is in flight.
+   *
+   * @since 3.5.0
+   */
+  on(
+    eventName: 'syncProgress',
+    callback?: (progress: number) => void
+  ): Subscribable<number>;
+
+  /**
+   * Register sync-success listener.
+   *
+   * Payload: `{ sent: number }` — locations included in the successful upload.
+   *
+   * @since 3.5.0
+   */
+  on(
+    eventName: 'syncSuccess',
+    callback?: (data: { sent: number }) => void
+  ): Subscribable<{ sent: number }>;
+
+  /**
+   * Register sync-error listener.
+   *
+   * Payload: `{ httpStatus: number; message: string }` — non-2xx response or IO/network failure.
+   *
+   * @since 3.5.0
+   */
+  on(
+    eventName: 'syncError',
+    callback?: (data: { httpStatus: number; message: string }) => void
+  ): Subscribable<{ httpStatus: number; message: string }>;
+
+  /**
+   * v4.0 Phase 6 — Trip starts (state goes from "stopped" to "moving" with sustained
+   * speed >= `drivingEvents.minTripSpeed` for `minTripDuration`).
+   * @since 4.0.0
+   */
+  on(
+    eventName: 'tripStart',
+    callback?: (location: Location) => void
+  ): Subscribable<Location>;
+
+  /**
+   * v4.0 Phase 6 — Trip ends (sustained speed near zero for `drivingEvents.stoppedDuration`).
+   * Payload includes basic trip stats: distance (m) and duration (ms).
+   * @since 4.0.0
+   */
+  on(
+    eventName: 'tripEnd',
+    callback?: (data: { location: Location; distance: number; durationMs: number }) => void
+  ): Subscribable<{ location: Location; distance: number; durationMs: number }>;
+
+  /**
+   * v4.0 Phase 6 — User started moving (speed crossed above `minMovingSpeed`).
+   * @since 4.0.0
+   */
+  on(
+    eventName: 'moving',
+    callback?: (location: Location) => void
+  ): Subscribable<Location>;
+
+  /**
+   * v4.0 Phase 6 — User stopped (speed below threshold for `stoppedDuration`).
+   * @since 4.0.0
+   */
+  on(
+    eventName: 'stopped',
+    callback?: (location: Location) => void
+  ): Subscribable<Location>;
+
+  /**
+   * v4.0 Phase 6 — Speed crossed above `drivingEvents.speedLimit` (km/h).
+   * Fires once when crossing; further fixes above the limit do not refire until the
+   * speed drops back below the limit and crosses again.
+   * @since 4.0.0
+   */
+  on(
+    eventName: 'speeding',
+    callback?: (data: { location: Location; speedKmh: number; limitKmh: number }) => void
+  ): Subscribable<{ location: Location; speedKmh: number; limitKmh: number }>;
+
+  /**
+   * v4.0 Phase 6 — Native location provider changed (GPS ↔ Network ↔ Fused).
+   * Useful to react to GPS being turned off or losing signal indoors.
+   * @since 4.0.0
+   */
+  on(
+    eventName: 'providerChange',
+    callback?: (data: { provider: string }) => void
+  ): Subscribable<{ provider: string }>;
+
+  /**
+   * v4.0 Phase 6 — `triggerSOS()` was invoked. Payload is the user-supplied object
+   * plus the latest known `location` (may be `undefined` if no fix yet).
+   * @since 4.0.0
+   */
+  on(
+    eventName: 'sos',
+    callback?: (data: { location?: Location; [key: string]: any }) => void
+  ): Subscribable<{ location?: Location; [key: string]: any }>;
+
+  /**
+   * v4.1 — GPS-derived hard brake. Payload `{ location, value }` where `value` is the
+   * computed deceleration in m/s² (negative number, more negative = harder brake).
+   * @since 4.1.0
+   */
+  on(
+    eventName: 'hardBrake',
+    callback?: (data: { location: Location; value: number }) => void
+  ): Subscribable<{ location: Location; value: number }>;
+
+  /**
+   * v4.1 — GPS-derived rapid acceleration (m/s²). Positive value.
+   * @since 4.1.0
+   */
+  on(
+    eventName: 'rapidAcceleration',
+    callback?: (data: { location: Location; value: number }) => void
+  ): Subscribable<{ location: Location; value: number }>;
+
+  /**
+   * v4.1 — GPS-derived sharp turn. `value` is the bearing-change rate in deg/s.
+   * Only fires when speed ≥ 5 m/s to avoid GPS jitter at low speeds.
+   * @since 4.1.0
+   */
+  on(
+    eventName: 'sharpTurn',
+    callback?: (data: { location: Location; value: number }) => void
+  ): Subscribable<{ location: Location; value: number }>;
+
+  /**
+   * v4.1+ — Heuristic possible-crash detection. `value` is the velocity drop in km/h
+   * (when `source === 'gps'`) or the impact magnitude in g (when `source === 'sensor'`).
+   * v4.2 adds the `source` field to distinguish the GPS heuristic from the accelerometer
+   * pipeline (`drivingEvents.sensorFusion`). App should ALWAYS confirm with the user
+   * before notifying contacts — false positives are possible.
+   * @since 4.1.0
+   */
+  on(
+    eventName: 'possibleCrash',
+    callback?: (data: { location: Location; value: number; source: 'gps' | 'sensor' }) => void
+  ): Subscribable<{ location: Location; value: number; source: 'gps' | 'sensor' }>;
+
+  /**
+   * v4.2 — Sustained device interaction during an active trip with the screen on.
+   * Conservative heuristic combining accelerometer/gyroscope jitter; meant to power
+   * "stop using your phone while driving" UX. Disabled unless `drivingEvents.sensorFusion === true`.
+   * @since 4.2.0
+   */
+  on(
+    eventName: 'phoneUsageWhileDriving',
+    callback?: (location?: Location) => void
+  ): Subscribable<Location | void>;
+
+  /**
    * Register event listener (accepts BackgroundGeolocationEvents enum for compatibility).
    */
   on(
     eventName: BackgroundGeolocationEvents,
-    callback?: (data: Location | StationaryLocation | Activity | BackgroundGeolocationError | AuthorizationStatus | void) => void
-  ): Subscribable<Location | StationaryLocation | Activity | BackgroundGeolocationError | AuthorizationStatus | void>;
+    callback?: (data: Location | StationaryLocation | Activity | BackgroundGeolocationError | AuthorizationStatus | number | { sent: number } | { httpStatus: number; message: string } | void) => void
+  ): Subscribable<Location | StationaryLocation | Activity | BackgroundGeolocationError | AuthorizationStatus | number | { sent: number } | { httpStatus: number; message: string } | void>;
 
 }
 

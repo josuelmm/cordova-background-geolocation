@@ -78,6 +78,33 @@ public class Config implements Parcelable
     private String httpMode;         // batch | single (default batch)
     private String syncMode;         // batch | single (default batch)
     private HashMap queryParams;     // static placeholder values for URL templating
+    // v3.5 (Phase 4): diagnostics
+    private Integer heartbeatInterval;    // ms; 0 disables heartbeat events
+    private String mockLocationPolicy;    // allow | flag | drop (default allow)
+    // v4.0 (Phase 6): driver insights
+    private DrivingEventsOptions drivingEvents;
+
+    /** v4.0 Phase 6 + v4.1: driver-insights configuration. Plain holder; no Parcelable to keep this class diff small. */
+    public static class DrivingEventsOptions {
+        public boolean enabled = false;
+        public double speedLimitKmh = 0;
+        public double minMovingSpeedMps = 1.0;
+        public long stoppedDurationMs = 60_000L;
+        public double minTripSpeedMps = 3.0;
+        public long minTripDurationMs = 30_000L;
+        // v4.1 GPS-derived sensor-like events. 0 disables each one.
+        public double hardBrakeMps2 = 3.5;
+        public double rapidAccelMps2 = 3.5;
+        public double sharpTurnDegPerSec = 30;
+        public double crashImpactKmh = 25;
+        public long   crashWindowMs = 2_000L;
+        // v4.2 sensor fusion (real accelerometer + gyroscope).
+        public boolean sensorFusion = false;
+        public double  crashImpactG = 3.0;          // |a| threshold for sensor crash, in g
+        public long    sensorCrashCooldownMs = 10_000L;
+        public long    phoneUsageWindowMs = 4_000L;
+        public long    phoneUsageCooldownMs = 60_000L;
+    }
 
     public Config () {
     }
@@ -120,6 +147,28 @@ public class Config implements Parcelable
         this.httpMode = config.httpMode;
         this.syncMode = config.syncMode;
         this.queryParams = CloneHelper.deepCopy(config.queryParams);
+        this.heartbeatInterval = config.heartbeatInterval;
+        this.mockLocationPolicy = config.mockLocationPolicy;
+        if (config.drivingEvents != null) {
+            DrivingEventsOptions de = new DrivingEventsOptions();
+            de.enabled            = config.drivingEvents.enabled;
+            de.speedLimitKmh      = config.drivingEvents.speedLimitKmh;
+            de.minMovingSpeedMps  = config.drivingEvents.minMovingSpeedMps;
+            de.stoppedDurationMs  = config.drivingEvents.stoppedDurationMs;
+            de.minTripSpeedMps    = config.drivingEvents.minTripSpeedMps;
+            de.minTripDurationMs  = config.drivingEvents.minTripDurationMs;
+            de.hardBrakeMps2      = config.drivingEvents.hardBrakeMps2;
+            de.rapidAccelMps2     = config.drivingEvents.rapidAccelMps2;
+            de.sharpTurnDegPerSec = config.drivingEvents.sharpTurnDegPerSec;
+            de.crashImpactKmh     = config.drivingEvents.crashImpactKmh;
+            de.crashWindowMs      = config.drivingEvents.crashWindowMs;
+            de.sensorFusion          = config.drivingEvents.sensorFusion;
+            de.crashImpactG          = config.drivingEvents.crashImpactG;
+            de.sensorCrashCooldownMs = config.drivingEvents.sensorCrashCooldownMs;
+            de.phoneUsageWindowMs    = config.drivingEvents.phoneUsageWindowMs;
+            de.phoneUsageCooldownMs  = config.drivingEvents.phoneUsageCooldownMs;
+            this.drivingEvents = de;
+        }
         if (config.template instanceof AbstractLocationTemplate) {
             this.template = ((AbstractLocationTemplate)config.template).clone();
         }
@@ -160,6 +209,48 @@ public class Config implements Parcelable
         setSyncHttpMethod(in.readString());
         setHttpMode(in.readString());
         setSyncMode(in.readString());
+        setHeartbeatInterval((Integer) in.readValue(null));
+        setMockLocationPolicy(in.readString());
+        // v4.0 + v4.1: driver-insights options serialised as primitives.
+        boolean deEnabled = in.readInt() != 0;
+        double deSpeedLimit = in.readDouble();
+        double deMinMove = in.readDouble();
+        long   deStoppedDur = in.readLong();
+        double deMinTrip = in.readDouble();
+        long   deMinTripDur = in.readLong();
+        // v4.1
+        double deHardBrake = in.readDouble();
+        double deRapidAccel = in.readDouble();
+        double deSharpTurn = in.readDouble();
+        double deCrashKmh = in.readDouble();
+        long   deCrashWin = in.readLong();
+        // v4.2 sensor fusion
+        boolean deSensorFusion = in.readInt() != 0;
+        double  deCrashImpactG = in.readDouble();
+        long    deSensorCrashCooldown = in.readLong();
+        long    dePhoneUsageWindow = in.readLong();
+        long    dePhoneUsageCooldown = in.readLong();
+        boolean deHasOptions = in.readInt() != 0;
+        if (deHasOptions) {
+            DrivingEventsOptions de = new DrivingEventsOptions();
+            de.enabled = deEnabled;
+            de.speedLimitKmh = deSpeedLimit;
+            de.minMovingSpeedMps = deMinMove;
+            de.stoppedDurationMs = deStoppedDur;
+            de.minTripSpeedMps = deMinTrip;
+            de.minTripDurationMs = deMinTripDur;
+            de.hardBrakeMps2 = deHardBrake;
+            de.rapidAccelMps2 = deRapidAccel;
+            de.sharpTurnDegPerSec = deSharpTurn;
+            de.crashImpactKmh = deCrashKmh;
+            de.crashWindowMs = deCrashWin;
+            de.sensorFusion = deSensorFusion;
+            de.crashImpactG = deCrashImpactG;
+            de.sensorCrashCooldownMs = deSensorCrashCooldown;
+            de.phoneUsageWindowMs = dePhoneUsageWindow;
+            de.phoneUsageCooldownMs = dePhoneUsageCooldown;
+            this.drivingEvents = de;
+        }
         Bundle bundle = in.readBundle();
         setHttpHeaders((HashMap<String, String>) bundle.getSerializable("httpHeaders"));
         setQueryParams((HashMap<String, String>) bundle.getSerializable("queryParams"));
@@ -205,6 +296,8 @@ public class Config implements Parcelable
         config.httpMode = "batch";
         config.syncMode = "batch";
         config.queryParams = null;
+        config.heartbeatInterval = 0;
+        config.mockLocationPolicy = "allow";
 
         return config;
     }
@@ -249,6 +342,29 @@ public class Config implements Parcelable
         out.writeString(getSyncHttpMethod());
         out.writeString(getHttpMode());
         out.writeString(getSyncMode());
+        out.writeValue(getHeartbeatInterval());
+        out.writeString(getMockLocationPolicy());
+        // v4.0 + v4.1: drivingEvents primitives (always written; "hasOptions" flag at end).
+        DrivingEventsOptions de = drivingEvents;
+        out.writeInt(de != null && de.enabled ? 1 : 0);
+        out.writeDouble(de != null ? de.speedLimitKmh     : 0.0);
+        out.writeDouble(de != null ? de.minMovingSpeedMps : 1.0);
+        out.writeLong  (de != null ? de.stoppedDurationMs : 60_000L);
+        out.writeDouble(de != null ? de.minTripSpeedMps   : 3.0);
+        out.writeLong  (de != null ? de.minTripDurationMs : 30_000L);
+        // v4.1
+        out.writeDouble(de != null ? de.hardBrakeMps2     : 3.5);
+        out.writeDouble(de != null ? de.rapidAccelMps2    : 3.5);
+        out.writeDouble(de != null ? de.sharpTurnDegPerSec: 30.0);
+        out.writeDouble(de != null ? de.crashImpactKmh    : 25.0);
+        out.writeLong  (de != null ? de.crashWindowMs     : 2_000L);
+        // v4.2 sensor fusion
+        out.writeInt   (de != null && de.sensorFusion ? 1 : 0);
+        out.writeDouble(de != null ? de.crashImpactG          : 3.0);
+        out.writeLong  (de != null ? de.sensorCrashCooldownMs : 10_000L);
+        out.writeLong  (de != null ? de.phoneUsageWindowMs    : 4_000L);
+        out.writeLong  (de != null ? de.phoneUsageCooldownMs  : 60_000L);
+        out.writeInt   (de != null ? 1 : 0);
         Bundle bundle = new Bundle();
         bundle.putSerializable("httpHeaders", getHttpHeaders());
         bundle.putSerializable("queryParams", getQueryParams());
@@ -736,6 +852,38 @@ public class Config implements Parcelable
         }
     }
 
+    /** Heartbeat emit interval in ms. 0 disables. */
+    @Nullable
+    public Integer getHeartbeatInterval() {
+        return heartbeatInterval != null ? heartbeatInterval : 0;
+    }
+
+    public void setHeartbeatInterval(Integer heartbeatInterval) {
+        this.heartbeatInterval = heartbeatInterval;
+    }
+
+    /** Mock location policy: "allow" | "flag" | "drop". Default "allow". */
+    @Nullable
+    public String getMockLocationPolicy() {
+        return mockLocationPolicy != null ? mockLocationPolicy : "allow";
+    }
+
+    public void setMockLocationPolicy(@Nullable String mockLocationPolicy) {
+        this.mockLocationPolicy = (mockLocationPolicy == null || mockLocationPolicy.isEmpty())
+                ? null
+                : mockLocationPolicy.toLowerCase(Locale.US);
+    }
+
+    /** v4.0 Phase 6: driver-insights options. */
+    @Nullable
+    public DrivingEventsOptions getDrivingEvents() {
+        return drivingEvents;
+    }
+
+    public void setDrivingEvents(@Nullable DrivingEventsOptions drivingEvents) {
+        this.drivingEvents = drivingEvents;
+    }
+
     @Override
     public String toString () {
         return new StringBuffer()
@@ -898,6 +1046,15 @@ public class Config implements Parcelable
         }
         if (config2.hasQueryParams()) {
             merger.setQueryParams(config2.getQueryParams());
+        }
+        if (config2.heartbeatInterval != null) {
+            merger.setHeartbeatInterval(config2.getHeartbeatInterval());
+        }
+        if (config2.mockLocationPolicy != null) {
+            merger.setMockLocationPolicy(config2.getMockLocationPolicy());
+        }
+        if (config2.drivingEvents != null) {
+            merger.setDrivingEvents(config2.drivingEvents);
         }
 
         return merger;

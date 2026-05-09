@@ -81,15 +81,26 @@ static MAURLocationTransform s_locationTransform = nil;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
         
         MAURLocation *location = inLocation;
-        
+
         if (locationTransform != nil) {
             location = locationTransform(location);
-            
+
             if (location == nil) {
                 return;
             }
         }
-        
+
+        // v3.5 Phase 4: mock location policy. Detection already exists in MAURLocation.simulated.
+        if (location.simulated != nil && [location.simulated boolValue]) {
+            NSString *policy = self.config.mockLocationPolicy ?: @"allow";
+            if ([@"drop" isEqualToString:policy]) {
+                DDLogInfo(@"%@ Simulated/mock location dropped (mockLocationPolicy=drop)", TAG);
+                return;
+            }
+            // "flag": leave it. The simulated NSNumber is already on the model and propagates via toResultFromTemplate.
+            // "allow": no-op.
+        }
+
         MAURSQLiteLocationDAO *locationDAO = [MAURSQLiteLocationDAO sharedInstance];
         // TODO: investigate location id always 0
         NSNumber *locationId = [locationDAO persistLocation:location limitRows:self.config.maxLocations.integerValue];

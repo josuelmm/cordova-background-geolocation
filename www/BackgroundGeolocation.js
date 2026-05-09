@@ -57,7 +57,28 @@ var BackgroundGeolocation = {
     'foreground',
     'background',
     'abort_requested',
-    'http_authorization'
+    'http_authorization',
+    // v3.5 Phase 4
+    'heartbeat',
+    'syncStart',
+    'syncProgress',
+    'syncSuccess',
+    'syncError',
+    // v4.0 Phase 6 — driver insights
+    'tripStart',
+    'tripEnd',
+    'moving',
+    'stopped',
+    'speeding',
+    'providerChange',
+    'sos',
+    // v4.1 — GPS-derived sensor-like events
+    'hardBrake',
+    'rapidAcceleration',
+    'sharpTurn',
+    'possibleCrash',
+    // v4.2 — sensor fusion
+    'phoneUsageWhileDriving'
   ],
 
   DISTANCE_FILTER_PROVIDER: 0,
@@ -195,6 +216,38 @@ var BackgroundGeolocation = {
     return execWithPromise(success,
       failure,
       'checkStatus')
+  },
+
+  getDiagnostics: function (success, failure) {
+    return execWithPromise(success,
+      failure,
+      'getDiagnostics')
+  },
+
+  // v3.6 Phase 5 — Battery / OEM helpers (Android only; on iOS these resolve as no-ops)
+  isIgnoringBatteryOptimizations: function (success, failure) {
+    return execWithPromise(success, failure, 'isIgnoringBatteryOptimizations');
+  },
+
+  requestIgnoreBatteryOptimizations: function (success, failure) {
+    return execWithPromise(success, failure, 'requestIgnoreBatteryOptimizations');
+  },
+
+  openBatterySettings: function (success, failure) {
+    return execWithPromise(success, failure, 'openBatterySettings');
+  },
+
+  openAutoStartSettings: function (success, failure) {
+    return execWithPromise(success, failure, 'openAutoStartSettings');
+  },
+
+  getManufacturerHelp: function (success, failure) {
+    return execWithPromise(success, failure, 'getManufacturerHelp');
+  },
+
+  // v4.0 Phase 6 — Driver insights
+  triggerSOS: function (payload, success, failure) {
+    return execWithPromise(success, failure, 'triggerSOS', [payload || {}]);
   },
 
   startTask: function (success, failure) {

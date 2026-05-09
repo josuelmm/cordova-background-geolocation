@@ -9,6 +9,12 @@
 #import "MAURLogging.h"
 #import "MAURBackgroundSync.h"
 #import "MAURSQLiteLocationDAO.h"
+#import <objc/runtime.h>
+
+NSString * const MAURBackgroundSyncDidStartNotification    = @"MAURBackgroundSyncDidStart";
+NSString * const MAURBackgroundSyncDidSucceedNotification  = @"MAURBackgroundSyncDidSucceed";
+NSString * const MAURBackgroundSyncDidFailNotification     = @"MAURBackgroundSyncDidFail";
+NSString * const MAURBackgroundSyncDidProgressNotification = @"MAURBackgroundSyncDidProgress";
 
 @interface MAURBackgroundSync ()  <NSURLSessionDelegate, NSURLSessionTaskDelegate>
 {
@@ -22,11 +28,15 @@
 - (instancetype) init
 {
     if(!(self = [super init])) return nil;
-    
+
+    // v3.5 Phase 4: previously `tasks` was never allocated; addObject/removeObject/cancel/status
+    // silently no-op'd on nil. Allocate now so cancel and status actually work.
+    tasks = [[NSMutableArray alloc] init];
+
     NSURLSessionConfiguration *conf = [NSURLSessionConfiguration backgroundSessionConfiguration:@"com.marianhello.session"];
     conf.allowsCellularAccess = YES;
     urlSession = [NSURLSession sessionWithConfiguration:conf delegate:self delegateQueue:[NSOperationQueue mainQueue]];
-    
+
     return self;
 }
 
@@ -98,8 +108,18 @@
     task.taskDescription = fileName;
     [tasks addObject:task];
     DDLogInfo(@"Started upload for %@ as task %zu/%@/%@", jsonUrl.lastPathComponent, (unsigned long)task.taskIdentifier, task.taskDescription, task);
+
+    // v3.5 Phase 4: emit syncStart now that we are about to push to the server.
+    if (self.delegate && [self.delegate respondsToSelector:@selector(backgroundSyncStarted:)]) {
+        [self.delegate backgroundSyncStarted:self];
+    }
+    [[NSNotificationCenter defaultCenter] postNotificationName:MAURBackgroundSyncDidStartNotification object:self];
+
+    // Stash count so didCompleteWithError can report it as syncSuccess payload.
+    objc_setAssociatedObject(task, "locationsSent", @([jsonArray count]), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
     [task resume];
-    
+
 }
 
 // http://stackoverflow.com/a/572623/48125
@@ -139,6 +159,23 @@ NSString *stringFromFileSize(unsigned long long theSize)
 
 
 #pragma mark -
+// v3.5 Phase 4: forward upload progress as syncProgress (0..100).
+- (void)URLSession:(NSURLSession *)session
+              task:(NSURLSessionTask *)task
+   didSendBodyData:(int64_t)bytesSent
+    totalBytesSent:(int64_t)totalBytesSent
+totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend
+{
+    if (totalBytesExpectedToSend <= 0) return;
+    NSInteger progress = (NSInteger)((totalBytesSent * 100) / totalBytesExpectedToSend);
+    if (progress < 0) progress = 0;
+    if (progress > 100) progress = 100;
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:MAURBackgroundSyncDidProgressNotification
+                      object:self
+                    userInfo:@{@"progress": @(progress)}];
+}
+
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(nullable NSError *)error
 {
     NSInteger statusCode = [(NSHTTPURLResponse *)task.response statusCode];
@@ -163,7 +200,7 @@ NSString *stringFromFileSize(unsigned long long theSize)
     }
 
     if (statusCode == 401)
-    {   
+    {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (_delegate && [_delegate respondsToSelector:@selector(backgroundSyncHttpAuthorizationUpdates:)])
             {
@@ -171,6 +208,41 @@ NSString *stringFromFileSize(unsigned long long theSize)
             }
         });
     }
+
+    // v3.5 Phase 4: emit syncSuccess / syncError.
+    NSNumber *sentNum = objc_getAssociatedObject(task, "locationsSent");
+    NSInteger locationsSent = sentNum != nil ? [sentNum integerValue] : 0;
+    BOOL isStatusOkay = (statusCode >= 200 && statusCode < 300);
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (error != nil) {
+            NSString *msg = error.localizedDescription ?: @"";
+            if (_delegate && [_delegate respondsToSelector:@selector(backgroundSyncFailed:httpStatus:message:)]) {
+                [_delegate backgroundSyncFailed:self httpStatus:0 message:msg];
+            }
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:MAURBackgroundSyncDidFailNotification
+                              object:self
+                            userInfo:@{@"httpStatus": @0, @"message": msg}];
+        } else if (!isStatusOkay) {
+            NSString *msg = [NSString stringWithFormat:@"HTTP %ld", (long)statusCode];
+            if (_delegate && [_delegate respondsToSelector:@selector(backgroundSyncFailed:httpStatus:message:)]) {
+                [_delegate backgroundSyncFailed:self httpStatus:statusCode message:msg];
+            }
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:MAURBackgroundSyncDidFailNotification
+                              object:self
+                            userInfo:@{@"httpStatus": @(statusCode), @"message": msg}];
+        } else {
+            if (_delegate && [_delegate respondsToSelector:@selector(backgroundSyncSucceeded:locationsSent:)]) {
+                [_delegate backgroundSyncSucceeded:self locationsSent:locationsSent];
+            }
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:MAURBackgroundSyncDidSucceedNotification
+                              object:self
+                            userInfo:@{@"sent": @(locationsSent)}];
+        }
+    });
 }
 
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data

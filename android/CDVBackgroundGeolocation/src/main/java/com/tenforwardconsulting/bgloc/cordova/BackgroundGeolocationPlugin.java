@@ -21,6 +21,7 @@ import com.marianhello.bgloc.PluginDelegate;
 import com.marianhello.bgloc.PluginException;
 import com.marianhello.bgloc.cordova.ConfigMapper;
 import com.marianhello.bgloc.cordova.PluginRegistry;
+import com.marianhello.bgloc.oem.BatteryOemHelper;
 import com.marianhello.bgloc.cordova.headless.JsEvaluatorTaskRunner;
 import com.marianhello.bgloc.data.BackgroundActivity;
 import com.marianhello.bgloc.data.BackgroundLocation;
@@ -78,9 +79,17 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     public static final String ACTION_CLEAR_SESSION = "clearSession";
     public static final String ACTION_GET_SESSION_LOCATIONS_COUNT = "getSessionLocationsCount";
     public static final String ACTION_GET_PLUGIN_VERSION = "getPluginVersion";
+    public static final String ACTION_GET_DIAGNOSTICS = "getDiagnostics";
+    // v3.6 Phase 5
+    public static final String ACTION_IS_IGNORING_BATTERY_OPT       = "isIgnoringBatteryOptimizations";
+    public static final String ACTION_REQUEST_IGNORE_BATTERY_OPT    = "requestIgnoreBatteryOptimizations";
+    public static final String ACTION_OPEN_BATTERY_SETTINGS         = "openBatterySettings";
+    public static final String ACTION_OPEN_AUTOSTART_SETTINGS       = "openAutoStartSettings";
+    public static final String ACTION_GET_MANUFACTURER_HELP         = "getManufacturerHelp";
+    public static final String ACTION_TRIGGER_SOS                   = "triggerSOS";
 
     /** Plugin version; keep in sync with plugin.xml. */
-    public static final String PLUGIN_VERSION = "3.2.0";
+    public static final String PLUGIN_VERSION = "4.2.0";
 
     private BackgroundGeolocationFacade facade;
 
@@ -449,9 +458,149 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
         } else if (ACTION_GET_PLUGIN_VERSION.equals(action)) {
             callbackContext.success(PLUGIN_VERSION);
             return true;
+        } else if (ACTION_GET_DIAGNOSTICS.equals(action)) {
+            runOnWebViewThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        callbackContext.success(buildDiagnostics());
+                    } catch (Exception e) {
+                        callbackContext.sendPluginResult(ErrorPluginResult.from("getDiagnostics failed", e, PluginException.SERVICE_ERROR));
+                    }
+                }
+            });
+            return true;
+        } else if (ACTION_IS_IGNORING_BATTERY_OPT.equals(action)) {
+            Context ctx = cordova.getActivity().getApplicationContext();
+            callbackContext.success(BatteryOemHelper.isIgnoringBatteryOptimizations(ctx) ? 1 : 0);
+            return true;
+        } else if (ACTION_REQUEST_IGNORE_BATTERY_OPT.equals(action)) {
+            BatteryOemHelper.requestIgnoreBatteryOptimizations(cordova.getActivity());
+            // Resolve with the (possibly unchanged) current state; the user accepts the dialog asynchronously.
+            Context ctx = cordova.getActivity().getApplicationContext();
+            callbackContext.success(BatteryOemHelper.isIgnoringBatteryOptimizations(ctx) ? 1 : 0);
+            return true;
+        } else if (ACTION_OPEN_BATTERY_SETTINGS.equals(action)) {
+            BatteryOemHelper.openBatterySettings(cordova.getActivity());
+            callbackContext.success();
+            return true;
+        } else if (ACTION_OPEN_AUTOSTART_SETTINGS.equals(action)) {
+            try {
+                callbackContext.success(BatteryOemHelper.openAutoStartSettings(cordova.getActivity()));
+            } catch (Exception e) {
+                callbackContext.sendPluginResult(ErrorPluginResult.from("openAutoStartSettings failed", e, PluginException.SERVICE_ERROR));
+            }
+            return true;
+        } else if (ACTION_GET_MANUFACTURER_HELP.equals(action)) {
+            try {
+                callbackContext.success(BatteryOemHelper.getManufacturerHelp());
+            } catch (Exception e) {
+                callbackContext.sendPluginResult(ErrorPluginResult.from("getManufacturerHelp failed", e, PluginException.SERVICE_ERROR));
+            }
+            return true;
+        } else if (ACTION_TRIGGER_SOS.equals(action)) {
+            try {
+                JSONObject payload = data.optJSONObject(0);
+                facade.triggerSOS(payload);
+                callbackContext.success();
+            } catch (Exception e) {
+                callbackContext.sendPluginResult(ErrorPluginResult.from("triggerSOS failed", e, PluginException.SERVICE_ERROR));
+            }
+            return true;
         }
 
         return false;
+    }
+
+    /** v3.5 Phase 4: extended diagnostics. */
+    private JSONObject buildDiagnostics() throws JSONException {
+        JSONObject d = new JSONObject();
+        Context ctx = cordova.getActivity().getApplicationContext();
+
+        // Common
+        d.put("isRunning", facade.isRunning());
+        d.put("locationServicesEnabled", facade.locationServicesEnabled());
+
+        try {
+            Config cfg = facade.getConfig();
+            if (cfg != null) {
+                d.put("startOnBoot", cfg.getStartOnBoot());
+            }
+        } catch (Exception ignored) { /* config may not be persisted yet */ }
+
+        try {
+            d.put("pendingSyncCount", (int) Math.min(facade.getPendingSyncCount(), Integer.MAX_VALUE));
+        } catch (Exception ignored) { /* DAO might not be ready */ }
+
+        try {
+            BackgroundLocation last = facade.getStationaryLocation();
+            // Last *received* location is closer to lastBest; we expose stationary as a fallback signal.
+            d.put("lastLocationAt", last != null ? last.getTime() : JSONObject.NULL);
+        } catch (Exception ignored) {
+            d.put("lastLocationAt", JSONObject.NULL);
+        }
+
+        // Permissions
+        d.put("fineLocationGranted", hasPermission(ctx, android.Manifest.permission.ACCESS_FINE_LOCATION));
+        d.put("coarseLocationGranted", hasPermission(ctx, android.Manifest.permission.ACCESS_COARSE_LOCATION));
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            d.put("backgroundLocationGranted", hasPermission(ctx, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION));
+        } else {
+            d.put("backgroundLocationGranted", true);
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            d.put("notificationPermissionGranted", hasPermission(ctx, "android.permission.POST_NOTIFICATIONS"));
+        } else {
+            d.put("notificationPermissionGranted", true);
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            d.put("activityRecognitionGranted", hasPermission(ctx, "android.permission.ACTIVITY_RECOGNITION"));
+        } else {
+            d.put("activityRecognitionGranted", true);
+        }
+
+        // Battery / OEM
+        d.put("batteryOptimizationIgnored", isIgnoringBatteryOptimizations(ctx));
+        d.put("manufacturer", android.os.Build.MANUFACTURER != null ? android.os.Build.MANUFACTURER : "");
+
+        // Foreground service type read from manifest (only meaningful on API 34+; reported as-is otherwise)
+        d.put("foregroundServiceType", readForegroundServiceTypeFromManifest(ctx));
+
+        return d;
+    }
+
+    private static boolean hasPermission(Context ctx, String permission) {
+        try {
+            return ctx.getPackageManager().checkPermission(permission, ctx.getPackageName())
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean isIgnoringBatteryOptimizations(Context ctx) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return true;
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+            return pm != null && pm.isIgnoringBatteryOptimizations(ctx.getPackageName());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static int readForegroundServiceTypeFromManifest(Context ctx) {
+        if (android.os.Build.VERSION.SDK_INT < 34) return 0;
+        try {
+            android.content.ComponentName cn = new android.content.ComponentName(
+                    ctx, com.marianhello.bgloc.service.LocationServiceImpl.class);
+            android.content.pm.ServiceInfo si = ctx.getPackageManager().getServiceInfo(
+                    cn, android.content.pm.PackageManager.ComponentInfoFlags.of(0));
+            java.lang.reflect.Field f = android.content.pm.ServiceInfo.class.getField("foregroundServiceType");
+            Object v = f.get(si);
+            return (v instanceof Integer) ? (Integer) v : 0;
+        } catch (Throwable e) {
+            return 0;
+        }
     }
 
     /**
@@ -692,5 +841,161 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     @Override
     public void onError(PluginException e) {
         sendError(e);
+    }
+
+    // v3.5 Phase 4: sync queue events
+    @Override
+    public void onSyncStart() {
+        sendEvent("syncStart");
+    }
+
+    @Override
+    public void onSyncSuccess(int locationsSent) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("sent", locationsSent);
+            sendEvent("syncSuccess", payload);
+        } catch (JSONException e) {
+            sendEvent("syncSuccess");
+        }
+    }
+
+    @Override
+    public void onSyncError(int httpStatus, String message) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("httpStatus", httpStatus);
+            payload.put("message", message != null ? message : "");
+            sendEvent("syncError", payload);
+        } catch (JSONException e) {
+            sendEvent("syncError");
+        }
+    }
+
+    @Override
+    public void onSyncProgress(int progress) {
+        sendEvent("syncProgress", Integer.valueOf(progress));
+    }
+
+    @Override
+    public void onHeartbeat(BackgroundLocation location) {
+        if (location == null) {
+            sendEvent("heartbeat");
+            return;
+        }
+        try {
+            sendEvent("heartbeat", location.toJSONObjectWithId());
+        } catch (JSONException e) {
+            sendEvent("heartbeat");
+        }
+    }
+
+    // v4.0 Phase 6 — driver-insight events
+    @Override
+    public void onTripStart(BackgroundLocation location) {
+        sendLocationEvent("tripStart", location);
+    }
+
+    @Override
+    public void onTripEnd(BackgroundLocation location, double distance, long durationMs) {
+        try {
+            JSONObject p = new JSONObject();
+            p.put("location", location != null ? location.toJSONObjectWithId() : JSONObject.NULL);
+            p.put("distance", distance);
+            p.put("durationMs", durationMs);
+            sendEvent("tripEnd", p);
+        } catch (JSONException e) { sendEvent("tripEnd"); }
+    }
+
+    @Override
+    public void onMoving(BackgroundLocation location) {
+        sendLocationEvent("moving", location);
+    }
+
+    @Override
+    public void onStopped(BackgroundLocation location) {
+        sendLocationEvent("stopped", location);
+    }
+
+    @Override
+    public void onSpeeding(BackgroundLocation location, double speedKmh, double limitKmh) {
+        try {
+            JSONObject p = new JSONObject();
+            p.put("location", location != null ? location.toJSONObjectWithId() : JSONObject.NULL);
+            p.put("speedKmh", speedKmh);
+            p.put("limitKmh", limitKmh);
+            sendEvent("speeding", p);
+        } catch (JSONException e) { sendEvent("speeding"); }
+    }
+
+    @Override
+    public void onProviderChange(String provider) {
+        try {
+            JSONObject p = new JSONObject();
+            p.put("provider", provider != null ? provider : "");
+            sendEvent("providerChange", p);
+        } catch (JSONException e) { sendEvent("providerChange"); }
+    }
+
+    @Override
+    public void onSOS(BackgroundLocation location, JSONObject userPayload) {
+        try {
+            JSONObject p = userPayload != null ? new JSONObject(userPayload.toString()) : new JSONObject();
+            p.put("location", location != null ? location.toJSONObjectWithId() : JSONObject.NULL);
+            sendEvent("sos", p);
+        } catch (JSONException e) { sendEvent("sos"); }
+    }
+
+    private void sendLocationEvent(String name, BackgroundLocation location) {
+        if (location == null) { sendEvent(name); return; }
+        try { sendEvent(name, location.toJSONObjectWithId()); }
+        catch (JSONException e) { sendEvent(name); }
+    }
+
+    // v4.1 GPS-derived sensor-like events
+    @Override
+    public void onHardBrake(BackgroundLocation location, double decelMps2) {
+        sendDrivingEvent("hardBrake", location, decelMps2);
+    }
+    @Override
+    public void onRapidAcceleration(BackgroundLocation location, double accelMps2) {
+        sendDrivingEvent("rapidAcceleration", location, accelMps2);
+    }
+    @Override
+    public void onSharpTurn(BackgroundLocation location, double degPerSec) {
+        sendDrivingEvent("sharpTurn", location, degPerSec);
+    }
+    @Override
+    public void onPossibleCrash(BackgroundLocation location, double velocityDropKmh) {
+        sendDrivingEvent("possibleCrash", location, velocityDropKmh);
+    }
+
+    // v4.2 sensor fusion: enriched possibleCrash with `source` ("gps"|"sensor") and phone-usage event.
+    @Override
+    public void onPossibleCrash(BackgroundLocation location, double value, String source) {
+        try {
+            JSONObject p = new JSONObject();
+            p.put("location", location != null ? location.toJSONObjectWithId() : JSONObject.NULL);
+            p.put("value", value);
+            p.put("source", source != null ? source : "gps");
+            sendEvent("possibleCrash", p);
+        } catch (JSONException e) {
+            sendEvent("possibleCrash");
+        }
+    }
+    @Override
+    public void onPhoneUsageWhileDriving(BackgroundLocation location) {
+        sendLocationEvent("phoneUsageWhileDriving", location);
+    }
+
+    private void sendDrivingEvent(String name, BackgroundLocation location, double value) {
+        try {
+            JSONObject p = new JSONObject();
+            p.put("location", location != null ? location.toJSONObjectWithId() : JSONObject.NULL);
+            p.put("value", value);
+            sendEvent(name, p);
+        } catch (JSONException e) {
+            sendEvent(name);
+        }
     }
 }

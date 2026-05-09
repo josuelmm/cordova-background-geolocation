@@ -83,6 +83,69 @@ export class BackgroundGeolocationService {
     return this.ensurePlugin().checkStatus(success, fail);
   }
 
+  /**
+   * Extended diagnostics. Returns permissions, battery optimisation state,
+   * last fix age, pending sync count, OEM info and (on iOS) precise location /
+   * background refresh / low power flags.
+   *
+   * @since 3.5.0
+   */
+  getDiagnostics(
+    success?: (diagnostics: any) => void,
+    fail?: (error: any) => void
+  ): Promise<any> {
+    return this.ensurePlugin().getDiagnostics(success, fail);
+  }
+
+  /** @since 3.6.0 */
+  isIgnoringBatteryOptimizations(
+    success?: (whitelisted: boolean) => void,
+    fail?: (error: any) => void
+  ): Promise<boolean> {
+    return this.ensurePlugin().isIgnoringBatteryOptimizations(success, fail);
+  }
+
+  /** @since 3.6.0 */
+  requestIgnoreBatteryOptimizations(
+    success?: (whitelisted: boolean) => void,
+    fail?: (error: any) => void
+  ): Promise<boolean> {
+    return this.ensurePlugin().requestIgnoreBatteryOptimizations(success, fail);
+  }
+
+  /** @since 3.6.0 */
+  openBatterySettings(
+    success?: () => void,
+    fail?: (error: any) => void
+  ): Promise<void> {
+    return this.ensurePlugin().openBatterySettings(success, fail);
+  }
+
+  /** @since 3.6.0 */
+  openAutoStartSettings(
+    success?: (info: { opened: boolean; manufacturer: string; screen: string }) => void,
+    fail?: (error: any) => void
+  ): Promise<{ opened: boolean; manufacturer: string; screen: string }> {
+    return this.ensurePlugin().openAutoStartSettings(success, fail);
+  }
+
+  /** @since 3.6.0 */
+  getManufacturerHelp(
+    success?: (info: { manufacturer: string; steps: string[] }) => void,
+    fail?: (error: any) => void
+  ): Promise<{ manufacturer: string; steps: string[] }> {
+    return this.ensurePlugin().getManufacturerHelp(success, fail);
+  }
+
+  /** @since 4.0.0 */
+  triggerSOS(
+    payload?: { [key: string]: any },
+    success?: () => void,
+    fail?: (error: any) => void
+  ): Promise<void> {
+    return this.ensurePlugin().triggerSOS(payload, success, fail);
+  }
+
   showAppSettings(): Promise<void> {
     return this.ensurePlugin().showAppSettings();
   }

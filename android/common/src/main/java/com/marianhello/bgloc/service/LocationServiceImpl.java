@@ -113,6 +113,29 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
 
     public static final int MSG_ON_HTTP_AUTHORIZATION = 107;
 
+    /** v3.5 Phase 4: sync queue events. */
+    public static final int MSG_ON_SYNC_START = 108;
+    public static final int MSG_ON_SYNC_SUCCESS = 109;
+    public static final int MSG_ON_SYNC_ERROR = 110;
+    public static final int MSG_ON_SYNC_PROGRESS = 111;
+    public static final int MSG_ON_HEARTBEAT = 112;
+    /** v4.0 Phase 6 — driver insight events. */
+    public static final int MSG_ON_TRIP_START      = 113;
+    public static final int MSG_ON_TRIP_END        = 114;
+    public static final int MSG_ON_MOVING          = 115;
+    public static final int MSG_ON_STOPPED         = 116;
+    public static final int MSG_ON_SPEEDING        = 117;
+    public static final int MSG_ON_PROVIDER_CHANGE = 118;
+    public static final int MSG_ON_SOS             = 119;
+    /** v4.1 — sensor-like GPS-derived driving events. */
+    public static final int MSG_ON_HARD_BRAKE          = 120;
+    public static final int MSG_ON_RAPID_ACCELERATION  = 121;
+    public static final int MSG_ON_SHARP_TURN          = 122;
+    public static final int MSG_ON_POSSIBLE_CRASH      = 123;
+    /** v4.2 — sensor-fusion-only events. {@code MSG_ON_POSSIBLE_CRASH} is reused
+     *  by the sensor pipeline; phone-usage is a brand-new event. */
+    public static final int MSG_ON_PHONE_USAGE_WHILE_DRIVING = 124;
+
     /** notification id */
     private static int NOTIFICATION_ID = 1;
 
@@ -141,6 +164,21 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
 
     /** Last time we received a location (for watchdog). */
     private volatile long mLastLocationTime = 0L;
+    /** v3.5 Phase 4: latest received location, used as heartbeat payload. */
+    private volatile BackgroundLocation mLastReceivedLocation;
+    /** v4.0 Phase 6: static accessor for {@link com.marianhello.bgloc.BackgroundGeolocationFacade#triggerSOS}. */
+    private static volatile BackgroundLocation sLastReceivedLocation;
+    public static BackgroundLocation getLastReceivedLocation() { return sLastReceivedLocation; }
+    /** v3.5 Phase 4: heartbeat scheduler. */
+    private java.util.concurrent.ScheduledExecutorService mHeartbeatExecutor;
+    private java.util.concurrent.ScheduledFuture<?> mHeartbeatTask;
+
+    /** v4.0 Phase 6: driver-insights detector. Created lazily when config has drivingEvents.enabled. */
+    private com.marianhello.bgloc.driving.DrivingEventsDetector mDrivingDetector;
+    /** v4.2 Phase 8: real sensor-fusion detector. Created when drivingEvents.sensorFusion=true. */
+    private com.marianhello.bgloc.sensor.SensorFusionDetector mSensorFusion;
+    /** v4.2 Phase 8: cached tripActive state so hot-reload can re-inject it. */
+    private volatile boolean mDrivingTripActive = false;
     private static final long WATCHDOG_INTERVAL_MS = 60_000L;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mWatchdogRunnable = new Runnable() {
@@ -469,6 +507,170 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         bundle.putInt("action", MSG_ON_SERVICE_STARTED);
         bundle.putLong("serviceId", mServiceId);
         broadcastMessage(bundle);
+
+        // v3.5 Phase 4: kick off heartbeat scheduler when the service starts.
+        scheduleHeartbeat();
+
+        // v4.0 Phase 6: build driver-insights detector if enabled in config.
+        configureDrivingDetector();
+    }
+
+    /** v4.0 Phase 6: instantiate / reconfigure the GPS-based driver-insights detector. */
+    private void configureDrivingDetector() {
+        if (mConfig == null) return;
+        com.marianhello.bgloc.Config.DrivingEventsOptions opts = mConfig.getDrivingEvents();
+        if (opts == null || !opts.enabled) {
+            if (mDrivingDetector != null) mDrivingDetector.reset();
+            mDrivingDetector = null;
+            return;
+        }
+        com.marianhello.bgloc.driving.DrivingEventsDetector.Config c =
+                new com.marianhello.bgloc.driving.DrivingEventsDetector.Config();
+        c.enabled = true;
+        c.speedLimitKmh     = opts.speedLimitKmh;
+        c.minMovingSpeedMps = opts.minMovingSpeedMps;
+        c.stoppedDurationMs = opts.stoppedDurationMs;
+        c.minTripSpeedMps   = opts.minTripSpeedMps;
+        c.minTripDurationMs = opts.minTripDurationMs;
+
+        mDrivingDetector = new com.marianhello.bgloc.driving.DrivingEventsDetector(
+                new com.marianhello.bgloc.driving.DrivingEventsDetector.Listener() {
+                    @Override public void onMoving(BackgroundLocation l) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_MOVING);
+                        if (l != null) b.putParcelable("payload", l);
+                        broadcastMessage(b);
+                    }
+                    @Override public void onStopped(BackgroundLocation l) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_STOPPED);
+                        if (l != null) b.putParcelable("payload", l);
+                        broadcastMessage(b);
+                    }
+                    @Override public void onTripStart(BackgroundLocation l) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_TRIP_START);
+                        if (l != null) b.putParcelable("payload", l);
+                        broadcastMessage(b);
+                        mDrivingTripActive = true;
+                        if (mSensorFusion != null) mSensorFusion.setTripActive(true);
+                    }
+                    @Override public void onTripEnd(BackgroundLocation l, double distance, long durationMs) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_TRIP_END);
+                        if (l != null) b.putParcelable("payload", l);
+                        b.putDouble("distance", distance);
+                        b.putLong("durationMs", durationMs);
+                        broadcastMessage(b);
+                        mDrivingTripActive = false;
+                        if (mSensorFusion != null) mSensorFusion.setTripActive(false);
+                    }
+                    @Override public void onSpeeding(BackgroundLocation l, double speedKmh, double limitKmh) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_SPEEDING);
+                        if (l != null) b.putParcelable("payload", l);
+                        b.putDouble("speedKmh", speedKmh);
+                        b.putDouble("limitKmh", limitKmh);
+                        broadcastMessage(b);
+                    }
+                    @Override public void onProviderChange(String provider) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_PROVIDER_CHANGE);
+                        b.putString("provider", provider != null ? provider : "");
+                        broadcastMessage(b);
+                    }
+                    @Override public void onHardBrake(BackgroundLocation l, double decelMps2) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_HARD_BRAKE);
+                        if (l != null) b.putParcelable("payload", l);
+                        b.putDouble("value", decelMps2);
+                        broadcastMessage(b);
+                    }
+                    @Override public void onRapidAcceleration(BackgroundLocation l, double accelMps2) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_RAPID_ACCELERATION);
+                        if (l != null) b.putParcelable("payload", l);
+                        b.putDouble("value", accelMps2);
+                        broadcastMessage(b);
+                    }
+                    @Override public void onSharpTurn(BackgroundLocation l, double degPerSec) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_SHARP_TURN);
+                        if (l != null) b.putParcelable("payload", l);
+                        b.putDouble("value", degPerSec);
+                        broadcastMessage(b);
+                    }
+                    @Override public void onPossibleCrash(BackgroundLocation l, double velocityDropKmh) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_POSSIBLE_CRASH);
+                        if (l != null) b.putParcelable("payload", l);
+                        b.putDouble("value", velocityDropKmh);
+                        b.putString("source", "gps");
+                        broadcastMessage(b);
+                    }
+                });
+        // Pass v4.1 thresholds from app config (with defaults from c).
+        com.marianhello.bgloc.Config.DrivingEventsOptions optsRef = mConfig.getDrivingEvents();
+        if (optsRef != null) {
+            c.hardBrakeMps2     = optsRef.hardBrakeMps2;
+            c.rapidAccelMps2    = optsRef.rapidAccelMps2;
+            c.sharpTurnDegPerSec = optsRef.sharpTurnDegPerSec;
+            c.crashImpactKmh    = optsRef.crashImpactKmh;
+            c.crashWindowMs     = optsRef.crashWindowMs;
+        }
+        mDrivingDetector.setConfig(c);
+        configureSensorFusion();
+    }
+
+    /** v4.2 Phase 8: instantiate / reconfigure the real sensor-fusion detector. */
+    private void configureSensorFusion() {
+        if (mConfig == null) {
+            if (mSensorFusion != null) { mSensorFusion.stop(); mSensorFusion = null; }
+            return;
+        }
+        com.marianhello.bgloc.Config.DrivingEventsOptions opts = mConfig.getDrivingEvents();
+        boolean wantSF = opts != null && opts.enabled && opts.sensorFusion;
+        if (!wantSF) {
+            if (mSensorFusion != null) { mSensorFusion.stop(); mSensorFusion = null; }
+            return;
+        }
+
+        com.marianhello.bgloc.sensor.SensorFusionDetector.Listener l =
+                new com.marianhello.bgloc.sensor.SensorFusionDetector.Listener() {
+                    @Override public void onSensorCrash(BackgroundLocation lastLocation, double impactG) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_POSSIBLE_CRASH);
+                        if (lastLocation != null) b.putParcelable("payload", lastLocation);
+                        b.putDouble("value", impactG);
+                        b.putString("source", "sensor");
+                        broadcastMessage(b);
+                    }
+                    @Override public void onPhoneUsageWhileDriving(BackgroundLocation lastLocation) {
+                        Bundle b = new Bundle();
+                        b.putInt("action", MSG_ON_PHONE_USAGE_WHILE_DRIVING);
+                        if (lastLocation != null) b.putParcelable("payload", lastLocation);
+                        broadcastMessage(b);
+                    }
+                };
+
+        if (mSensorFusion == null) {
+            mSensorFusion = new com.marianhello.bgloc.sensor.SensorFusionDetector(this, l);
+        }
+        com.marianhello.bgloc.sensor.SensorFusionDetector.Config sfc =
+                new com.marianhello.bgloc.sensor.SensorFusionDetector.Config();
+        sfc.enabled = true;
+        sfc.crashImpactG          = opts.crashImpactG;
+        sfc.crashCooldownMs       = opts.sensorCrashCooldownMs;
+        sfc.phoneUsageWindowMs    = opts.phoneUsageWindowMs;
+        sfc.phoneUsageCooldownMs  = opts.phoneUsageCooldownMs;
+        mSensorFusion.setConfig(sfc);
+        // v4.2 hot-reload: re-inject current tripActive state and last location so the
+        // sensor pipeline starts in the right mode (e.g. config arrives mid-trip).
+        mSensorFusion.setTripActive(mDrivingTripActive);
+        if (mLastReceivedLocation != null) {
+            mSensorFusion.setLastLocation(mLastReceivedLocation);
+        }
+        if (sIsRunning) mSensorFusion.start();
     }
 
     @Override
@@ -502,6 +704,17 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         mIsInForeground = false;
         stopForeground(true);
         stopSelf();
+
+        // v3.5 Phase 4: stop heartbeat scheduler.
+        cancelHeartbeat();
+        // v4.0 Phase 6: reset driver-insights state machine.
+        if (mDrivingDetector != null) mDrivingDetector.reset();
+        // v4.2 Phase 8: stop sensor fusion sampling.
+        mDrivingTripActive = false;
+        if (mSensorFusion != null) {
+            mSensorFusion.setTripActive(false);
+            mSensorFusion.stop();
+        }
 
         broadcastMessage(MSG_ON_SERVICE_STOPPED);
         sIsRunning = false;
@@ -726,8 +939,47 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 } else {
                     mProvider.onConfigure(mConfig);
                 }
+
+                // v4.1: re-evaluate hot-reload features when config changes while service is running.
+                if (sIsRunning) {
+                    Integer prevHb = currentConfig.getHeartbeatInterval();
+                    Integer newHb = mConfig.getHeartbeatInterval();
+                    if (prevHb == null) prevHb = 0;
+                    if (newHb == null) newHb = 0;
+                    if (!prevHb.equals(newHb)) {
+                        scheduleHeartbeat(); // cancels and reschedules with the new interval (or stops if 0)
+                    }
+                    // Driver-insights detector: rebuild if the config dict changed.
+                    Config.DrivingEventsOptions prevDe = currentConfig.getDrivingEvents();
+                    Config.DrivingEventsOptions newDe = mConfig.getDrivingEvents();
+                    if (!equalsDrivingEvents(prevDe, newDe)) {
+                        configureDrivingDetector();
+                    }
+                }
             }
         });
+    }
+
+    /** Shallow value equality for DrivingEventsOptions; avoids needless detector rebuilds. */
+    private static boolean equalsDrivingEvents(Config.DrivingEventsOptions a, Config.DrivingEventsOptions b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        return a.enabled == b.enabled
+                && a.speedLimitKmh == b.speedLimitKmh
+                && a.minMovingSpeedMps == b.minMovingSpeedMps
+                && a.stoppedDurationMs == b.stoppedDurationMs
+                && a.minTripSpeedMps == b.minTripSpeedMps
+                && a.minTripDurationMs == b.minTripDurationMs
+                && a.hardBrakeMps2 == b.hardBrakeMps2
+                && a.rapidAccelMps2 == b.rapidAccelMps2
+                && a.sharpTurnDegPerSec == b.sharpTurnDegPerSec
+                && a.crashImpactKmh == b.crashImpactKmh
+                && a.crashWindowMs == b.crashWindowMs
+                && a.sensorFusion == b.sensorFusion
+                && a.crashImpactG == b.crashImpactG
+                && a.sensorCrashCooldownMs == b.sensorCrashCooldownMs
+                && a.phoneUsageWindowMs == b.phoneUsageWindowMs
+                && a.phoneUsageCooldownMs == b.phoneUsageCooldownMs;
     }
 
     @Override
@@ -771,6 +1023,17 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     @Override
     public void onLocation(BackgroundLocation location) {
         mLastLocationTime = System.currentTimeMillis();
+        mLastReceivedLocation = location;
+        sLastReceivedLocation = location;
+
+        // v4.0 Phase 6: feed the driver-insights state machine.
+        if (mDrivingDetector != null) {
+            mDrivingDetector.onLocation(location);
+        }
+        // v4.2 Phase 8: keep sensor pipeline aware of the latest fix.
+        if (mSensorFusion != null) {
+            mSensorFusion.setLastLocation(location);
+        }
         if (Boolean.TRUE.equals(mConfig != null ? mConfig.getShowDistance() : null)) {
             double lat = location.getLatitude();
             double lon = location.getLongitude();
@@ -889,6 +1152,40 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         Intent intent = new Intent(ACTION_BROADCAST);
         intent.putExtras(bundle);
         LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
+    }
+
+    /** v3.5 Phase 4: schedule periodic heartbeat broadcasts using {@link Config#getHeartbeatInterval()}. */
+    private void scheduleHeartbeat() {
+        cancelHeartbeat();
+        if (mConfig == null) return;
+        Integer interval = mConfig.getHeartbeatInterval();
+        if (interval == null || interval <= 0) return;
+        logger.debug("Scheduling heartbeat every {} ms", interval);
+        mHeartbeatExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+        mHeartbeatTask = mHeartbeatExecutor.scheduleAtFixedRate(new Runnable() {
+            @Override public void run() {
+                try {
+                    Bundle b = new Bundle();
+                    b.putInt("action", MSG_ON_HEARTBEAT);
+                    BackgroundLocation last = mLastReceivedLocation;
+                    if (last != null) b.putParcelable("payload", last);
+                    broadcastMessage(b);
+                } catch (Throwable t) {
+                    logger.warn("Heartbeat tick failed: {}", t.getMessage());
+                }
+            }
+        }, interval, interval, java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
+
+    private void cancelHeartbeat() {
+        if (mHeartbeatTask != null) {
+            mHeartbeatTask.cancel(false);
+            mHeartbeatTask = null;
+        }
+        if (mHeartbeatExecutor != null) {
+            mHeartbeatExecutor.shutdownNow();
+            mHeartbeatExecutor = null;
+        }
     }
 
     @Override

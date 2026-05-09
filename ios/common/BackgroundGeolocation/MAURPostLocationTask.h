@@ -19,6 +19,10 @@
 @optional
 - (void)postLocationTaskRequestedAbortUpdates:(MAURPostLocationTask * _Nonnull)task;
 - (void)postLocationTaskHttpAuthorizationUpdates:(MAURPostLocationTask * _Nonnull)task;
+// v3.5 Phase 4
+- (void)postLocationTaskSyncStarted:(MAURPostLocationTask * _Nonnull)task;
+- (void)postLocationTaskSyncSucceeded:(MAURPostLocationTask * _Nonnull)task locationsSent:(NSInteger)locationsSent;
+- (void)postLocationTaskSyncFailed:(MAURPostLocationTask * _Nonnull)task httpStatus:(NSInteger)httpStatus message:(NSString * _Nullable)message;
 
 @end
 

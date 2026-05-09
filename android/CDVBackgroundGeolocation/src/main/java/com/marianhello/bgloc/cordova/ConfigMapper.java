@@ -142,6 +142,36 @@ public class ConfigMapper {
         if (jObject.has("queryParams") && !jObject.isNull("queryParams")) {
             config.setQueryParams(jObject.getJSONObject("queryParams"));
         }
+        if (jObject.has("heartbeatInterval") && !jObject.isNull("heartbeatInterval")) {
+            config.setHeartbeatInterval(jObject.getInt("heartbeatInterval"));
+        }
+        if (jObject.has("mockLocationPolicy") && !jObject.isNull("mockLocationPolicy")) {
+            config.setMockLocationPolicy(jObject.getString("mockLocationPolicy"));
+        }
+        // v4.0 Phase 6: drivingEvents
+        if (jObject.has("drivingEvents") && !jObject.isNull("drivingEvents")) {
+            JSONObject de = jObject.getJSONObject("drivingEvents");
+            Config.DrivingEventsOptions opts = new Config.DrivingEventsOptions();
+            if (de.has("enabled"))          opts.enabled            = de.getBoolean("enabled");
+            if (de.has("speedLimit"))       opts.speedLimitKmh      = de.getDouble("speedLimit");
+            if (de.has("minMovingSpeed"))   opts.minMovingSpeedMps  = de.getDouble("minMovingSpeed");
+            if (de.has("stoppedDuration"))  opts.stoppedDurationMs  = de.getLong("stoppedDuration");
+            if (de.has("minTripSpeed"))     opts.minTripSpeedMps    = de.getDouble("minTripSpeed");
+            if (de.has("minTripDuration"))  opts.minTripDurationMs  = de.getLong("minTripDuration");
+            // v4.1
+            if (de.has("hardBrakeMps2"))    opts.hardBrakeMps2      = de.getDouble("hardBrakeMps2");
+            if (de.has("rapidAccelMps2"))   opts.rapidAccelMps2     = de.getDouble("rapidAccelMps2");
+            if (de.has("sharpTurnDegPerSec")) opts.sharpTurnDegPerSec = de.getDouble("sharpTurnDegPerSec");
+            if (de.has("crashImpactKmh"))   opts.crashImpactKmh     = de.getDouble("crashImpactKmh");
+            if (de.has("crashWindowMs"))    opts.crashWindowMs      = de.getLong("crashWindowMs");
+            // v4.2 sensor fusion
+            if (de.has("sensorFusion"))         opts.sensorFusion           = de.getBoolean("sensorFusion");
+            if (de.has("crashImpactG"))         opts.crashImpactG           = de.getDouble("crashImpactG");
+            if (de.has("sensorCrashCooldownMs"))opts.sensorCrashCooldownMs  = de.getLong("sensorCrashCooldownMs");
+            if (de.has("phoneUsageWindowMs"))   opts.phoneUsageWindowMs     = de.getLong("phoneUsageWindowMs");
+            if (de.has("phoneUsageCooldownMs")) opts.phoneUsageCooldownMs   = de.getLong("phoneUsageCooldownMs");
+            config.setDrivingEvents(opts);
+        }
         if (jObject.has("enableWatchdog")) {
             config.setEnableWatchdog(jObject.getBoolean("enableWatchdog"));
         }
@@ -209,6 +239,31 @@ public class ConfigMapper {
         json.put("httpMode", config.getHttpMode());
         json.put("syncMode", config.getSyncMode());
         json.put("queryParams", config.getQueryParams() != null ? new JSONObject(config.getQueryParams()) : JSONObject.NULL);
+        json.put("heartbeatInterval", config.getHeartbeatInterval());
+        json.put("mockLocationPolicy", config.getMockLocationPolicy());
+
+        Config.DrivingEventsOptions de = config.getDrivingEvents();
+        if (de != null) {
+            JSONObject deJson = new JSONObject();
+            deJson.put("enabled", de.enabled);
+            deJson.put("speedLimit", de.speedLimitKmh);
+            deJson.put("minMovingSpeed", de.minMovingSpeedMps);
+            deJson.put("stoppedDuration", de.stoppedDurationMs);
+            deJson.put("minTripSpeed", de.minTripSpeedMps);
+            deJson.put("minTripDuration", de.minTripDurationMs);
+            deJson.put("hardBrakeMps2", de.hardBrakeMps2);
+            deJson.put("rapidAccelMps2", de.rapidAccelMps2);
+            deJson.put("sharpTurnDegPerSec", de.sharpTurnDegPerSec);
+            deJson.put("crashImpactKmh", de.crashImpactKmh);
+            deJson.put("crashWindowMs", de.crashWindowMs);
+            // v4.2 sensor fusion
+            deJson.put("sensorFusion", de.sensorFusion);
+            deJson.put("crashImpactG", de.crashImpactG);
+            deJson.put("sensorCrashCooldownMs", de.sensorCrashCooldownMs);
+            deJson.put("phoneUsageWindowMs", de.phoneUsageWindowMs);
+            deJson.put("phoneUsageCooldownMs", de.phoneUsageCooldownMs);
+            json.put("drivingEvents", deJson);
+        }
 
         return json;
     }

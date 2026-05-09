@@ -13,6 +13,10 @@
 #import "MAURConfig.h"
 #import "MAURBackgroundGeolocationFacade.h"
 #import "MAURBackgroundTaskManager.h"
+#import "MAURSQLiteLocationDAO.h"
+#import "MAURBackgroundSync.h"
+#import <CoreMotion/CoreMotion.h>
+#import <UIKit/UIKit.h>
 
 static NSString * const TAG = @"CDVBackgroundGeolocation";
 
@@ -35,6 +39,219 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onAppResume:) name:UIApplicationWillEnterForegroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onFinishLaunching:) name:UIApplicationDidFinishLaunchingNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onAppTerminate:) name:UIApplicationWillTerminateNotification object:nil];
+
+    // v3.5 Phase 4: forward sync notifications from MAURBackgroundSync into JS events.
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onSyncStart:)    name:MAURBackgroundSyncDidStartNotification    object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onSyncSuccess:)  name:MAURBackgroundSyncDidSucceedNotification  object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onSyncError:)    name:MAURBackgroundSyncDidFailNotification     object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onSyncProgress:) name:MAURBackgroundSyncDidProgressNotification object:nil];
+    // v3.5 Phase 4: forward heartbeat notification from the facade timer into JS events.
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onHeartbeat:)    name:MAURHeartbeatNotification                 object:nil];
+
+    // v4.0 Phase 6: forward driver-insights notifications.
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onTripStartN:)      name:MAURTripStartNotification      object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onTripEndN:)        name:MAURTripEndNotification        object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onMovingN:)         name:MAURMovingNotification         object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onStoppedN:)        name:MAURStoppedNotification        object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onSpeedingN:)       name:MAURSpeedingNotification       object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onProviderChangeN:) name:MAURProviderChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onSOSN:)            name:MAURSOSNotification            object:nil];
+    // v4.1 GPS-derived sensor-like events
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onHardBrakeN:)         name:MAURHardBrakeNotification         object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onRapidAccelerationN:) name:MAURRapidAccelerationNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onSharpTurnN:)         name:MAURSharpTurnNotification         object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onPossibleCrashN:)     name:MAURPossibleCrashNotification     object:nil];
+    // v4.2 sensor fusion
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onPhoneUsageWhileDrivingN:) name:MAURPhoneUsageWhileDrivingNotification object:nil];
+}
+
+#pragma mark - v4.0 Phase 6 driver-insight observers
+
+- (void) onTripStartN:(NSNotification *)note
+{
+    MAURLocation *loc = note.userInfo[@"location"];
+    if (loc != nil) [self sendEvent:@"tripStart" result:[loc toDictionaryWithId]];
+    else            [self sendEvent:@"tripStart"];
+}
+
+- (void) onTripEndN:(NSNotification *)note
+{
+    NSMutableDictionary *p = [NSMutableDictionary dictionary];
+    MAURLocation *loc = note.userInfo[@"location"];
+    p[@"location"]   = loc != nil ? [loc toDictionaryWithId] : [NSNull null];
+    p[@"distance"]   = note.userInfo[@"distance"]   ?: @0;
+    p[@"durationMs"] = note.userInfo[@"durationMs"] ?: @0;
+    [self sendEvent:@"tripEnd" result:p];
+}
+
+- (void) onMovingN:(NSNotification *)note
+{
+    MAURLocation *loc = note.userInfo[@"location"];
+    if (loc != nil) [self sendEvent:@"moving" result:[loc toDictionaryWithId]];
+    else            [self sendEvent:@"moving"];
+}
+
+- (void) onStoppedN:(NSNotification *)note
+{
+    MAURLocation *loc = note.userInfo[@"location"];
+    if (loc != nil) [self sendEvent:@"stopped" result:[loc toDictionaryWithId]];
+    else            [self sendEvent:@"stopped"];
+}
+
+- (void) onSpeedingN:(NSNotification *)note
+{
+    NSMutableDictionary *p = [NSMutableDictionary dictionary];
+    MAURLocation *loc = note.userInfo[@"location"];
+    p[@"location"] = loc != nil ? [loc toDictionaryWithId] : [NSNull null];
+    p[@"speedKmh"] = note.userInfo[@"speedKmh"] ?: @0;
+    p[@"limitKmh"] = note.userInfo[@"limitKmh"] ?: @0;
+    [self sendEvent:@"speeding" result:p];
+}
+
+- (void) onProviderChangeN:(NSNotification *)note
+{
+    NSDictionary *p = @{ @"provider": note.userInfo[@"provider"] ?: @"" };
+    [self sendEvent:@"providerChange" result:p];
+}
+
+- (void) onSOSN:(NSNotification *)note
+{
+    NSMutableDictionary *p = [NSMutableDictionary dictionary];
+    NSDictionary *userPayload = note.userInfo[@"payload"];
+    if ([userPayload isKindOfClass:[NSDictionary class]]) [p addEntriesFromDictionary:userPayload];
+    MAURLocation *loc = note.userInfo[@"location"];
+    if (loc != nil) p[@"location"] = [loc toDictionaryWithId];
+    [self sendEvent:@"sos" result:p];
+}
+
+- (void) triggerSOS:(CDVInvokedUrlCommand *)command
+{
+    NSDictionary *payload = nil;
+    if (command.arguments.count > 0 && [command.arguments[0] isKindOfClass:[NSDictionary class]]) {
+        payload = command.arguments[0];
+    }
+    [facade triggerSOS:payload];
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK]
+                                callbackId:command.callbackId];
+}
+
+// v4.1 GPS-derived sensor-like events
+- (void) sendDrivingEventN:(NSString *)name note:(NSNotification *)note
+{
+    NSMutableDictionary *p = [NSMutableDictionary dictionary];
+    MAURLocation *loc = note.userInfo[@"location"];
+    p[@"location"] = loc != nil ? [loc toDictionaryWithId] : [NSNull null];
+    p[@"value"]    = note.userInfo[@"value"] ?: @0;
+    if (note.userInfo[@"source"] != nil) p[@"source"] = note.userInfo[@"source"];
+    [self sendEvent:name result:p];
+}
+- (void) onHardBrakeN:(NSNotification *)n         { [self sendDrivingEventN:@"hardBrake"         note:n]; }
+- (void) onRapidAccelerationN:(NSNotification *)n { [self sendDrivingEventN:@"rapidAcceleration" note:n]; }
+- (void) onSharpTurnN:(NSNotification *)n         { [self sendDrivingEventN:@"sharpTurn"         note:n]; }
+- (void) onPossibleCrashN:(NSNotification *)n     { [self sendDrivingEventN:@"possibleCrash"     note:n]; }
+// v4.2 sensor fusion
+- (void) onPhoneUsageWhileDrivingN:(NSNotification *)note
+{
+    MAURLocation *loc = note.userInfo[@"location"];
+    if (loc != nil) [self sendEvent:@"phoneUsageWhileDriving" result:[loc toDictionaryWithId]];
+    else            [self sendEvent:@"phoneUsageWhileDriving"];
+}
+
+- (void) onSyncStart:(NSNotification *)note
+{
+    [self sendEvent:@"syncStart"];
+}
+
+- (void) onSyncSuccess:(NSNotification *)note
+{
+    NSDictionary *info = note.userInfo ?: @{};
+    [self sendEvent:@"syncSuccess" result:@{@"sent": info[@"sent"] ?: @0}];
+}
+
+- (void) onSyncError:(NSNotification *)note
+{
+    NSDictionary *info = note.userInfo ?: @{};
+    [self sendEvent:@"syncError" result:@{
+        @"httpStatus": info[@"httpStatus"] ?: @0,
+        @"message": info[@"message"] ?: @""
+    }];
+}
+
+- (void) onSyncProgress:(NSNotification *)note
+{
+    NSDictionary *info = note.userInfo ?: @{};
+    [self sendEvent:@"syncProgress" resultAsNumber:(info[@"progress"] ?: @0)];
+}
+
+- (void) onHeartbeat:(NSNotification *)note
+{
+    NSDictionary *info = note.userInfo ?: @{};
+    MAURLocation *loc = info[@"location"];
+    if (loc != nil) {
+        [self sendEvent:@"heartbeat" result:[loc toDictionaryWithId]];
+    } else {
+        [self sendEvent:@"heartbeat"];
+    }
+}
+
+// v3.6 Phase 5 — Battery / OEM helpers. iOS does not expose Doze whitelist or
+// vendor "auto-start" screens, so these are best-effort no-ops that resolve true
+// (whitelist concept N/A) or open the app's Settings entry.
+
+- (void) isIgnoringBatteryOptimizations:(CDVInvokedUrlCommand *)command
+{
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:YES]
+                                callbackId:command.callbackId];
+}
+
+- (void) requestIgnoreBatteryOptimizations:(CDVInvokedUrlCommand *)command
+{
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:YES]
+                                callbackId:command.callbackId];
+}
+
+- (void) openBatterySettings:(CDVInvokedUrlCommand *)command
+{
+    NSURL *url = [NSURL URLWithString:UIApplicationOpenSettingsURLString];
+    if (url != nil && [[UIApplication sharedApplication] canOpenURL:url]) {
+        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+    }
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK]
+                                callbackId:command.callbackId];
+}
+
+- (void) openAutoStartSettings:(CDVInvokedUrlCommand *)command
+{
+    // iOS has no per-OEM auto-start screen. Open the app's Settings entry as a best-effort
+    // and report opened=false so the JS layer can decide whether to render a help screen.
+    NSURL *url = [NSURL URLWithString:UIApplicationOpenSettingsURLString];
+    BOOL opened = NO;
+    if (url != nil && [[UIApplication sharedApplication] canOpenURL:url]) {
+        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+        opened = YES;
+    }
+    NSDictionary *info = @{
+        @"opened": @(opened),
+        @"manufacturer": @"apple",
+        @"screen": @"UIApplicationOpenSettingsURLString"
+    };
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:info]
+                                callbackId:command.callbackId];
+}
+
+- (void) getManufacturerHelp:(CDVInvokedUrlCommand *)command
+{
+    NSDictionary *info = @{
+        @"manufacturer": @"apple",
+        @"steps": @[
+            @"Settings → Privacy & Security → Location Services → [your app] → Always.",
+            @"Settings → Privacy & Security → Location Services → [your app] → Precise Location → ON.",
+            @"Settings → General → Background App Refresh → enable globally and for [your app].",
+            @"Settings → Battery → Low Power Mode → off (Low Power Mode pauses background activity)."
+        ]
+    };
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:info]
+                                callbackId:command.callbackId];
 }
 
 /**
@@ -154,6 +371,100 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 }
 
 /**
+ * v3.5 Phase 4: extended diagnostics. Returns permissions, precise location,
+ * background refresh, low power and motion authorization on iOS.
+ */
+- (void) getDiagnostics:(CDVInvokedUrlCommand *)command
+{
+    NSLog(@"%@ #%@", TAG, @"getDiagnostics");
+    [self.commandDelegate runInBackground:^{
+        NSMutableDictionary *d = [NSMutableDictionary dictionary];
+
+        // Common
+        [d setObject:[NSNumber numberWithBool:[facade isStarted]] forKey:@"isRunning"];
+        [d setObject:[NSNumber numberWithBool:[facade locationServicesEnabled]] forKey:@"locationServicesEnabled"];
+
+        // Authorization status (raw + human-readable)
+        CLAuthorizationStatus status;
+        if (@available(iOS 14.0, *)) {
+            CLLocationManager *lm = [[CLLocationManager alloc] init];
+            status = lm.authorizationStatus;
+            // accuracyAuthorization (Precise vs Reduced)
+            BOOL precise = (lm.accuracyAuthorization == CLAccuracyAuthorizationFullAccuracy);
+            [d setObject:[NSNumber numberWithBool:precise] forKey:@"preciseLocationEnabled"];
+        } else {
+            status = [CLLocationManager authorizationStatus];
+            // Pre-iOS 14 had no Reduced accuracy concept; report YES.
+            [d setObject:[NSNumber numberWithBool:YES] forKey:@"preciseLocationEnabled"];
+        }
+        [d setObject:[NSNumber numberWithInteger:status] forKey:@"authorization"];
+        [d setObject:[self authorizationStatusText:status] forKey:@"authorizationStatusText"];
+
+        // Background App Refresh
+        [d setObject:[self backgroundRefreshStatusText] forKey:@"backgroundRefreshStatus"];
+
+        // Low Power Mode (iOS 9+)
+        if (@available(iOS 9.0, *)) {
+            [d setObject:[NSNumber numberWithBool:[NSProcessInfo processInfo].lowPowerModeEnabled]
+                  forKey:@"lowPowerModeEnabled"];
+        } else {
+            [d setObject:[NSNumber numberWithBool:NO] forKey:@"lowPowerModeEnabled"];
+        }
+
+        // Motion authorization. Use the flag exposed by CMMotionActivityManager.
+        [d setObject:[self motionPermissionText] forKey:@"motionPermissionStatus"];
+
+        // Pending sync count (best-effort).
+        @try {
+            NSNumber *pending = [[MAURSQLiteLocationDAO sharedInstance] getLocationsForSyncCount];
+            [d setObject:(pending != nil ? pending : [NSNumber numberWithInt:0]) forKey:@"pendingSyncCount"];
+        } @catch (NSException *e) {
+            [d setObject:[NSNumber numberWithInt:0] forKey:@"pendingSyncCount"];
+        }
+
+        CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:d];
+        [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+    }];
+}
+
+- (NSString *) authorizationStatusText:(CLAuthorizationStatus)status
+{
+    switch (status) {
+        case kCLAuthorizationStatusNotDetermined: return @"notDetermined";
+        case kCLAuthorizationStatusRestricted:    return @"restricted";
+        case kCLAuthorizationStatusDenied:        return @"denied";
+        case kCLAuthorizationStatusAuthorizedAlways:    return @"authorizedAlways";
+        case kCLAuthorizationStatusAuthorizedWhenInUse: return @"authorizedWhenInUse";
+    }
+    return @"unknown";
+}
+
+- (NSString *) backgroundRefreshStatusText
+{
+    UIBackgroundRefreshStatus s = [UIApplication sharedApplication].backgroundRefreshStatus;
+    switch (s) {
+        case UIBackgroundRefreshStatusAvailable:  return @"available";
+        case UIBackgroundRefreshStatusDenied:     return @"denied";
+        case UIBackgroundRefreshStatusRestricted: return @"restricted";
+    }
+    return @"unknown";
+}
+
+- (NSString *) motionPermissionText
+{
+    if (![CMMotionActivityManager isActivityAvailable]) return @"restricted";
+    if (@available(iOS 11.0, *)) {
+        switch ([CMMotionActivityManager authorizationStatus]) {
+            case CMAuthorizationStatusNotDetermined: return @"notDetermined";
+            case CMAuthorizationStatusRestricted:    return @"restricted";
+            case CMAuthorizationStatusDenied:        return @"denied";
+            case CMAuthorizationStatusAuthorized:    return @"authorized";
+        }
+    }
+    return @"notDetermined";
+}
+
+/**
  * Fetches current stationaryLocation
  */
 - (void) getStationaryLocation:(CDVInvokedUrlCommand *)command
@@ -202,7 +513,7 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 - (void) getPluginVersion:(CDVInvokedUrlCommand*)command
 {
     NSLog(@"%@ #%@", TAG, @"getPluginVersion");
-    NSString *version = @"3.2.0"; // keep in sync with plugin.xml
+    NSString *version = @"4.2.0"; // keep in sync with plugin.xml and Android PLUGIN_VERSION
     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:version];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }

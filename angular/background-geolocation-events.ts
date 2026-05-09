@@ -14,4 +14,25 @@ export enum BackgroundGeolocationEvents {
   activity = 'activity',
   stationary = 'stationary',
   location = 'location',
+  // v3.5+
+  heartbeat = 'heartbeat',
+  syncStart = 'syncStart',
+  syncProgress = 'syncProgress',
+  syncSuccess = 'syncSuccess',
+  syncError = 'syncError',
+  // v4.0
+  tripStart = 'tripStart',
+  tripEnd = 'tripEnd',
+  moving = 'moving',
+  stopped = 'stopped',
+  speeding = 'speeding',
+  providerChange = 'providerChange',
+  sos = 'sos',
+  // v4.1
+  hardBrake = 'hardBrake',
+  rapidAcceleration = 'rapidAcceleration',
+  sharpTurn = 'sharpTurn',
+  possibleCrash = 'possibleCrash',
+  // v4.2 sensor fusion
+  phoneUsageWhileDriving = 'phoneUsageWhileDriving',
 }

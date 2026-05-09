@@ -1,6 +1,6 @@
 {
   "name": "@josuelmm/cordova-background-geolocation",
-  "version": "3.4.0",
+  "version": "4.2.0",
   "description": "Cordova Background Geolocation (fork actualizado)",
   "main": "./www/BackgroundGeolocation.js",
   "types": "./www/BackgroundGeolocation.d.ts",
@@ -71,6 +71,31 @@
         "cordova-ios": ">=6.0.0"
       },
       "3.4.0": {
+        "cordova": ">=10.0.0",
+        "cordova-android": ">=12.0.0",
+        "cordova-ios": ">=6.2.0"
+      },
+      "3.5.0": {
+        "cordova": ">=10.0.0",
+        "cordova-android": ">=12.0.0",
+        "cordova-ios": ">=6.2.0"
+      },
+      "3.6.0": {
+        "cordova": ">=10.0.0",
+        "cordova-android": ">=12.0.0",
+        "cordova-ios": ">=6.2.0"
+      },
+      "4.0.0": {
+        "cordova": ">=10.0.0",
+        "cordova-android": ">=12.0.0",
+        "cordova-ios": ">=6.2.0"
+      },
+      "4.1.0": {
+        "cordova": ">=10.0.0",
+        "cordova-android": ">=12.0.0",
+        "cordova-ios": ">=6.2.0"
+      },
+      "4.2.0": {
         "cordova": ">=10.0.0",
         "cordova-android": ">=12.0.0",
         "cordova-ios": ">=6.2.0"

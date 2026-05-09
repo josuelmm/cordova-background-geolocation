@@ -2,6 +2,76 @@
 
 **for cordova-plugin-background-geolocation**
 
+## [4.2.0] - 2026-05-08
+
+### Phase 8 — Real sensor fusion (accelerometer + gyroscope)
+
+- New Android `com.marianhello.bgloc.sensor.SensorFusionDetector` using `Sensor.TYPE_LINEAR_ACCELERATION` + `Sensor.TYPE_GYROSCOPE` at `SENSOR_DELAY_GAME`.
+- New iOS `MAURSensorFusionDetector` using `CMMotionManager.startDeviceMotionUpdatesToQueue` (50 Hz).
+- New `drivingEvents.sensorFusion` toggle (off by default) plus thresholds: `crashImpactG` (default 3.0), `sensorCrashCooldownMs`, `phoneUsageWindowMs`, `phoneUsageCooldownMs`.
+- `possibleCrash` event payload extended with `source: "gps" | "sensor"`.
+- New `phoneUsageWhileDriving` event (jitter + screen-on during active trip).
+- Hot-reload of sensor pipeline on `configure()`.
+- Plugin version: `4.2.0`.
+
+## [4.1.0] - 2026-05-09
+
+### Phase 6.1 — GPS-derived sensor-like driving events
+
+- New events: `hardBrake`, `rapidAcceleration`, `sharpTurn`, `possibleCrash` (all GPS-derived, no accelerometer/gyroscope yet).
+- New config thresholds: `hardBrakeMps2`, `rapidAccelMps2`, `sharpTurnDegPerSec`, `crashImpactKmh`, `crashWindowMs`. Set any to 0 to disable.
+- 4-second cooldown per event to avoid refiring on sustained conditions.
+- Android `DrivingEventsDetector` extended; iOS detector inline in `MAURBackgroundGeolocationFacade`. Same heuristics on both platforms.
+- 4 new MSG codes (120-123) and 4 new NSNotifications wired end-to-end to JS.
+- Plugin version: `4.1.0`.
+
+Sensor fusion (real accelerometer + gyroscope) deferred to v4.2 as a separate `SensorFusionDetector` class.
+
+## [4.0.0] - 2026-05-08
+
+### Phase 6 — Driver insights (GPS-only)
+
+- New events: `tripStart`, `tripEnd` (with `distance` + `durationMs`), `moving`, `stopped`, `speeding`, `providerChange`, `sos`.
+- New method: `triggerSOS(payload?)`. New config: `drivingEvents` with thresholds for moving / trip / speed limit.
+- Shared state machine: Android `DrivingEventsDetector.java` (pure-Java); iOS inline in `MAURBackgroundGeolocationFacade`. Android uses MSG codes 113-119 routed via the existing `PluginDelegate`; iOS uses 7 new `NSNotification`s observed in `CDVBackgroundGeolocation`.
+- TypeScript: 7 new event overloads, new method declaration, new config option.
+- Plugin version: `4.0.0`.
+
+### Sensor-fusion events deferred to v4.1
+- `hardBrake`, `rapidAcceleration`, `sharpTurn`, `possibleCrash` require accelerometer + gyroscope. Excluded on purpose to keep v4.0.0 GPS-only and reliable.
+
+## [3.6.0] - 2026-05-08
+
+### Phase 5 — Battery / OEM helpers
+
+- Added `isIgnoringBatteryOptimizations()`, `requestIgnoreBatteryOptimizations()`, `openBatterySettings()`, `openAutoStartSettings()`, `getManufacturerHelp()` (Android + iOS).
+- Android helper class `com.marianhello.bgloc.oem.BatteryOemHelper` with per-OEM `ComponentName` table for auto-start screens (Xiaomi MIUI, Huawei EMUI, Oppo ColorOS, Vivo FunTouch, OnePlus, Asus; Samsung falls back to app-info).
+- iOS uses `UIApplicationOpenSettingsURLString` as best-effort destination and reports `manufacturer: 'apple'`.
+- Angular service re-exports the 5 new helpers with strong types.
+
+## [3.5.0] - 2026-05-08
+
+### Phase 4 — Diagnostics
+
+- Added `getDiagnostics()` (Android + iOS) returning permissions, battery whitelist state, OEM manufacturer, last fix age, pending sync count, foreground service type (Android) and precise location / background refresh / low power / motion permission (iOS).
+- Added `Diagnostics` TypeScript interface in `www/BackgroundGeolocation.d.ts`.
+- Angular service exposes `getDiagnostics()`.
+- Android plugin version bumped to `3.5.0`.
+
+- Added `mockLocationPolicy: 'allow' | 'flag' | 'drop'` config (Android `Config` + iOS `MAURConfig`). Applied in `PostLocationTask` (Android) and `MAURPostLocationTask` (iOS): mocked samples are dropped before persistence when policy is `'drop'`.
+- Added `heartbeatInterval` config option (typed in `.d.ts`, persisted in `Config` / `MAURConfig`).
+- Registered events `heartbeat`, `syncStart`, `syncProgress`, `syncSuccess`, `syncError` in `www/BackgroundGeolocation.js` and both `Event` union and `BackgroundGeolocationEvents` enum in `.d.ts`.
+- **Sync events emit natively now**: Android via `MSG_ON_SYNC_*` broadcasts from `SyncAdapter` → `BackgroundGeolocationFacade` → `PluginDelegate` → `BackgroundGeolocationPlugin.sendEvent`; iOS via `NSNotificationCenter` from `MAURBackgroundSync` → `CDVBackgroundGeolocation` observers. `syncSuccess` payload includes `sent`; `syncError` payload includes `httpStatus` + `message`.
+- Bug: iOS `getPluginVersion` returned hardcoded `"3.2.0"`; now `"3.5.0"`.
+
+- `syncProgress` emits natively now: Android via `MSG_ON_SYNC_PROGRESS` from `SyncAdapter.onProgress`; iOS via `URLSession:task:didSendBodyData:totalBytesSent:totalBytesExpectedToSend:` posting `MAURBackgroundSyncDidProgressNotification`. Both are forwarded as `syncProgress` JS events.
+- TypeScript `on()` overloads added for `'heartbeat'`, `'syncStart'`, `'syncProgress'`, `'syncSuccess'`, `'syncError'` so string-literal subscriptions type-check.
+- Bug: iOS `MAURBackgroundSync.tasks` was never allocated. Fixed in `init`.
+
+- `heartbeat` emits natively now: Android `LocationServiceImpl` schedules a `ScheduledExecutorService` task on service start using `Config.heartbeatInterval`, broadcasts `MSG_ON_HEARTBEAT` with the latest `BackgroundLocation`, and `BackgroundGeolocationPlugin` forwards it to JS. iOS `MAURBackgroundGeolocationFacade` schedules an `NSTimer` (main run loop), posts `MAURHeartbeatNotification`, and `CDVBackgroundGeolocation` forwards it as a `heartbeat` JS event with the latest location.
+
+Phase 4 status: all four deliverables (`getDiagnostics`, `mockLocationPolicy`, sync events, heartbeat) are now native and end-to-end.
+
 ## [3.4.0] - 2026-05-08
 
 ### Phase 3 — Location API modernization

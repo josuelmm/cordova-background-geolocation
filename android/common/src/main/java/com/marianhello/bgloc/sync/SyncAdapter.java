@@ -171,6 +171,27 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
             notificationManager.notify(NOTIFICATION_ID, builder.build());
         }
 
+        // v3.5 Phase 4: emit syncStart event.
+        Bundle syncStart = new Bundle();
+        syncStart.putInt("action", LocationServiceImpl.MSG_ON_SYNC_START);
+        broadcastMessage(syncStart);
+
+        // Count locations being uploaded (best-effort, API-21+ safe).
+        int locationsAttempted = 0;
+        java.io.FileInputStream fis = null;
+        try {
+            fis = new java.io.FileInputStream(file);
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = fis.read(buf)) > 0) baos.write(buf, 0, n);
+            org.json.JSONArray arr = new org.json.JSONArray(new String(baos.toByteArray(), "UTF-8"));
+            locationsAttempted = arr.length();
+        } catch (Throwable ignored) { /* best-effort; emit 0 if we cannot read */
+        } finally {
+            if (fis != null) try { fis.close(); } catch (Exception ignored) {}
+        }
+
         try {
             int responseCode = HttpPostService.postJSONFile(url, file, httpHeaders, this, method);
 
@@ -203,6 +224,16 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
 
             if (!isStatusOkay) {
                 logger.warn("Batch sync failed: server returned HTTP {} (check server logs or sync URL)", responseCode);
+                Bundle errBundle = new Bundle();
+                errBundle.putInt("action", LocationServiceImpl.MSG_ON_SYNC_ERROR);
+                errBundle.putInt("httpStatus", responseCode);
+                errBundle.putString("message", "HTTP " + responseCode);
+                broadcastMessage(errBundle);
+            } else {
+                Bundle okBundle = new Bundle();
+                okBundle.putInt("action", LocationServiceImpl.MSG_ON_SYNC_SUCCESS);
+                okBundle.putInt("sent", locationsAttempted);
+                broadcastMessage(okBundle);
             }
 
             return isStatusOkay;
@@ -213,6 +244,11 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
             if (builder != null) {
                 builder.setContentText(currentSyncConfig.getNotificationSyncFailedText() + ": " + errMsg);
             }
+            Bundle errBundle = new Bundle();
+            errBundle.putInt("action", LocationServiceImpl.MSG_ON_SYNC_ERROR);
+            errBundle.putInt("httpStatus", 0);
+            errBundle.putString("message", errMsg);
+            broadcastMessage(errBundle);
         } finally {
             logger.info("Syncing endAt: {}", System.currentTimeMillis());
 
@@ -249,6 +285,12 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
             builder.setProgress(100, progress, false);
             notificationManager.notify(NOTIFICATION_ID, builder.build());
         }
+
+        // v3.5 Phase 4: forward progress percentage to JS via syncProgress event.
+        Bundle progBundle = new Bundle();
+        progBundle.putInt("action", LocationServiceImpl.MSG_ON_SYNC_PROGRESS);
+        progBundle.putInt("progress", progress);
+        broadcastMessage(progBundle);
     }
 
     private void broadcastMessage(Bundle bundle) {

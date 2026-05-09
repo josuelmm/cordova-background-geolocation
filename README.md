@@ -368,6 +368,68 @@ Subscribe with `BackgroundGeolocation.on(eventName, callback)`. Unsubscribe with
 
 Full event payloads and options: [Events](docs/events.md). Full API (all options, all methods): [API](docs/api.md).
 
+### New in 4.2.0
+
+- **Real sensor fusion (Phase 8).** Optional accelerometer + gyroscope pipeline (`drivingEvents.sensorFusion: true`). On Android uses `Sensor.TYPE_LINEAR_ACCELERATION` + `Sensor.TYPE_GYROSCOPE`; on iOS uses `CMMotionManager.startDeviceMotionUpdatesToQueue` at 50 Hz.
+- **Sensor-driven `possibleCrash`.** When the pipeline detects `|a| ≥ crashImpactG` (default 3 g) during an active trip, emits `possibleCrash` with `source: "sensor"`. GPS-derived `possibleCrash` keeps emitting with `source: "gps"`. Detects parking-lot impacts that GPS alone misses.
+- **New event `phoneUsageWhileDriving`.** Sustained device interaction (gyro/accel jitter + screen on) during an active trip.
+- New thresholds in `drivingEvents`: `crashImpactG`, `sensorCrashCooldownMs`, `phoneUsageWindowMs`, `phoneUsageCooldownMs`.
+- Hot-reload: changes to `drivingEvents.sensorFusion` via `configure()` (re)start the pipeline without a full service restart.
+- Battery: pipeline only samples while a trip is active. Off by default — opt in with `sensorFusion: true`.
+
+```javascript
+BackgroundGeolocation.configure({
+  drivingEvents: {
+    enabled: true,
+    sensorFusion: true,        // v4.2 — opt in
+    crashImpactG: 3.0,         // |a| in g for sensor-driven possibleCrash (default 3.0)
+    phoneUsageWindowMs: 4000,
+    phoneUsageCooldownMs: 60000
+  }
+});
+
+BackgroundGeolocation.on('possibleCrash', (d) => {
+  // d.source === 'gps' (GPS heuristic) or 'sensor' (accelerometer impact, higher confidence)
+});
+BackgroundGeolocation.on('phoneUsageWhileDriving', (location) => {
+  // Sustained device interaction during an active trip with the screen on.
+});
+```
+
+Full reference (all thresholds, when to enable, iOS screen-on caveat): [docs/api.md → Driver insights](docs/api.md#driver-insights-since-400).
+
+### New in 4.1.0
+
+- **GPS-derived driving events.** Four new events: `hardBrake`, `rapidAcceleration`, `sharpTurn`, `possibleCrash`. All derived from GPS speed and bearing — **no accelerometer/gyroscope required**. Configure thresholds via the extended `drivingEvents` config (`hardBrakeMps2`, `rapidAccelMps2`, `sharpTurnDegPerSec`, `crashImpactKmh`, `crashWindowMs`). Each event has a 4 s cooldown.
+- `possibleCrash` is heuristic. **Always confirm with the user** before notifying contacts; false positives are expected (sudden tunnel exit, GPS glitches).
+- TypeScript: 4 new typed `on()` overloads with `{ location, value }` payloads.
+- v4.2 adds real sensor fusion on top of these events.
+
+### New in 4.0.0
+
+- **Driver insights (Phase 6).** New GPS-only state machine emits `tripStart`, `tripEnd`, `moving`, `stopped`, `speeding`, `providerChange`, `sos` events end-to-end (Android + iOS). Configure thresholds via the new `drivingEvents` option.
+- New method **`triggerSOS(payload?)`** — fires a single `sos` event with the latest known location plus your payload. The host app handles the actual SOS workflow (notify contacts, push, alarm UI).
+- The Angular service exposes `triggerSOS()`.
+- ✅ Driving events (`hardBrake`, `rapidAcceleration`, `sharpTurn`, `possibleCrash`) ya están disponibles en v4.1.0 — derivados de GPS (sin sensores adicionales). Real sensor fusion (acelerómetro/giroscopio) se planea para v4.2.
+
+### New in 3.6.0
+
+- **Battery / OEM helpers (Phase 5).** Five new methods to guide the user through the steps required for reliable background tracking on aggressive OEMs:
+  - `isIgnoringBatteryOptimizations()` — Android Doze whitelist state.
+  - `requestIgnoreBatteryOptimizations()` — opens the system dialog.
+  - `openBatterySettings()` — opens the per-app battery screen.
+  - `openAutoStartSettings()` — opens the OEM-specific auto-start screen on Xiaomi MIUI, Huawei EMUI, Oppo ColorOS, Vivo FunTouch, OnePlus, Asus (Samsung falls back to app-info).
+  - `getManufacturerHelp()` — returns OEM-specific guidance text the app can render as a help screen.
+- The Angular service exposes all 5 methods.
+- Combine with `getDiagnostics()` to build a "Tracking is being killed by your phone — fix it here" flow.
+
+### New in 3.5.0
+
+- **`getDiagnostics()` (Phase 4).** New extended diagnostics method that helps you debug "tracking is not running" in production. Returns permissions (`fineLocationGranted`, `coarseLocationGranted`, `backgroundLocationGranted`, `notificationPermissionGranted`, `activityRecognitionGranted`), battery optimisation state (`batteryOptimizationIgnored`), OEM manufacturer (`manufacturer`), last-fix timestamp, pending sync count, declared `foregroundServiceType` (Android), and `preciseLocationEnabled`, `backgroundRefreshStatus`, `lowPowerModeEnabled`, `motionPermissionStatus` (iOS). Use it to surface actionable hints to users like "Allow all the time" or "Disable battery optimisation". See [getDiagnostics](docs/api.md#getdiagnosticssuccess-fail).
+- **`mockLocationPolicy: 'allow' | 'flag' | 'drop'`** — policy for mocked locations. Detection (`isFromMockProvider` Android, `simulated` iOS) was already present; this option controls what to do with those samples. Recommended for anti-fraud: `'flag'` (keep them but tagged) or `'drop'` (discard).
+- **`heartbeatInterval`** option plus events `heartbeat`, `syncStart`, `syncProgress`, `syncSuccess`, `syncError` are all wired end-to-end with native emission on Android and iOS. Subscribe via `BackgroundGeolocation.on('heartbeat', cb)` etc.
+- The Angular service exposes `getDiagnostics()` directly.
+
 ### New in 3.4.0
 
 - **Location API modernization (Phase 3).** The Android Activity provider now uses `LocationRequest.Builder` + `Priority.PRIORITY_*` (replaces the deprecated `LocationRequest.create()` / `setPriority` / `setInterval` / `LocationRequest.PRIORITY_*` family from `play-services-location 21.0.0+`). The Distance Filter and Raw providers no longer use the deprecated `Criteria` API; provider selection is now an explicit GPS-first / Network-fallback. iOS migrates `[NSURLConnection sendSynchronousRequest:]` (deprecated since iOS 9) to `NSURLSession + dispatch_semaphore`, and adds the iOS 14+ `locationManagerDidChangeAuthorization:` callback alongside the legacy one.
@@ -474,7 +536,7 @@ No extra wrapper (e.g. Awesome Cordova Plugins) is required.
 | 1.x            | ≥ 8.0.0     | ≥ 8.0.0         | ≥ 6.0.0     |
 | 2.x            | ≥ 10.0.0    | ≥ 10.0.0        | ≥ 6.0.0     |
 | 3.0.x – 3.2.x  | ≥ 10.0.0    | ≥ 10.0.0        | ≥ 6.0.0     |
-| 3.3.x – 3.4.x  | ≥ 10.0.0    | ≥ 12.0.0        | ≥ 6.2.0     |
+| 3.3.x – 4.1.x  | ≥ 10.0.0    | ≥ 12.0.0        | ≥ 6.2.0     |
 
 > 3.3.0+: `cordova-android >= 12` is required for `targetSdk 34+` and the modernised foreground-service handling. The new iOS APIs (`showsBackgroundLocationIndicator` iOS 11+, `locationManagerDidChangeAuthorization:` iOS 14+) are gated by runtime `@available` checks, so older iOS versions still link and run.
 

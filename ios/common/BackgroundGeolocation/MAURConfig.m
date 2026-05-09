@@ -12,7 +12,7 @@
 
 @implementation MAURConfig 
 
-@synthesize stationaryRadius, distanceFilter, desiredAccuracy, _debug, activityType, activitiesInterval, _stopOnTerminate, url, syncUrl, syncThreshold, syncEnabled, httpHeaders, httpMethod, syncHttpMethod, httpMode, syncMode, queryParams, _showsBackgroundLocationIndicator, _saveBatteryOnBackground, maxLocations, _pauseLocationUpdates, locationProvider, _template;
+@synthesize stationaryRadius, distanceFilter, desiredAccuracy, _debug, activityType, activitiesInterval, _stopOnTerminate, url, syncUrl, syncThreshold, syncEnabled, httpHeaders, httpMethod, syncHttpMethod, httpMode, syncMode, queryParams, _showsBackgroundLocationIndicator, heartbeatInterval, mockLocationPolicy, drivingEvents, _saveBatteryOnBackground, maxLocations, _pauseLocationUpdates, locationProvider, _template;
 
 -(instancetype) initWithDefaults {
     self = [super init];
@@ -38,6 +38,8 @@
     syncHttpMethod = @"POST";
     httpMode = @"batch";
     syncMode = @"batch";
+    heartbeatInterval = [NSNumber numberWithInt:0];
+    mockLocationPolicy = @"allow";
 //    template =
 
     return self;
@@ -105,6 +107,15 @@
     }
     if (isNotNull(config[@"showsBackgroundLocationIndicator"])) {
         instance._showsBackgroundLocationIndicator = config[@"showsBackgroundLocationIndicator"];
+    }
+    if (isNotNull(config[@"heartbeatInterval"])) {
+        instance.heartbeatInterval = config[@"heartbeatInterval"];
+    }
+    if (isNotNull(config[@"mockLocationPolicy"])) {
+        instance.mockLocationPolicy = [(NSString*)config[@"mockLocationPolicy"] lowercaseString];
+    }
+    if ([config[@"drivingEvents"] isKindOfClass:[NSDictionary class]]) {
+        instance.drivingEvents = config[@"drivingEvents"];
     }
     if (isNotNull(config[@"saveBatteryOnBackground"])) {
         instance._saveBatteryOnBackground = config[@"saveBatteryOnBackground"];
@@ -195,6 +206,15 @@
     if ([newConfig hasShowsBackgroundLocationIndicator]) {
         merger._showsBackgroundLocationIndicator = newConfig._showsBackgroundLocationIndicator;
     }
+    if (newConfig.heartbeatInterval != nil) {
+        merger.heartbeatInterval = newConfig.heartbeatInterval;
+    }
+    if (newConfig.mockLocationPolicy != nil) {
+        merger.mockLocationPolicy = newConfig.mockLocationPolicy;
+    }
+    if (newConfig.drivingEvents != nil) {
+        merger.drivingEvents = newConfig.drivingEvents;
+    }
     if ([newConfig hasSaveBatteryOnBackground]) {
         merger._saveBatteryOnBackground = newConfig._saveBatteryOnBackground;
     }
@@ -236,6 +256,9 @@
         copy.syncMode = syncMode;
         copy.queryParams = queryParams;
         copy._showsBackgroundLocationIndicator = _showsBackgroundLocationIndicator;
+        copy.heartbeatInterval = heartbeatInterval;
+        copy.mockLocationPolicy = mockLocationPolicy;
+        copy.drivingEvents = drivingEvents;
         copy._saveBatteryOnBackground = _saveBatteryOnBackground;
         copy.maxLocations = maxLocations;
         copy._pauseLocationUpdates = _pauseLocationUpdates;
@@ -550,6 +573,9 @@
     if (self.syncMode != nil) [dict setObject:self.syncMode forKey:@"syncMode"];
     if (self.queryParams != nil) [dict setObject:self.queryParams forKey:@"queryParams"];
     if ([self hasShowsBackgroundLocationIndicator]) [dict setObject:self._showsBackgroundLocationIndicator forKey:@"showsBackgroundLocationIndicator"];
+    if (self.heartbeatInterval != nil) [dict setObject:self.heartbeatInterval forKey:@"heartbeatInterval"];
+    if (self.mockLocationPolicy != nil) [dict setObject:self.mockLocationPolicy forKey:@"mockLocationPolicy"];
+    if (self.drivingEvents != nil) [dict setObject:self.drivingEvents forKey:@"drivingEvents"];
     if ([self hasStationaryRadius]) [dict setObject:self.stationaryRadius forKey:@"stationaryRadius"];
     if ([self hasDistanceFilter]) [dict setObject:self.distanceFilter forKey:@"distanceFilter"];
     if ([self hasDesiredAccuracy]) [dict setObject:self.desiredAccuracy forKey:@"desiredAccuracy"];

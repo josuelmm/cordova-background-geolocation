@@ -19,7 +19,8 @@ The NPM package can be found at [@josuelmm/cordova-background-geolocation](https
 
 > **Plugin global y backend-agnóstico.** Sin lógica hardcodeada de proveedores. Cualquier backend (Traccar, GPSWox, Laravel, Node, Firebase, n8n, API propia) se conecta vía HTTP transport personalizable.
 
-- [Roadmap](ROADMAP.md) — fases: 1) Auto-start ✅, 2) HTTP ✅, 3) Modernización location APIs, 4) Diagnóstico, 5) Battery/OEM, 6) Driving.
+- [Roadmap](ROADMAP.md) — fases: 1) Auto-start ✅, 2) HTTP ✅, 3) Modernización location APIs ✅, 4) Diagnóstico ✅, 5) Battery/OEM ✅, 6) Driving ✅ (v4.0.0 GPS-only; sensor fusion v4.1).
+- **[Resumen 3.3 → 4.0](RELEASES-3.3-to-4.0.md)** — qué entregó cada release, eventos y métodos nuevos, bugs corregidos, validación.
 - [Auto-start tras reinicio (Fase 1)](auto-start.md) — entregado en v3.3.0.
 - [HTTP transport personalizable (Fase 2)](http-transport.md) — entregado en v3.3.0.
 - [Modernización location APIs (Fase 3, v3.4)](location-modernization.md) — `LocationRequest.Builder`, eliminar `Criteria`, `NSURLSession`, etc.
