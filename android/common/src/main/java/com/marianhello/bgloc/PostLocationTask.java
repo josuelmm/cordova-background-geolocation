@@ -189,7 +189,7 @@ public class PostLocationTask {
         String method = mConfig.getHttpMethod();
         String mode = mConfig.getHttpMode();
         logger.debug("Posting to url: {} method: {} mode: {} headers: {}",
-                resolvedUrl, method, mConfig.getHttpHeaders());
+                resolvedUrl, method, mode, mConfig.getHttpHeaders());
         int responseCode;
 
         try {

@@ -1,6 +1,6 @@
 # Roadmap
 
-Estado actual: **v4.2.2** (Fases 1-8 completadas; 4.2.2 = hotfixes de compilación).
+Estado actual: **v4.2.3** (Fases 1-8 completadas; 4.2.x = hotfixes de compilación + log).
 
 > **Principio de diseño.** Este es un plugin **global y backend-agnóstico**. No incorpora lógica de Traccar, GPSWox, OsmAnd ni de ninguna API propietaria. La compatibilidad con cualquier backend se logra mediante **transporte HTTP personalizable** (URL templating + body templating + métodos HTTP genéricos). Traccar y similares solo se documentan como **ejemplos de integración**, nunca como modo interno.
 

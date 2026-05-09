@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.2.3](https://github.com/josuelmm/cordova-background-geolocation/tree/4.2.3) (2026-05-09)
+
+### Fixed
+- `PostLocationTask`: log de debug pasaba 3 args para 4 placeholders `{}` (faltaba `mode`). Cosmético, sin impacto funcional.
+
+### Audited (no changes required)
+- HTTP transport (real-time + sync queue) intacto: URL templating, `httpMethod`/`httpMode`/`syncMode`, headers, `Content-Length` UTF-8.
+- Hot-reload `configure()` de v4.2 no toca `clearQueue` — no se pierden ubicaciones pendientes.
+- Sensor fusion: imports, protocolo iOS, MSG codes, parcels simétricos, listeners enlazados — sin regresiones.
+
 ## [4.2.2](https://github.com/josuelmm/cordova-background-geolocation/tree/4.2.2) (2026-05-09)
 
 ### Fixed

@@ -2,6 +2,12 @@
 
 **for cordova-plugin-background-geolocation**
 
+## [4.2.3] - 2026-05-09
+
+### Fixed
+- `PostLocationTask` debug log: missing `mode` argument for the 4-placeholder format string. Cosmetic.
+- Plugin version: `4.2.3`.
+
 ## [4.2.2] - 2026-05-09
 
 ### Fixed
