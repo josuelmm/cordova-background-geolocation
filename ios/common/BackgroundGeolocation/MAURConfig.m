@@ -12,7 +12,7 @@
 
 @implementation MAURConfig 
 
-@synthesize stationaryRadius, distanceFilter, desiredAccuracy, _debug, activityType, activitiesInterval, _stopOnTerminate, url, syncUrl, syncThreshold, syncEnabled, httpHeaders, httpMethod, syncHttpMethod, httpMode, syncMode, queryParams, _showsBackgroundLocationIndicator, heartbeatInterval, mockLocationPolicy, drivingEvents, includeBattery, _saveBatteryOnBackground, maxLocations, _pauseLocationUpdates, locationProvider, _template;
+@synthesize stationaryRadius, distanceFilter, desiredAccuracy, _debug, activityType, activitiesInterval, _stopOnTerminate, url, syncUrl, syncThreshold, syncEnabled, httpHeaders, httpMethod, syncHttpMethod, httpMode, syncMode, queryParams, _showsBackgroundLocationIndicator, heartbeatInterval, mockLocationPolicy, drivingEvents, includeBattery, activityConfidenceThreshold, maxAcceptedAccuracy, _saveBatteryOnBackground, maxLocations, _pauseLocationUpdates, locationProvider, _template;
 
 -(instancetype) initWithDefaults {
     self = [super init];
@@ -40,6 +40,10 @@
     syncMode = @"batch";
     heartbeatInterval = [NSNumber numberWithInt:0];
     mockLocationPolicy = @"allow";
+    // v4.5.2 — match Android defaults so the JS layer sees the same behavior
+    // regardless of platform when the host doesn't override these.
+    activityConfidenceThreshold = [NSNumber numberWithInt:50];
+    maxAcceptedAccuracy = nil; // off by default
 //    template =
 
     return self;
@@ -119,6 +123,13 @@
     }
     if (isNotNull(config[@"includeBattery"])) {
         instance.includeBattery = config[@"includeBattery"];
+    }
+    // v4.5.2 provider hardening
+    if (isNotNull(config[@"activityConfidenceThreshold"])) {
+        instance.activityConfidenceThreshold = config[@"activityConfidenceThreshold"];
+    }
+    if (isNotNull(config[@"maxAcceptedAccuracy"])) {
+        instance.maxAcceptedAccuracy = config[@"maxAcceptedAccuracy"];
     }
     if (isNotNull(config[@"saveBatteryOnBackground"])) {
         instance._saveBatteryOnBackground = config[@"saveBatteryOnBackground"];
@@ -221,6 +232,12 @@
     if (newConfig.includeBattery != nil) {
         merger.includeBattery = newConfig.includeBattery;
     }
+    if (newConfig.activityConfidenceThreshold != nil) {
+        merger.activityConfidenceThreshold = newConfig.activityConfidenceThreshold;
+    }
+    if (newConfig.maxAcceptedAccuracy != nil) {
+        merger.maxAcceptedAccuracy = newConfig.maxAcceptedAccuracy;
+    }
     if ([newConfig hasSaveBatteryOnBackground]) {
         merger._saveBatteryOnBackground = newConfig._saveBatteryOnBackground;
     }
@@ -266,6 +283,8 @@
         copy.mockLocationPolicy = mockLocationPolicy;
         copy.drivingEvents = drivingEvents;
         copy.includeBattery = includeBattery;
+        copy.activityConfidenceThreshold = activityConfidenceThreshold;
+        copy.maxAcceptedAccuracy = maxAcceptedAccuracy;
         copy._saveBatteryOnBackground = _saveBatteryOnBackground;
         copy.maxLocations = maxLocations;
         copy._pauseLocationUpdates = _pauseLocationUpdates;
@@ -590,6 +609,8 @@
     if (self.mockLocationPolicy != nil) [dict setObject:self.mockLocationPolicy forKey:@"mockLocationPolicy"];
     if (self.drivingEvents != nil) [dict setObject:self.drivingEvents forKey:@"drivingEvents"];
     if (self.includeBattery != nil) [dict setObject:self.includeBattery forKey:@"includeBattery"];
+    if (self.activityConfidenceThreshold != nil) [dict setObject:self.activityConfidenceThreshold forKey:@"activityConfidenceThreshold"];
+    if (self.maxAcceptedAccuracy != nil) [dict setObject:self.maxAcceptedAccuracy forKey:@"maxAcceptedAccuracy"];
     if ([self hasStationaryRadius]) [dict setObject:self.stationaryRadius forKey:@"stationaryRadius"];
     if ([self hasDistanceFilter]) [dict setObject:self.distanceFilter forKey:@"distanceFilter"];
     if ([self hasDesiredAccuracy]) [dict setObject:self.desiredAccuracy forKey:@"desiredAccuracy"];

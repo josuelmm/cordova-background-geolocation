@@ -2,6 +2,34 @@
 
 **for cordova-plugin-background-geolocation**
 
+## [4.5.2] - 2026-05-10
+
+### Added (Provider Hardening)
+- `activityConfidenceThreshold` (0-100, default 50) — ignore low-confidence STILL/ACTIVE transitions in ACTIVITY_PROVIDER. iOS normalizes CMMotionActivityConfidence (Low/Medium/High → 20/40/80).
+- `maxAcceptedAccuracy` (m, optional) — global filter that drops fixes worse than this before persist/POST/JS emission. All providers.
+
+### Fixed (ACTIVITY_PROVIDER blockers)
+- Android: missing `setMinUpdateDistanceMeters(distanceFilter)` in `LocationRequest.Builder`.
+- Android: Google Play Services availability check in `onCreate`; emits `SERVICE_ERROR` if missing.
+- Android: `ACTIVITY_RECOGNITION` permission check on Android 10+; emits `PERMISSION_DENIED_ERROR` once when denied (was silent → tracking ran continuously).
+- Android: `onConfigure` only restarts tracking when a relevant field changes (was always stop+start).
+- iOS: `onLocationsChanged` returns after stationary emission (was emitting both stationary and regular onLocationChanged during STILL).
+- iOS: SOMotionDetector confidence normalized to 0-100 to match the threshold scale.
+- iOS: ACTIVITY/RAW/DISTANCE providers release `delegate` slot in `onDestroy`/`dealloc` (singletons were leaking callbacks to destroyed instances).
+
+### Fixed (Provider Errors)
+- Android `DISTANCE_FILTER` + `RAW`: `onProviderDisabled` now emits `SERVICE_ERROR` when no fallback provider is available.
+- iOS `MAURLocationManager`: added iOS 14+ `locationManagerDidChangeAuthorization:` callback (legacy guard prevents double-notification on iOS 14+).
+- Android `RAW`: now picks providers based on `desiredAccuracy` (HIGH → GPS only, BALANCED → GPS+Network, LOW → Network only). Subscribes to both when useful.
+- Warning logged when `stopOnStillActivity: false` is combined with `ACTIVITY_PROVIDER`.
+
+### Refactor (internal, no JS API change, no device-coverage loss)
+- iOS `ACTIVITY_PROVIDER` migrated to `CMMotionActivityManager` directly. `SOMotionDetector` removed entirely (sources + plugin.xml entries).
+- Android `DISTANCE_FILTER_PROVIDER` is now **hybrid**: chooses backend at runtime — `FusedLocationProviderClient` when Google Play Services is available, `LocationManager` fallback when not (Huawei/HMS, AOSP, ChinaROMs). API unchanged.
+- `addProximityAlert` path removed in both routes (no geofencing per product decision); stationary exit detected purely by polling.
+
+### Plugin version: `4.5.2`.
+
 ## [4.5.1] - 2026-05-09
 
 ### Fixed (blockers)

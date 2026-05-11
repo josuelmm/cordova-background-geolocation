@@ -118,11 +118,20 @@ static NSString * const Domain = @"com.marianhello";
 - (void) onDestroy {
     DDLogInfo(@"Destroying %@ ", TAG);
     [self onStop:nil];
+
+    // v4.5.2: MAURLocationManager is a singleton shared with the other providers.
+    // Release our delegate slot so a later provider swap does not leave this
+    // (already destroyed) instance as the active delegate.
+    if (locationManager != nil && locationManager.delegate == self) {
+        locationManager.delegate = nil;
+    }
 }
 
 - (void) dealloc
 {
-    //    locationController.delegate = nil;
+    if (locationManager != nil && locationManager.delegate == self) {
+        locationManager.delegate = nil;
+    }
 }
 
 @end

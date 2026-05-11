@@ -12,6 +12,8 @@ import android.os.Build;
 import android.os.Looper;
 import androidx.core.app.ActivityCompat;
 
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
 import com.google.android.gms.location.ActivityRecognition;
 import com.google.android.gms.location.ActivityRecognitionClient;
 import com.google.android.gms.location.ActivityRecognitionResult;
@@ -41,7 +43,18 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
     private boolean isStarted = false;
     private boolean isTracking = false;
     private boolean isWatchingActivity = false;
+    private boolean playServicesAvailable = false;
+    private boolean activityPermissionErrorEmitted = false;
+    private boolean stopOnStillWarningEmitted = false;
     private DetectedActivity lastActivity = new DetectedActivity(DetectedActivity.UNKNOWN, 100);
+
+    // v4.5.2: snapshot of fields that require restarting tracking when they change.
+    private Integer prevDesiredAccuracy;
+    private Integer prevInterval;
+    private Integer prevFastestInterval;
+    private Integer prevDistanceFilter;
+    private Integer prevActivitiesInterval;
+    private Boolean prevStopOnStillActivity;
 
     private final LocationCallback locationCallback = new LocationCallback() {
         @Override
@@ -63,6 +76,20 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
     @Override
     public void onCreate() {
         super.onCreate();
+
+        // v4.5.2: ACTIVITY_PROVIDER strictly depends on Google Play Services
+        // (FusedLocationProviderClient + ActivityRecognitionClient). If GPS is
+        // missing/outdated we cannot operate — surface a clear error instead of
+        // silently failing.
+        int gps = GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(mContext);
+        playServicesAvailable = (gps == ConnectionResult.SUCCESS);
+        if (!playServicesAvailable) {
+            String msg = "Google Play Services unavailable for ACTIVITY_PROVIDER (code=" + gps + "); provider will be inert.";
+            logger.error(msg);
+            handleServiceError(msg);
+            return;
+        }
+
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(mContext);
         activityRecognitionClient = ActivityRecognition.getClient(mContext);
 
@@ -80,6 +107,15 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
     public void onStart() {
         logger.info("Start recording");
         this.isStarted = true;
+
+        // v4.5.2: ACTIVITY_PROVIDER hinges on the STILL/ACTIVE state machine.
+        // If the host turned that off, the provider degenerates into a tracker
+        // that never pauses — warn so it shows up in logcat for the integrator.
+        if (mConfig != null && Boolean.FALSE.equals(mConfig.getStopOnStillActivity()) && !stopOnStillWarningEmitted) {
+            logger.warn("ACTIVITY_PROVIDER with stopOnStillActivity=false will track continuously; consider DISTANCE_FILTER_PROVIDER or RAW_PROVIDER for that use case.");
+            stopOnStillWarningEmitted = true;
+        }
+
         attachRecorder();
     }
 
@@ -93,11 +129,40 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
 
     @Override
     public void onConfigure(Config config) {
-        super.onConfigure(config);
+        // v4.5.2: only restart tracking if a field that actually affects the
+        // LocationRequest / activity-updates subscription has changed. A no-op
+        // reconfigure used to drop+re-add the location callback and momentarily
+        // leave the service without updates.
+        boolean restart = false;
         if (isStarted) {
+            restart = !sameValue(prevDesiredAccuracy, config != null ? config.getDesiredAccuracy() : null)
+                    || !sameValue(prevInterval, config != null ? config.getInterval() : null)
+                    || !sameValue(prevFastestInterval, config != null ? config.getFastestInterval() : null)
+                    || !sameValue(prevDistanceFilter, config != null ? config.getDistanceFilter() : null)
+                    || !sameValue(prevActivitiesInterval, config != null ? config.getActivitiesInterval() : null)
+                    || !sameValue(prevStopOnStillActivity, config != null ? config.getStopOnStillActivity() : null);
+        }
+
+        super.onConfigure(config);
+
+        if (restart) {
+            logger.debug("Restarting ACTIVITY_PROVIDER tracking after relevant config change.");
             onStop();
             onStart();
         }
+
+        if (config != null) {
+            prevDesiredAccuracy = config.getDesiredAccuracy();
+            prevInterval = config.getInterval();
+            prevFastestInterval = config.getFastestInterval();
+            prevDistanceFilter = config.getDistanceFilter();
+            prevActivitiesInterval = config.getActivitiesInterval();
+            prevStopOnStillActivity = config.getStopOnStillActivity();
+        }
+    }
+
+    private static boolean sameValue(Object a, Object b) {
+        return a == null ? b == null : a.equals(b);
     }
 
     @Override
@@ -139,10 +204,16 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
         int priority = translateDesiredAccuracy(mConfig.getDesiredAccuracy());
         // v3.4: LocationRequest.Builder (play-services-location 21.0.0+) replaces deprecated
         // LocationRequest.create() + setPriority/setInterval/setFastestInterval.
-        LocationRequest locationRequest = new LocationRequest.Builder(priority, mConfig.getInterval())
+        // v4.5.2: also honor distanceFilter (was ignored on ACTIVITY_PROVIDER), so the
+        // FusedLocationProvider can throttle by distance and not just by interval.
+        LocationRequest.Builder builder = new LocationRequest.Builder(priority, mConfig.getInterval())
                 .setMinUpdateIntervalMillis(mConfig.getFastestInterval())
-                .setWaitForAccurateLocation(false)
-                .build();
+                .setWaitForAccurateLocation(false);
+        Integer distanceFilter = mConfig.getDistanceFilter();
+        if (distanceFilter != null && distanceFilter > 0) {
+            builder.setMinUpdateDistanceMeters(distanceFilter.floatValue());
+        }
+        LocationRequest locationRequest = builder.build();
 
         try {
             fusedLocationClient.requestLocationUpdates(
@@ -185,7 +256,20 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
 
         startTracking();
 
-        if (!isWatchingActivity && mConfig.getStopOnStillActivity() && activityRecognitionPermitted()) {
+        if (!isWatchingActivity && mConfig.getStopOnStillActivity()) {
+            // v4.5.2: on Android 10+ ACTIVITY_RECOGNITION is a runtime permission.
+            // Without it, requestActivityUpdates() silently returns no broadcasts and
+            // STILL/ACTIVE never flips — the provider then runs as a continuous tracker
+            // by accident. Emit a one-shot error so the host app knows to request it.
+            if (!activityRecognitionPermitted()) {
+                if (!activityPermissionErrorEmitted) {
+                    String msg = "ACTIVITY_RECOGNITION permission denied; ACTIVITY_PROVIDER cannot detect STILL/ACTIVE transitions.";
+                    logger.warn(msg);
+                    handlePermissionDenied(msg);
+                    activityPermissionErrorEmitted = true;
+                }
+                return;
+            }
             activityRecognitionClient.requestActivityUpdates(
                     mConfig.getActivitiesInterval(),
                     detectedActivitiesPI
@@ -255,7 +339,22 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
             List<DetectedActivity> detectedActivities = result.getProbableActivities();
             if (detectedActivities == null || detectedActivities.isEmpty()) return;
 
-            lastActivity = getProbableActivity(detectedActivities);
+            DetectedActivity candidate = getProbableActivity(detectedActivities);
+
+            // v4.5.2: skip transitions whose confidence is below the configured
+            // threshold (default 50). Prevents jittery STILL/ACTIVE flips when the
+            // motion classifier is unsure — which translated into spurious GPS
+            // start/stop bursts in earlier versions.
+            Integer threshold = mConfig != null ? mConfig.getActivityConfidenceThreshold() : null;
+            if (threshold != null && candidate.getConfidence() < threshold) {
+                logger.debug("Ignoring low-confidence activity={} confidence={} threshold={}",
+                        BackgroundActivity.getActivityString(candidate.getType()),
+                        candidate.getConfidence(),
+                        threshold);
+                return;
+            }
+
+            lastActivity = candidate;
 
             logger.debug("Detected activity={} confidence={}", BackgroundActivity.getActivityString(lastActivity.getType()), lastActivity.getConfidence());
 

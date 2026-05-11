@@ -531,11 +531,20 @@ enum {
 - (void) onDestroy {
     DDLogInfo(@"Destroying %@ ", TAG);
     [self onStop:nil];
+
+    // v4.5.2: release our delegate slot so a CLLocationManager retained by the
+    // OS (e.g. while a stationary region monitor is still alive briefly after
+    // stop) cannot deliver callbacks to a destroyed provider.
+    if (locationManager != nil && locationManager.delegate == self) {
+        locationManager.delegate = nil;
+    }
 }
 
 - (void) dealloc
 {
-    //    locationController.delegate = nil;
+    if (locationManager != nil && locationManager.delegate == self) {
+        locationManager.delegate = nil;
+    }
 }
 
 @end

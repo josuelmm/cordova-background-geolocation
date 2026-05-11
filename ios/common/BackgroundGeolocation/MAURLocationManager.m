@@ -213,10 +213,28 @@ static NSString *const Domain = @"com.marianhello";
     }
 }
 
+// v4.5.2: iOS 14+ delegate callback. The legacy
+// `locationManager:didChangeAuthorizationStatus:` is deprecated in iOS 14 but
+// still delivered alongside this one, so we ignore the legacy variant when
+// running on iOS 14+ to avoid double-notifying delegates (RAW + ACTIVITY
+// providers go through this MAURLocationManager singleton).
+- (void) locationManagerDidChangeAuthorization:(CLLocationManager *)manager API_AVAILABLE(ios(14.0))
+{
+    [self maurDispatchAuthorizationStatus:manager.authorizationStatus];
+}
+
 - (void) locationManager:(CLLocationManager *)manager didChangeAuthorizationStatus:(CLAuthorizationStatus)status
 {
+    if (@available(iOS 14.0, *)) {
+        return; // delivered by locationManagerDidChangeAuthorization: above
+    }
+    [self maurDispatchAuthorizationStatus:status];
+}
+
+- (void) maurDispatchAuthorizationStatus:(CLAuthorizationStatus)status
+{
     MAURLocationAuthorizationStatus authStatus;
-    
+
     switch(status) {
         case kCLAuthorizationStatusRestricted:
         case kCLAuthorizationStatusDenied:

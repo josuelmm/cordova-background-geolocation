@@ -198,6 +198,13 @@ public class ConfigMapper {
         if (jObject.has("stationaryPollFast") && !jObject.isNull("stationaryPollFast")) {
             config.setStationaryPollFast(jObject.getInt("stationaryPollFast"));
         }
+        // v4.5.2: provider hardening
+        if (jObject.has("activityConfidenceThreshold") && !jObject.isNull("activityConfidenceThreshold")) {
+            config.setActivityConfidenceThreshold(jObject.getInt("activityConfidenceThreshold"));
+        }
+        if (jObject.has("maxAcceptedAccuracy") && !jObject.isNull("maxAcceptedAccuracy")) {
+            config.setMaxAcceptedAccuracy((float) jObject.getDouble("maxAcceptedAccuracy"));
+        }
 
         return config;
     }
@@ -288,6 +295,9 @@ public class ConfigMapper {
         json.put("stationaryTimeout", config.getStationaryTimeout());
         json.put("stationaryPollInterval", config.getStationaryPollInterval());
         json.put("stationaryPollFast", config.getStationaryPollFast());
+        // v4.5.2 provider hardening
+        json.put("activityConfidenceThreshold", config.getActivityConfidenceThreshold());
+        json.put("maxAcceptedAccuracy", config.getMaxAcceptedAccuracy());
 
         return json;
     }

@@ -34,6 +34,20 @@ public class BootCompletedReceiver extends BroadcastReceiver {
     @Override
      public void onReceive(Context context, Intent intent) {
         String action = intent != null ? intent.getAction() : null;
+
+        // v4.5.2 — hardening: ignore arbitrary broadcasts directed at this
+        // receiver. Without this, any explicit intent (e.g. a malicious app
+        // targeting our package) could trigger the service auto-start path.
+        // Accept only the canonical boot/package-replaced actions plus the
+        // OEM-specific quick-boot variants used by HTC and Samsung.
+        if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
+                && !"android.intent.action.QUICKBOOT_POWERON".equals(action)
+                && !"com.htc.intent.action.QUICKBOOT_POWERON".equals(action)
+                && !Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
+            Log.w(TAG, "Ignoring unsupported broadcast: " + action);
+            return;
+        }
+
         Log.d(TAG, "Received boot/replace broadcast: " + action);
         ConfigurationDAO dao = DAOFactory.createConfigurationDAO(context);
         Config config = null;

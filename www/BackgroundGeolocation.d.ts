@@ -557,6 +557,35 @@ export interface ConfigureOptions {
   stationaryPollFast?: number;
 
   /**
+   * v4.5.2 — Activity-recognition confidence threshold (0-100). Transitions below this
+   * confidence are ignored, preventing jittery STILL/ACTIVE flips that cause spurious
+   * GPS start/stop bursts. Only used by `ACTIVITY_PROVIDER`.
+   *
+   * iOS confidence is normalized from CMMotionActivityConfidence (Low/Medium/High →
+   * 20/40/80) so the threshold means the same thing on both platforms.
+   *
+   * Platform: Android, iOS
+   * Provider: ACTIVITY
+   * @default 50
+   * @since 4.5.2
+   */
+  activityConfidenceThreshold?: number;
+
+  /**
+   * v4.5.2 — Maximum accepted horizontal accuracy in meters. Fixes whose reported
+   * accuracy is worse than this value are dropped before reaching the JS layer
+   * (and before being persisted / posted / synced).
+   *
+   * Use to filter out indoor GPS noise on Android (`accuracy > 100 m`) or initial
+   * coarse network fixes on iOS. `null` / unset disables the filter.
+   *
+   * Platform: Android, iOS
+   * Provider: all
+   * @since 4.5.2
+   */
+  maxAcceptedAccuracy?: number;
+
+  /**
    * v4.0 Phase 6 — Driver insights configuration. Enables a GPS-based state machine
    * that emits `moving`, `stopped`, `tripStart`, `tripEnd`, `speeding` and
    * `providerChange` events without additional sensors.

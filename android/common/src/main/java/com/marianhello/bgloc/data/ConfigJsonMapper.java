@@ -71,6 +71,9 @@ public final class ConfigJsonMapper {
         j.put("stationaryTimeout", c.getStationaryTimeout());
         j.put("stationaryPollInterval", c.getStationaryPollInterval());
         j.put("stationaryPollFast", c.getStationaryPollFast());
+        // v4.5.2: provider hardening knobs
+        j.put("activityConfidenceThreshold", c.getActivityConfidenceThreshold());
+        j.put("maxAcceptedAccuracy", c.getMaxAcceptedAccuracy());
 
         if (c.getHttpHeaders() != null) {
             j.put("httpHeaders", new JSONObject(c.getHttpHeaders()));
@@ -149,6 +152,9 @@ public final class ConfigJsonMapper {
         if (j.has("stationaryTimeout") && !j.isNull("stationaryTimeout")) c.setStationaryTimeout(j.getInt("stationaryTimeout"));
         if (j.has("stationaryPollInterval") && !j.isNull("stationaryPollInterval")) c.setStationaryPollInterval(j.getInt("stationaryPollInterval"));
         if (j.has("stationaryPollFast") && !j.isNull("stationaryPollFast")) c.setStationaryPollFast(j.getInt("stationaryPollFast"));
+        // v4.5.2
+        if (j.has("activityConfidenceThreshold") && !j.isNull("activityConfidenceThreshold")) c.setActivityConfidenceThreshold(j.getInt("activityConfidenceThreshold"));
+        if (j.has("maxAcceptedAccuracy") && !j.isNull("maxAcceptedAccuracy")) c.setMaxAcceptedAccuracy((float) j.getDouble("maxAcceptedAccuracy"));
 
         if (has(j, "httpHeaders")) c.setHttpHeaders(jsonToHashMap(j.getJSONObject("httpHeaders")));
         if (has(j, "queryParams")) c.setQueryParams(jsonToHashMap(j.getJSONObject("queryParams")));

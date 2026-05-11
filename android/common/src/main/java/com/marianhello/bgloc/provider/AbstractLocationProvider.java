@@ -89,10 +89,28 @@ public abstract class AbstractLocationProvider implements LocationProvider {
     }
 
     /**
+     * v4.5.2: drop fixes whose horizontal accuracy is worse than the configured
+     * maxAcceptedAccuracy threshold. Returns true when the location must be
+     * discarded.
+     */
+    private boolean exceedsMaxAcceptedAccuracy(Location location) {
+        if (location == null || mConfig == null) return false;
+        Float max = mConfig.getMaxAcceptedAccuracy();
+        if (max == null || max <= 0) return false;
+        if (!location.hasAccuracy()) return false;
+        if (location.getAccuracy() > max) {
+            logger.debug("Dropping fix: accuracy={} exceeds maxAcceptedAccuracy={}", location.getAccuracy(), max);
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Handle location as recorder by provider
      * @param location
      */
     protected void handleLocation (Location location) {
+        if (exceedsMaxAcceptedAccuracy(location)) return;
         playDebugTone(Tone.BEEP);
         if (mDelegate != null) {
             BackgroundLocation bgLocation = new BackgroundLocation(PROVIDER_ID, location);
@@ -108,6 +126,7 @@ public abstract class AbstractLocationProvider implements LocationProvider {
      * @param radius radius of stationary region
      */
     protected void handleStationary (Location location, float radius) {
+        if (exceedsMaxAcceptedAccuracy(location)) return;
         playDebugTone(Tone.LONG_BEEP);
         if (mDelegate != null) {
             BackgroundLocation bgLocation = new BackgroundLocation(PROVIDER_ID, location);
@@ -123,6 +142,7 @@ public abstract class AbstractLocationProvider implements LocationProvider {
      * @param location
      */
     protected void handleStationary (Location location) {
+        if (exceedsMaxAcceptedAccuracy(location)) return;
         playDebugTone(Tone.LONG_BEEP);
         if (mDelegate != null) {
             BackgroundLocation bgLocation = new BackgroundLocation(PROVIDER_ID, location);
@@ -148,6 +168,26 @@ public abstract class AbstractLocationProvider implements LocationProvider {
         }
     }
 
+    /**
+     * v4.5.2: emit a permission-denied error to the delegate (used when a runtime
+     * permission such as ACTIVITY_RECOGNITION is missing on Android 10+).
+     */
+    protected void handlePermissionDenied(String message) {
+        if (mDelegate != null) {
+            mDelegate.onError(new PluginException(message, PluginException.PERMISSION_DENIED_ERROR));
+        }
+    }
+
+    /**
+     * v4.5.2: emit a service-level error to the delegate (used when Google Play
+     * Services is missing/outdated or the OS location service is disabled).
+     */
+    protected void handleServiceError(String message) {
+        if (mDelegate != null) {
+            mDelegate.onError(new PluginException(message, PluginException.SERVICE_ERROR));
+        }
+    }
+
     protected void showDebugToast (String text) {
         if (mConfig.isDebugging()) {
             Toast.makeText(mContext, text, Toast.LENGTH_LONG).show();
@@ -155,7 +195,14 @@ public abstract class AbstractLocationProvider implements LocationProvider {
     }
 
     public Boolean hasMockLocationsEnabled() {
-        return Settings.Secure.getString(mContext.getContentResolver(), android.provider.Settings.Secure.ALLOW_MOCK_LOCATION).equals("1");
+        // v4.5.2: Settings.Secure.getString may return null (key absent on the
+        // device's settings provider). The previous code crashed with NPE because
+        // it called .equals("1") on the returned value. Invert the comparison so
+        // null safely yields false.
+        String value = Settings.Secure.getString(
+                mContext.getContentResolver(),
+                android.provider.Settings.Secure.ALLOW_MOCK_LOCATION);
+        return "1".equals(value);
     }
 
     /**

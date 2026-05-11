@@ -2,7 +2,7 @@
 <plugin xmlns="http://www.phonegap.com/ns/plugins/1.0"
     xmlns:android="http://schemas.android.com/apk/res/android"
     id="cordova-background-geolocation"
-    version="4.5.1">
+    version="4.5.2">
     <name>cordova-background-geolocation</name>
     <description>Cordova Background Geolocation Plugin</description>
     <license>Apache-2.0</license>
@@ -354,14 +354,6 @@
         <source-file src="ios/common/BackgroundGeolocation/MAURUncaughtExceptionLogger.m" />
         <header-file src="ios/common/BackgroundGeolocation/Reachability.h" />
         <source-file src="ios/common/BackgroundGeolocation/Reachability.m" />
-        <header-file src="ios/common/BackgroundGeolocation/SOMotionDetector/SOLocationManager.h" />
-        <source-file src="ios/common/BackgroundGeolocation/SOMotionDetector/SOLocationManager.m" />
-        <header-file src="ios/common/BackgroundGeolocation/SOMotionDetector/SOMotionActivity.h" />
-        <source-file src="ios/common/BackgroundGeolocation/SOMotionDetector/SOMotionActivity.m" />
-        <header-file src="ios/common/BackgroundGeolocation/SOMotionDetector/SOMotionDetector.h" />
-        <source-file src="ios/common/BackgroundGeolocation/SOMotionDetector/SOMotionDetector.m" />
-        <header-file src="ios/common/BackgroundGeolocation/SOMotionDetector/SOStepDetector.h" />
-        <source-file src="ios/common/BackgroundGeolocation/SOMotionDetector/SOStepDetector.m" />
         <header-file src="ios/common/BackgroundGeolocation/SQLQueryBuilder/ext/NSString+ZIMString.h" />
         <source-file src="ios/common/BackgroundGeolocation/SQLQueryBuilder/ext/NSString+ZIMString.m" />
         <header-file src="ios/common/BackgroundGeolocation/SQLQueryBuilder/sql/ZIMSqlDataManipulationCommand.h" />

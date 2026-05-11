@@ -1,6 +1,6 @@
 # Roadmap
 
-Estado actual: **v4.5.1** (Fases 1-8 completadas; 4.3+ añadió events en payload, 4.4 batería, 4.5 persistencia/sync/permisos y optimización de batería).
+Estado actual: **v4.5.2** (Fases 1-8 completadas + provider hardening: confidence threshold, accuracy filter, GMS hybrid, iOS CoreMotion directo).
 
 > **Principio de diseño.** Este es un plugin **global y backend-agnóstico**. No incorpora lógica de Traccar, GPSWox, OsmAnd ni de ninguna API propietaria. La compatibilidad con cualquier backend se logra mediante **transporte HTTP personalizable** (URL templating + body templating + métodos HTTP genéricos). Traccar y similares solo se documentan como **ejemplos de integración**, nunca como modo interno.
 
@@ -14,6 +14,26 @@ Orden de implementación (de mayor a menor impacto):
 6. ✅ Driver insights GPS-only (Fase 6, v4.0)
 7. ✅ Driving events GPS-derived: hardBrake / rapidAcceleration / sharpTurn / possibleCrash (Fase 6.1, v4.1)
 8. ✅ Sensor fusion real con acelerómetro + giroscopio (Fase 8, v4.2)
+9. ✅ Provider hardening v4.5.2 (CMMotionActivityManager iOS, FLP híbrido Android, confidence threshold, accuracy filter, no geozonas)
+
+---
+
+## Mejoras futuras (no programadas) — Roadmap post 4.5.2
+
+Estas no son bugs ni regresiones; son trabajo nuevo opcional. Si se hacen, idealmente cada una en su propia minor.
+
+| Mejora | Prioridad | Notas |
+|---|---|---|
+| `ACTIVITY_PROVIDER` sin Google Play Services | Alta | Hoy depende de `ActivityRecognitionClient` (GMS). Para Huawei/AOSP haría falta un detector propio con `SensorManager` (acelerómetro + giroscopio) — semanas de trabajo. Mientras tanto, usar `DISTANCE_FILTER_PROVIDER` que ya hace el fallback automático. |
+| Android `DISTANCE_FILTER`: estrategia Doze-friendly | Media | Reemplazar el `AlarmManager.setInexactRepeating` por `WorkManager` + `setExactAndAllowWhileIdle` cuando aplique. No urgente: el fallback funciona. |
+| `GeofencingClient` moderno (opcional, solo GMS) | Media | Reintroducción explícita opt-in (no como default) si algún caso de uso lo necesita. Producto decidió no incluirlo por defecto. |
+| RAW Android con política inteligente GPS/Network | Media | Ya escucha ambos; falta priorizar dinámicamente por precisión observada. |
+| Perfiles predefinidos | Alta | `batterySaver`, `balanced`, `vehicle`, `highAccuracy`. Simplifica configuración inicial. |
+| Persistir `pendingDrivingEvents` en SQLite | Baja | Hoy son in-memory; si el proceso muere antes del próximo fix, se pierden. Aceptable por ahora. |
+| Métricas internas de salud | Media | Último fix, último sync, último error, provider activo (FLP / LocationManager), permisos vigentes. |
+| `getDiagnostics()` extendido | Media | Más campos para soporte: modo GMS/fallback, motivo del último error, conteo de fixes filtrados por `maxAcceptedAccuracy`. |
+| iOS tuning por `CMMotionActivity` | Media | Ajustar `desiredAccuracy` / `distanceFilter` según walking / automotive / stationary. |
+| Tests automatizados por provider | Alta | Unit + integration tests para config, sync, payload, provider fallback y templates. |
 
 ---
 

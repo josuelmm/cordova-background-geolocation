@@ -1,5 +1,63 @@
 # Changelog
 
+## [4.5.2](https://github.com/josuelmm/cordova-background-geolocation/tree/4.5.2) (2026-05-10)
+
+### Added — Provider Hardening
+- **`activityConfidenceThreshold` (0-100, default 50)**: las transiciones STILL/ACTIVE por debajo de este umbral se ignoran. Antes, ACTIVITY_PROVIDER reaccionaba a cualquier ruido de baja confianza → bursts espurios de start/stop GPS. iOS normaliza `CMMotionActivityConfidence` (Low/Medium/High → 20/40/80) para que el umbral signifique lo mismo en ambas plataformas.
+- **`maxAcceptedAccuracy` (m, opcional)**: filtro global que descarta fixes con accuracy peor a este valor antes de persistir/POST/emitir al JS. Aplica a los 3 providers.
+
+### Fixed (BLOQUEANTES — ACTIVITY_PROVIDER)
+- **Android `ACTIVITY_PROVIDER` ignoraba `distanceFilter`**: el `LocationRequest.Builder` no llamaba a `setMinUpdateDistanceMeters`. Resultado: con `interval` bajo se bombardeaba al consumidor sin throttling por distancia.
+- **Android sin verificación de Google Play Services**: si GPS estaba ausente/desactualizado, `FusedLocationProviderClient` + `ActivityRecognitionClient` fallaban silenciosamente. Ahora `onCreate` emite `SERVICE_ERROR` y queda inerte.
+- **Android `ACTIVITY_RECOGNITION` denegado en Android 10+**: `requestActivityUpdates` retornaba sin emitir nada y STILL/ACTIVE nunca cambiaba → tracking continuo accidental. Ahora `attachRecorder` emite `PERMISSION_DENIED_ERROR` una vez y desiste.
+- **Android `onConfigure` siempre stop+start**: incluso si la config nueva era idéntica, se dropeaba el callback y se reanudaba. Ahora compara `desiredAccuracy/interval/fastestInterval/distanceFilter/activitiesInterval/stopOnStillActivity` y solo reinicia si cambió algo relevante.
+- **iOS `onLocationsChanged` durante NotMoving emitía DOBLE**: invocaba `onStationaryChanged` + un `onLocationChanged` por cada CLLocation. Resultado: rows "moving" fantasma durante ventana STILL. Ahora retorna tras stationary.
+- **iOS confidence cruda (0/1/2 enum) comparada con threshold 0-100**: cualquier umbral > 2 ignoraba TODO. Normalizada a 0-100 en el provider.
+- **iOS ACTIVITY/RAW/DISTANCE `onDestroy` no soltaba `delegate`**: `MAURLocationManager` y `SOMotionDetector` son singletons compartidos; un swap de provider dejaba el destruido recibiendo callbacks. `delegate = nil` en `onDestroy` + `dealloc`.
+
+### Fixed — Provider Errors
+- **Android DISTANCE_FILTER + RAW `onProviderDisabled`**: era no-op silencioso. Ahora emite `SERVICE_ERROR` cuando no queda ningún provider disponible (el JS puede repromptear al usuario).
+- **iOS `MAURLocationManager` no implementaba el callback iOS 14+ `locationManagerDidChangeAuthorization:`**: solo el legacy deprecado. RAW + ACTIVITY (que usan la singleton) no veían cambios de "Always → While Using" sin reinicio del proceso. Añadido, con guard `@available(iOS 14, *)` en el legacy para evitar doble notificación.
+- **Android RAW solo usaba GPS-o-Network (excluyente)** ignorando `desiredAccuracy`. Ahora `pickProviders` mapea: HIGH (<10 m) → GPS only, BALANCED → GPS+Network, LOW (≥1000 m) → Network only. Suscripción simultánea cuando ambos son útiles.
+- **`AbstractLocationProvider` warning si `stopOnStillActivity: false` con ACTIVITY_PROVIDER**: el provider depende del state machine STILL/ACTIVE; con eso desactivado tracking continuo accidental. Warning en logcat.
+
+### Internal
+- `AbstractLocationProvider` ahora expone `handlePermissionDenied(msg)` y `handleServiceError(msg)` para que los providers emitan `PluginException` sin tocar `mDelegate` directamente.
+
+### Fixed (post-revisión 4.5.2, cuarta iteración — hardening)
+- **`BootCompletedReceiver` ahora valida el `intent.getAction()`**: el receiver está declarado `exported="true"` para recibir `BOOT_COMPLETED` del sistema; sin validar la action, una app maliciosa podría enviarle un intent explícito y disparar el auto-start del servicio. Ahora solo acepta `BOOT_COMPLETED`, `MY_PACKAGE_REPLACED`, y los quickboot OEM (HTC/Samsung); lo demás se ignora con un log warn.
+
+### Fixed (post-revisión 4.5.2, tercera iteración)
+- **iOS `ACTIVITY_PROVIDER` no arrancaba GPS si la app abría con el usuario quieto**: `onStart` subscribía a `CMMotionActivityManager` pero NO llamaba `startTracking`. Si CoreMotion disparaba STILL antes del primer fix, `handleActivityUpdate` (cuya regla es "ACTIVE → start") nunca arrancaba el location manager, así que no llegaba ningún fix y el `onStationaryChanged` inicial nunca se emitía. Restaurado el patrón del SOMotionDetector legacy: `startTracking` se invoca inmediatamente al `onStart`. Si CoreMotion confirma STILL después, el primer fix dispara `onStationaryChanged` + `stopTracking` automáticamente — el consumo de batería sigue acotado.
+
+### Fixed (post-revisión 4.5.2, segunda iteración)
+- **iOS `MAURActivityLocationProvider` UNKNOWN seguía mutando `lastMotionType`**: en la corrección anterior el `return` por UNKNOWN ocurría DESPUÉS de actualizar `lastMotionType`. Si la secuencia era STILL → UNKNOWN, el próximo fix ya no se trataba como stationary porque `lastMotionType` había pasado a `Unknown`. Ahora el `return` es lo primero — UNKNOWN no toca estado ni emite (silenciado además para no spamear consecutivos).
+- **Android `singleUpdatePI` con `FLAG_IMMUTABLE` en API 31+**: `LocationManager.requestSingleUpdate(provider, PendingIntent)` rellena la `Location` en los extras del intent en delivery; con `FLAG_IMMUTABLE` el OS bloquea esa población y el receiver nunca veía el fix. Solo el `singleUpdatePI` se cambió a `FLAG_MUTABLE`; los demás siguen `IMMUTABLE` (alarms y monitor reciben PI sin payload).
+- **`AbstractLocationProvider.hasMockLocationsEnabled` NPE**: `Settings.Secure.getString(...)` puede devolver `null` (clave ausente en el provider de Settings del dispositivo); el `.equals("1")` crasheaba. Invertido a `"1".equals(value)` — null-safe.
+- **DISTANCE_FILTER legacy ahora suscribe GPS+Network simultáneo en modo moving normal**: antes elegía uno (GPS-o-Network excluyente). En Androids baratos/vehiculares donde GPS está "enabled" pero tarda en dar fix, esto perdía la oportunidad de un fix rápido por Network. Burst mode (acquisition) ya lo hacía; ahora moving también.
+
+### Fixed (post-revisión 4.5.2)
+- **iOS `MAURActivityLocationProvider` trataba UNKNOWN como NotMoving**: el branch `activity.stationary || activity.unknown` colapsaba ambos casos a `MAURMotionTypeNotMoving`, lo que paraba GPS al recibir un fix de baja confianza ("unknown" puede llegar con confianza alta). Ahora UNKNOWN se procesa como un tipo aparte: emite `onActivityChanged` pero **no toca el estado de tracking** y **no actualiza `lastMotionType`** (así un STILL/ACTIVE posterior produce la transición correcta). Contradecía el propio comentario "UNKNOWN keeps previous behavior (don't pause on uncertainty)".
+- **README desactualizado**: la tabla de `locationProvider` decía que `DISTANCE_FILTER_PROVIDER` era "Pure Android LocationManager" y "Works without Google Play Services". Actualizada a "hybrid (v4.5.2+)": usa FLP cuando hay Play Services, fallback a LocationManager si no.
+- **README caveats v4.5.2 añadidos**:
+  - `maxAcceptedAccuracy` está apagado por defecto (`null`); recomendaciones por escenario.
+  - `ACTIVITY_PROVIDER` sin `ACTIVITY_RECOGNITION` degrada a tracking continuo (caveat).
+
+### Refactor — Provider internals (sin cambio de API JS, sin pérdida de cobertura)
+- **iOS `ACTIVITY_PROVIDER` migrado a `CMMotionActivityManager` directo** (CoreMotion). Se eliminó la dependencia `SOMotionDetector` (sources + plugin.xml entries). Threading propio (NSOperationQueue) y manejo de permiso "Motion & Fitness" denegado (iOS 11+: `CMMotionActivityManager.authorizationStatus`) con emisión de error.
+- **Android `DISTANCE_FILTER_PROVIDER` ahora es híbrido**: detecta Google Play Services en `onCreate` y elige backend en runtime.
+  - **Play Services disponible** → `FusedLocationProviderClient` + `LocationCallback` (mezcla GPS+Network, mejor batería, `setMinUpdateDistanceMeters`/Priority).
+  - **Play Services ausente** (Huawei/HMS, AOSP, ChinaROMs) → fallback a `android.location.LocationManager` + `LocationListener` (preservando el comportamiento previo a v4.5.2 — el plugin funciona en cualquier Android).
+  - **Eliminado el path de `addProximityAlert`** (decisión de producto: sin geozonas) en ambas rutas; la salida del estado stationary se detecta exclusivamente por polling (FLP `setMaxUpdates(1)` o `LocationManager.requestSingleUpdate`).
+- `DISTANCE_FILTER_PROVIDER` emite `SERVICE_ERROR` cuando ni GPS ni Network están habilitados al `setPace`.
+
+### Matriz Play Services (Android)
+| Provider | Play Services | Comportamiento |
+|----------|---------------|----------------|
+| `RAW_PROVIDER` | No requiere | OS LocationManager directo (GPS+Network simultáneo según `desiredAccuracy`). |
+| `DISTANCE_FILTER_PROVIDER` | Opcional | FLP si está disponible, LocationManager si no. Auto. |
+| `ACTIVITY_PROVIDER` | Requerido | Sin fallback (depende de `ActivityRecognitionClient`). En dispositivos sin Play Services usar `DISTANCE_FILTER` o `RAW`. |
+
 ## [4.5.1](https://github.com/josuelmm/cordova-background-geolocation/tree/4.5.1) (2026-05-09)
 
 ### Fixed (BLOQUEANTES)

@@ -1016,6 +1016,17 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
 - (void) onStationaryChanged:(MAURLocation *)location
 {
     DDLogDebug(@"%@ #onStationaryChanged", TAG);
+
+    // v4.5.2: drop stationary fixes whose accuracy is worse than the configured
+    // maxAcceptedAccuracy threshold. Mirrors the Android filter in
+    // AbstractLocationProvider.handleStationary.
+    NSNumber *maxAcc = [self getConfig].maxAcceptedAccuracy;
+    if (maxAcc != nil && maxAcc.doubleValue > 0 && location.accuracy != nil
+            && [location.accuracy doubleValue] > maxAcc.doubleValue) {
+        DDLogDebug(@"%@ dropping stationary fix accuracy=%@ exceeds maxAcceptedAccuracy=%@", TAG, location.accuracy, maxAcc);
+        return;
+    }
+
     stationaryLocation = location;
 
     // v4.5.1 — enrichment moved into MAURPostLocationTask.add: so pending events / battery
@@ -1046,6 +1057,16 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
 - (void) onLocationChanged:(MAURLocation *)location
 {
     DDLogDebug(@"%@ #onLocationChanged %@", TAG, location);
+
+    // v4.5.2: drop fixes whose accuracy is worse than maxAcceptedAccuracy.
+    // Mirrors AbstractLocationProvider.handleLocation on Android.
+    NSNumber *maxAcc = [self getConfig].maxAcceptedAccuracy;
+    if (maxAcc != nil && maxAcc.doubleValue > 0 && location.accuracy != nil
+            && [location.accuracy doubleValue] > maxAcc.doubleValue) {
+        DDLogDebug(@"%@ dropping fix accuracy=%@ exceeds maxAcceptedAccuracy=%@", TAG, location.accuracy, maxAcc);
+        return;
+    }
+
     stationaryLocation = nil;
     lastReceivedLocation = location; // v3.5 Phase 4: cached for heartbeat payload
 

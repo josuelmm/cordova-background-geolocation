@@ -94,6 +94,11 @@ public class Config implements Parcelable
     private Integer stationaryPollInterval;
     /** Aggressive poll interval while stationary (ms). Default 60_000. */
     private Integer stationaryPollFast;
+    // v4.5.2 — provider hardening
+    /** 0-100. Activity-recognition transitions below this confidence are ignored. Default 50. */
+    private Integer activityConfidenceThreshold;
+    /** Discard fixes whose `accuracy` (m) is worse than this. `null` (default) disables the filter. */
+    private Float maxAcceptedAccuracy;
 
     /** v4.0 Phase 6 + v4.1: driver-insights configuration. Plain holder; no Parcelable to keep this class diff small. */
     public static class DrivingEventsOptions {
@@ -165,6 +170,8 @@ public class Config implements Parcelable
         this.stationaryTimeout = config.stationaryTimeout;
         this.stationaryPollInterval = config.stationaryPollInterval;
         this.stationaryPollFast = config.stationaryPollFast;
+        this.activityConfidenceThreshold = config.activityConfidenceThreshold;
+        this.maxAcceptedAccuracy = config.maxAcceptedAccuracy;
         if (config.drivingEvents != null) {
             DrivingEventsOptions de = new DrivingEventsOptions();
             de.enabled            = config.drivingEvents.enabled;
@@ -274,6 +281,9 @@ public class Config implements Parcelable
         setStationaryTimeout((Integer) in.readValue(null));
         setStationaryPollInterval((Integer) in.readValue(null));
         setStationaryPollFast((Integer) in.readValue(null));
+        // v4.5.2 provider hardening
+        setActivityConfidenceThreshold((Integer) in.readValue(null));
+        setMaxAcceptedAccuracy((Float) in.readValue(null));
         // v4.5.1 — pass the plugin's classloader so getSerializable() can deserialize
         // LocationTemplate / HashMap subclasses across IPC boundaries (e.g. SyncService :sync process).
         Bundle bundle = in.readBundle(Config.class.getClassLoader());
@@ -328,6 +338,8 @@ public class Config implements Parcelable
         config.stationaryTimeout = 5 * 60 * 1000;
         config.stationaryPollInterval = 3 * 60 * 1000;
         config.stationaryPollFast = 60 * 1000;
+        config.activityConfidenceThreshold = 50; // v4.5.2: ignore <50% confidence transitions
+        config.maxAcceptedAccuracy = null;       // v4.5.2: off by default (no JS regression)
 
         return config;
     }
@@ -402,6 +414,9 @@ public class Config implements Parcelable
         out.writeValue(getStationaryTimeout());
         out.writeValue(getStationaryPollInterval());
         out.writeValue(getStationaryPollFast());
+        // v4.5.2
+        out.writeValue(getActivityConfidenceThreshold());
+        out.writeValue(getMaxAcceptedAccuracy());
         Bundle bundle = new Bundle();
         bundle.putSerializable("httpHeaders", getHttpHeaders());
         bundle.putSerializable("queryParams", getQueryParams());
@@ -816,6 +831,10 @@ public class Config implements Parcelable
     public void setStationaryPollInterval(Integer ms) { this.stationaryPollInterval = ms; }
     @Nullable public Integer getStationaryPollFast() { return stationaryPollFast; }
     public void setStationaryPollFast(Integer ms) { this.stationaryPollFast = ms; }
+    @Nullable public Integer getActivityConfidenceThreshold() { return activityConfidenceThreshold; }
+    public void setActivityConfidenceThreshold(Integer v) { this.activityConfidenceThreshold = v; }
+    @Nullable public Float getMaxAcceptedAccuracy() { return maxAcceptedAccuracy; }
+    public void setMaxAcceptedAccuracy(Float v) { this.maxAcceptedAccuracy = v; }
 
     public boolean hasShowTime() {
         return showTime != null;
@@ -1120,6 +1139,9 @@ public class Config implements Parcelable
         if (config2.stationaryTimeout != null) merger.setStationaryTimeout(config2.stationaryTimeout);
         if (config2.stationaryPollInterval != null) merger.setStationaryPollInterval(config2.stationaryPollInterval);
         if (config2.stationaryPollFast != null) merger.setStationaryPollFast(config2.stationaryPollFast);
+        // v4.5.2
+        if (config2.activityConfidenceThreshold != null) merger.setActivityConfidenceThreshold(config2.activityConfidenceThreshold);
+        if (config2.maxAcceptedAccuracy != null) merger.setMaxAcceptedAccuracy(config2.maxAcceptedAccuracy);
 
         return merger;
     }
