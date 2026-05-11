@@ -44,6 +44,8 @@ enum {
 @property NSString *mockLocationPolicy;       // allow | flag | drop (default allow)
 // v4.0 Phase 6: driver insights — passed through as a dictionary; the facade reads keys at runtime.
 @property NSDictionary *drivingEvents;
+// v4.4: stamp battery percentage + charging state onto every location (default ON).
+@property NSNumber *includeBattery;
 @property NSNumber *_saveBatteryOnBackground;
 @property NSNumber *maxLocations;
 @property NSNumber *_pauseLocationUpdates;

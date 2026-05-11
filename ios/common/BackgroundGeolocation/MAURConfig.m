@@ -12,7 +12,7 @@
 
 @implementation MAURConfig 
 
-@synthesize stationaryRadius, distanceFilter, desiredAccuracy, _debug, activityType, activitiesInterval, _stopOnTerminate, url, syncUrl, syncThreshold, syncEnabled, httpHeaders, httpMethod, syncHttpMethod, httpMode, syncMode, queryParams, _showsBackgroundLocationIndicator, heartbeatInterval, mockLocationPolicy, drivingEvents, _saveBatteryOnBackground, maxLocations, _pauseLocationUpdates, locationProvider, _template;
+@synthesize stationaryRadius, distanceFilter, desiredAccuracy, _debug, activityType, activitiesInterval, _stopOnTerminate, url, syncUrl, syncThreshold, syncEnabled, httpHeaders, httpMethod, syncHttpMethod, httpMode, syncMode, queryParams, _showsBackgroundLocationIndicator, heartbeatInterval, mockLocationPolicy, drivingEvents, includeBattery, _saveBatteryOnBackground, maxLocations, _pauseLocationUpdates, locationProvider, _template;
 
 -(instancetype) initWithDefaults {
     self = [super init];
@@ -117,6 +117,9 @@
     if ([config[@"drivingEvents"] isKindOfClass:[NSDictionary class]]) {
         instance.drivingEvents = config[@"drivingEvents"];
     }
+    if (isNotNull(config[@"includeBattery"])) {
+        instance.includeBattery = config[@"includeBattery"];
+    }
     if (isNotNull(config[@"saveBatteryOnBackground"])) {
         instance._saveBatteryOnBackground = config[@"saveBatteryOnBackground"];
     }
@@ -215,6 +218,9 @@
     if (newConfig.drivingEvents != nil) {
         merger.drivingEvents = newConfig.drivingEvents;
     }
+    if (newConfig.includeBattery != nil) {
+        merger.includeBattery = newConfig.includeBattery;
+    }
     if ([newConfig hasSaveBatteryOnBackground]) {
         merger._saveBatteryOnBackground = newConfig._saveBatteryOnBackground;
     }
@@ -259,6 +265,7 @@
         copy.heartbeatInterval = heartbeatInterval;
         copy.mockLocationPolicy = mockLocationPolicy;
         copy.drivingEvents = drivingEvents;
+        copy.includeBattery = includeBattery;
         copy._saveBatteryOnBackground = _saveBatteryOnBackground;
         copy.maxLocations = maxLocations;
         copy._pauseLocationUpdates = _pauseLocationUpdates;
@@ -512,9 +519,15 @@
              @"altitude": @"@altitude",
              @"latitude": @"@latitude",
              @"longitude": @"@longitude",
-             @"provider": @"provider",
+             @"provider": @"@provider",          // v4.5.1 — was literal "provider" (bug)
              @"locationProvider": @"@locationProvider",
              @"radius": @"@radius",
+             // v4.5.1 — README promete events/battery/isCharging en payload default. Sin esto,
+             // el template default que se usa siempre que la app no configura postTemplate omitía
+             // estos campos al serializar via toResultFromTemplate.
+             @"events": @"@events",
+             @"battery": @"@battery",
+             @"isCharging": @"@isCharging",
              };
 }
 
@@ -576,6 +589,7 @@
     if (self.heartbeatInterval != nil) [dict setObject:self.heartbeatInterval forKey:@"heartbeatInterval"];
     if (self.mockLocationPolicy != nil) [dict setObject:self.mockLocationPolicy forKey:@"mockLocationPolicy"];
     if (self.drivingEvents != nil) [dict setObject:self.drivingEvents forKey:@"drivingEvents"];
+    if (self.includeBattery != nil) [dict setObject:self.includeBattery forKey:@"includeBattery"];
     if ([self hasStationaryRadius]) [dict setObject:self.stationaryRadius forKey:@"stationaryRadius"];
     if ([self hasDistanceFilter]) [dict setObject:self.distanceFilter forKey:@"distanceFilter"];
     if ([self hasDesiredAccuracy]) [dict setObject:self.desiredAccuracy forKey:@"desiredAccuracy"];

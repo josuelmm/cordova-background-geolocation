@@ -36,6 +36,7 @@ import android.os.Message;
 import android.os.PowerManager;
 import android.os.Process;
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.marianhello.bgloc.Config;
@@ -179,6 +180,13 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     private com.marianhello.bgloc.sensor.SensorFusionDetector mSensorFusion;
     /** v4.2 Phase 8: cached tripActive state so hot-reload can re-inject it. */
     private volatile boolean mDrivingTripActive = false;
+    /** v4.3: events fired without a simultaneous fix (providerChange, sensor crash, phone usage,
+     *  manual SOS) buffered here and flushed onto the next location's `events` array.
+     *  v4.4.1: capped at PENDING_DRIVING_EVENTS_MAX entries (oldest evicted) and entries older
+     *  than PENDING_DRIVING_EVENTS_TTL_MS are dropped at flush time. */
+    private final org.json.JSONArray mPendingDrivingEvents = new org.json.JSONArray();
+    private static final int  PENDING_DRIVING_EVENTS_MAX = 20;
+    private static final long PENDING_DRIVING_EVENTS_TTL_MS = 60_000L;
     private static final long WATCHDOG_INTERVAL_MS = 60_000L;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mWatchdogRunnable = new Runnable() {
@@ -188,12 +196,23 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             if (!Boolean.TRUE.equals(mConfig.getEnableWatchdog())) return;
             long now = System.currentTimeMillis();
             if (mLastLocationTime > 0 && (now - mLastLocationTime) > WATCHDOG_INTERVAL_MS) {
-                logger.info("Location watchdog: no update in {}s, restarting provider", WATCHDOG_INTERVAL_MS / 1000);
-                try {
-                    mProvider.onStop();
-                    mProvider.onStart();
-                } catch (Exception e) {
-                    logger.warn("Watchdog restart failed", e);
+                // v4.5.1: when drivingEvents is enabled, treat "no fixes" while NOT tripActive as
+                // intentional stationary → don't restart (saves battery). When drivingEvents is
+                // disabled (the plugin has no notion of "trip"), keep the legacy behaviour of
+                // restarting on every stale window.
+                Config.DrivingEventsOptions de = mConfig.getDrivingEvents();
+                boolean drivingEnabled = de != null && de.enabled;
+                boolean shouldRestart = !drivingEnabled || mDrivingTripActive;
+                if (shouldRestart) {
+                    logger.info("Location watchdog: no update in {}s, restarting provider", WATCHDOG_INTERVAL_MS / 1000);
+                    try {
+                        mProvider.onStop();
+                        mProvider.onStart();
+                    } catch (Exception e) {
+                        logger.warn("Watchdog restart failed", e);
+                    }
+                } else {
+                    logger.debug("Location watchdog: stationary (no active trip); skipping restart");
                 }
             }
             mMainHandler.postDelayed(this, WATCHDOG_INTERVAL_MS);
@@ -476,9 +495,12 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 mWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG);
             }
         }
-        if (mWakeLock != null && !mWakeLock.isHeld()) {
+        // v4.5.1: only hold a permanent CPU wake lock when wakeLockMode == 'always'.
+        // Default 'posting' acquires only briefly during onLocation/post; 'none' never.
+        String wlMode = mConfig.getWakeLockMode() != null ? mConfig.getWakeLockMode() : "posting";
+        if ("always".equals(wlMode) && mWakeLock != null && !mWakeLock.isHeld()) {
             mWakeLock.acquire();
-            logger.debug("Wake lock acquired");
+            logger.debug("Wake lock acquired (mode=always)");
         }
 
         if (Boolean.TRUE.equals(mConfig.getEnableWatchdog())) {
@@ -536,18 +558,21 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         mDrivingDetector = new com.marianhello.bgloc.driving.DrivingEventsDetector(
                 new com.marianhello.bgloc.driving.DrivingEventsDetector.Listener() {
                     @Override public void onMoving(BackgroundLocation l) {
+                        attachDrivingEvent(l, "moving", null);
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_MOVING);
                         if (l != null) b.putParcelable("payload", l);
                         broadcastMessage(b);
                     }
                     @Override public void onStopped(BackgroundLocation l) {
+                        attachDrivingEvent(l, "stopped", null);
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_STOPPED);
                         if (l != null) b.putParcelable("payload", l);
                         broadcastMessage(b);
                     }
                     @Override public void onTripStart(BackgroundLocation l) {
+                        attachDrivingEvent(l, "tripStart", null);
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_TRIP_START);
                         if (l != null) b.putParcelable("payload", l);
@@ -556,6 +581,9 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                         if (mSensorFusion != null) mSensorFusion.setTripActive(true);
                     }
                     @Override public void onTripEnd(BackgroundLocation l, double distance, long durationMs) {
+                        org.json.JSONObject extra = new org.json.JSONObject();
+                        try { extra.put("distance", distance); extra.put("durationMs", durationMs); } catch (org.json.JSONException ignored) {}
+                        attachDrivingEvent(l, "tripEnd", extra);
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_TRIP_END);
                         if (l != null) b.putParcelable("payload", l);
@@ -566,6 +594,9 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                         if (mSensorFusion != null) mSensorFusion.setTripActive(false);
                     }
                     @Override public void onSpeeding(BackgroundLocation l, double speedKmh, double limitKmh) {
+                        org.json.JSONObject extra = new org.json.JSONObject();
+                        try { extra.put("speedKmh", speedKmh); extra.put("limitKmh", limitKmh); } catch (org.json.JSONException ignored) {}
+                        attachDrivingEvent(l, "speeding", extra);
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_SPEEDING);
                         if (l != null) b.putParcelable("payload", l);
@@ -574,12 +605,19 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                         broadcastMessage(b);
                     }
                     @Override public void onProviderChange(String provider) {
+                        // No location associated; buffer for next fix.
+                        org.json.JSONObject ev = new org.json.JSONObject();
+                        try { ev.put("type", "providerChange"); ev.put("provider", provider != null ? provider : ""); ev.put("time", System.currentTimeMillis()); } catch (org.json.JSONException ignored) {}
+                        enqueuePendingDrivingEvent(ev);
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_PROVIDER_CHANGE);
                         b.putString("provider", provider != null ? provider : "");
                         broadcastMessage(b);
                     }
                     @Override public void onHardBrake(BackgroundLocation l, double decelMps2) {
+                        org.json.JSONObject extra = new org.json.JSONObject();
+                        try { extra.put("value", decelMps2); } catch (org.json.JSONException ignored) {}
+                        attachDrivingEvent(l, "hardBrake", extra);
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_HARD_BRAKE);
                         if (l != null) b.putParcelable("payload", l);
@@ -587,6 +625,9 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                         broadcastMessage(b);
                     }
                     @Override public void onRapidAcceleration(BackgroundLocation l, double accelMps2) {
+                        org.json.JSONObject extra = new org.json.JSONObject();
+                        try { extra.put("value", accelMps2); } catch (org.json.JSONException ignored) {}
+                        attachDrivingEvent(l, "rapidAcceleration", extra);
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_RAPID_ACCELERATION);
                         if (l != null) b.putParcelable("payload", l);
@@ -594,6 +635,9 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                         broadcastMessage(b);
                     }
                     @Override public void onSharpTurn(BackgroundLocation l, double degPerSec) {
+                        org.json.JSONObject extra = new org.json.JSONObject();
+                        try { extra.put("value", degPerSec); } catch (org.json.JSONException ignored) {}
+                        attachDrivingEvent(l, "sharpTurn", extra);
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_SHARP_TURN);
                         if (l != null) b.putParcelable("payload", l);
@@ -601,6 +645,9 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                         broadcastMessage(b);
                     }
                     @Override public void onPossibleCrash(BackgroundLocation l, double velocityDropKmh) {
+                        org.json.JSONObject extra = new org.json.JSONObject();
+                        try { extra.put("value", velocityDropKmh); extra.put("source", "gps"); } catch (org.json.JSONException ignored) {}
+                        attachDrivingEvent(l, "possibleCrash", extra);
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_POSSIBLE_CRASH);
                         if (l != null) b.putParcelable("payload", l);
@@ -638,6 +685,15 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         com.marianhello.bgloc.sensor.SensorFusionDetector.Listener l =
                 new com.marianhello.bgloc.sensor.SensorFusionDetector.Listener() {
                     @Override public void onSensorCrash(BackgroundLocation lastLocation, double impactG) {
+                        // Buffer for next fix (sensor events fire async to GPS).
+                        try {
+                            org.json.JSONObject ev = new org.json.JSONObject();
+                            ev.put("type", "possibleCrash");
+                            ev.put("value", impactG);
+                            ev.put("source", "sensor");
+                            ev.put("time", System.currentTimeMillis());
+                            enqueuePendingDrivingEvent(ev);
+                        } catch (org.json.JSONException ignored) {}
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_POSSIBLE_CRASH);
                         if (lastLocation != null) b.putParcelable("payload", lastLocation);
@@ -646,6 +702,12 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                         broadcastMessage(b);
                     }
                     @Override public void onPhoneUsageWhileDriving(BackgroundLocation lastLocation) {
+                        try {
+                            org.json.JSONObject ev = new org.json.JSONObject();
+                            ev.put("type", "phoneUsageWhileDriving");
+                            ev.put("time", System.currentTimeMillis());
+                            enqueuePendingDrivingEvent(ev);
+                        } catch (org.json.JSONException ignored) {}
                         Bundle b = new Bundle();
                         b.putInt("action", MSG_ON_PHONE_USAGE_WHILE_DRIVING);
                         if (lastLocation != null) b.putParcelable("payload", lastLocation);
@@ -671,6 +733,89 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             mSensorFusion.setLastLocation(mLastReceivedLocation);
         }
         if (sIsRunning) mSensorFusion.start();
+    }
+
+    /** v4.3 — append a {type, time, ...extra} entry to the location's events array. */
+    private void attachDrivingEvent(BackgroundLocation loc, String type, org.json.JSONObject extra) {
+        if (loc == null || type == null) return;
+        try {
+            org.json.JSONObject ev = new org.json.JSONObject();
+            ev.put("type", type);
+            ev.put("time", System.currentTimeMillis());
+            if (extra != null) {
+                java.util.Iterator<String> keys = extra.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    ev.put(k, extra.opt(k));
+                }
+            }
+            loc.addDrivingEvent(ev);
+        } catch (org.json.JSONException ignored) {}
+    }
+
+    /** v4.5.1 — acquire a short, time-bounded wake lock when wakeLockMode is 'posting'. */
+    private void acquireWakeLockForPosting() {
+        if (mWakeLock == null || mConfig == null) return;
+        String mode = mConfig.getWakeLockMode() != null ? mConfig.getWakeLockMode() : "posting";
+        if (!"posting".equals(mode)) return;
+        try {
+            // Bounded: SQLite write + HTTP POST should finish well within 30 s.
+            if (!mWakeLock.isHeld()) mWakeLock.acquire(30_000L);
+        } catch (Throwable ignored) { /* best-effort */ }
+    }
+
+    /** v4.4 — read current device battery via sticky broadcast and stamp it onto the location.
+     *  No permission required. Sticky broadcast returns instantly without blocking.
+     *  v4.4.1: route through the application context to bypass our own registerReceiver()
+     *  override (which forces RECEIVER_NOT_EXPORTED + handler — incompatible with sticky-only reads). */
+    private void attachBatterySnapshot(BackgroundLocation loc) {
+        if (loc == null) return;
+        try {
+            android.content.IntentFilter filter = new android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED);
+            android.content.Intent batteryStatus = getApplicationContext().registerReceiver(null, filter);
+            if (batteryStatus == null) return;
+            int level = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+            int scale = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1);
+            if (level >= 0 && scale > 0) {
+                loc.setBatteryLevel((int) Math.round(level * 100.0 / scale));
+            }
+            int status = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1);
+            boolean charging = (status == android.os.BatteryManager.BATTERY_STATUS_CHARGING
+                    || status == android.os.BatteryManager.BATTERY_STATUS_FULL);
+            loc.setCharging(charging);
+        } catch (Throwable ignored) { /* best-effort; never fail the fix */ }
+    }
+
+    /** v4.3 — drain pending events (those fired without a simultaneous fix) onto this location.
+     *  v4.4.1: drop entries older than PENDING_DRIVING_EVENTS_TTL_MS so we don't anexar an event
+     *  whose context (location, speed, etc.) is no longer relevant. */
+    private void flushPendingDrivingEvents(BackgroundLocation loc) {
+        if (loc == null) return;
+        long now = System.currentTimeMillis();
+        synchronized (mPendingDrivingEvents) {
+            int n = mPendingDrivingEvents.length();
+            if (n == 0) return;
+            for (int i = 0; i < n; i++) {
+                org.json.JSONObject ev = mPendingDrivingEvents.optJSONObject(i);
+                if (ev == null) continue;
+                long t = ev.optLong("time", now);
+                if (now - t <= PENDING_DRIVING_EVENTS_TTL_MS) {
+                    loc.addDrivingEvent(ev);
+                }
+            }
+            for (int i = n - 1; i >= 0; i--) mPendingDrivingEvents.remove(i);
+        }
+    }
+
+    /** v4.4.1 — append to pending events with cap (oldest evicted). */
+    private void enqueuePendingDrivingEvent(org.json.JSONObject ev) {
+        if (ev == null) return;
+        synchronized (mPendingDrivingEvents) {
+            while (mPendingDrivingEvents.length() >= PENDING_DRIVING_EVENTS_MAX) {
+                mPendingDrivingEvents.remove(0);
+            }
+            mPendingDrivingEvents.put(ev);
+        }
     }
 
     @Override
@@ -725,8 +870,9 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
      * Required before starting a location foreground service on API 34+.
      */
     private boolean hasLocationPermission() {
-        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        // v4.5.1 — ContextCompat handles API < 23 (permissions granted at install time).
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
     /**
@@ -791,16 +937,32 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 mProvider.onCommand(LocationProvider.CMD_SWITCH_MODE,
                         LocationProvider.FOREGROUND_MODE);
             }
-            // Android 14+ (API 34): type must match the merged manifest. Read it dynamically; if unknown, do not start.
-            if (Build.VERSION.SDK_INT >= 34) {
-                int type = getManifestForegroundServiceType();
-                if (type == 0) {
-                    logger.error("Cannot start foreground: manifest foregroundServiceType missing or unreadable");
+            // Android 14+ (API 34): type is required. Android 12-13 (API 31-33): type accepted (preferred).
+            // FOREGROUND_SERVICE_TYPE_LOCATION = 0x00000008. Resolve from merged manifest first;
+            // if reflection fails or manifest merge missed the attribute, fall back to LOCATION
+            // hardcoded so the FGS still promotes (otherwise: no notification, no background tracking).
+            try {
+                if (Build.VERSION.SDK_INT >= 30) {
+                    int type = getManifestForegroundServiceType();
+                    if (type == 0) {
+                        // Defensive fallback: every consumer of this plugin requires location FGS.
+                        // Logging at warn so the failure is visible without breaking the service.
+                        logger.warn("Manifest foregroundServiceType unreadable; defaulting to LOCATION (0x8). "
+                                + "Verify merged AndroidManifest has foregroundServiceType=\"location\"." );
+                        type = 0x00000008; // ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                    }
+                    super.startForeground(NOTIFICATION_ID, notification, type);
+                } else {
+                    super.startForeground(NOTIFICATION_ID, notification);
+                }
+            } catch (Throwable t) {
+                logger.error("startForeground threw {}; retrying without type", t.getMessage());
+                try {
+                    super.startForeground(NOTIFICATION_ID, notification);
+                } catch (Throwable t2) {
+                    logger.error("startForeground retry failed: {}", t2.getMessage());
                     return;
                 }
-                super.startForeground(NOTIFICATION_ID, notification, type);
-            } else {
-                super.startForeground(NOTIFICATION_ID, notification);
             }
             mIsInForeground = true;
             scheduleNotificationUpdater();
@@ -955,6 +1117,26 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                     if (!equalsDrivingEvents(prevDe, newDe)) {
                         configureDrivingDetector();
                     }
+                    // v4.5.1 — hot-reload wakeLockMode: when transitioning between always /
+                    // posting / none, the existing permanent lock (if any) must be released,
+                    // or a new permanent lock acquired. Without this, switching mode at runtime
+                    // either leaked CPU or left the service running without the requested lock.
+                    String prevWl = currentConfig.getWakeLockMode() != null ? currentConfig.getWakeLockMode() : "posting";
+                    String newWl  = mConfig.getWakeLockMode()      != null ? mConfig.getWakeLockMode()      : "posting";
+                    if (!prevWl.equals(newWl) && mWakeLock != null) {
+                        if ("always".equals(newWl)) {
+                            if (!mWakeLock.isHeld()) {
+                                try { mWakeLock.acquire(); logger.debug("Wake lock acquired (hot-reload → always)"); }
+                                catch (Throwable t) { logger.warn("Wake lock acquire failed", t); }
+                            }
+                        } else {
+                            // 'posting' or 'none' — release any permanent lock; per-fix lock continues to work via acquireWakeLockForPosting().
+                            if (mWakeLock.isHeld()) {
+                                try { mWakeLock.release(); logger.debug("Wake lock released (hot-reload → {})", newWl); }
+                                catch (Throwable t) { logger.warn("Wake lock release failed", t); }
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -1022,15 +1204,19 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
 
     @Override
     public void onLocation(BackgroundLocation location) {
+        // v4.5.1: in 'posting' wake-lock mode, hold the CPU briefly so SQLite writes + HTTP
+        // POST finish before the system returns to deep sleep. 30s ceiling — plenty for a fix.
+        acquireWakeLockForPosting();
         mLastLocationTime = System.currentTimeMillis();
         mLastReceivedLocation = location;
         sLastReceivedLocation = location;
 
-        // v4.0 Phase 6: feed the driver-insights state machine.
+        // v4.0 Phase 6: feed the driver-insights state machine on the *raw* location so speed/bearing
+        // come straight from the sensors. Listener attaches events to this same instance.
         if (mDrivingDetector != null) {
             mDrivingDetector.onLocation(location);
         }
-        // v4.2 Phase 8: keep sensor pipeline aware of the latest fix.
+        // v4.2 Phase 8: keep sensor pipeline aware of the latest raw fix.
         if (mSensorFusion != null) {
             mSensorFusion.setLastLocation(location);
         }
@@ -1056,10 +1242,36 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         }
         logger.debug("New location {}", location.toString());
 
+        // v4.5.1 — events were attached to the RAW location above (so detector heuristics see real
+        // speed/bearing). If transformLocation() returns a NEW instance, we'd lose those events
+        // and the battery snapshot. Solution: copy them across to the transformed instance below.
+        org.json.JSONArray rawEvents = location.getDrivingEvents();
+        Integer rawBatteryLevel = null;
+        Boolean rawIsCharging = null;
+
         location = transformLocation(location);
         if (location == null) {
             logger.debug("Skipping location as requested by the locationTransform");
             return;
+        }
+
+        // Re-attach events to the transformed location if the transform produced a new instance.
+        if (rawEvents != null && rawEvents.length() > 0 && location.getDrivingEvents() != rawEvents) {
+            try {
+                org.json.JSONArray copy = new org.json.JSONArray(rawEvents.toString());
+                for (int i = 0; i < copy.length(); i++) {
+                    org.json.JSONObject ev = copy.optJSONObject(i);
+                    if (ev != null) location.addDrivingEvent(ev);
+                }
+            } catch (org.json.JSONException ignored) {}
+        }
+        // v4.3: drain pending events (providerChange/sensor crash/phone usage) onto the post-transform
+        // instance so they always reach the backend.
+        flushPendingDrivingEvents(location);
+        // v4.4: stamp device battery snapshot onto the *transformed* location so it survives any
+        // user-supplied locationTransform that creates a new instance.
+        if (mConfig == null || !Boolean.FALSE.equals(mConfig.getIncludeBattery())) {
+            attachBatterySnapshot(location);
         }
 
         Bundle bundle = new Bundle();
@@ -1090,6 +1302,11 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         if (location == null) {
             logger.debug("Skipping location as requested by the locationTransform");
             return;
+        }
+        // v4.5.1 — same enrichment as regular fixes: drain pending events and stamp battery.
+        flushPendingDrivingEvents(location);
+        if (mConfig == null || !Boolean.FALSE.equals(mConfig.getIncludeBattery())) {
+            attachBatterySnapshot(location);
         }
 
         Bundle bundle = new Bundle();
@@ -1190,7 +1407,15 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
 
     @Override
     public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter) {
-        return super.registerReceiver(receiver, filter, null, mServiceHandler, RECEIVER_NOT_EXPORTED);
+        // v4.5.1 — RECEIVER_NOT_EXPORTED flag is required on Android 13+ (API 33) for non-system
+        // broadcasts and the 5-arg overload exists only from API 26. Guard for older OSs.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return super.registerReceiver(receiver, filter, null, mServiceHandler, Context.RECEIVER_NOT_EXPORTED);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return super.registerReceiver(receiver, filter, null, mServiceHandler);
+        }
+        return super.registerReceiver(receiver, filter);
     }
 
     @Override

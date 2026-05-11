@@ -153,7 +153,7 @@ export interface ConfigureOptions {
    * Platform: Android
    * Provider: all
    *
-   * @default 60000
+   * @default 600000
    * @see {@link https://bit.ly/1x00RUu|Android docs}
    */
   interval?: number;
@@ -511,6 +511,52 @@ export interface ConfigureOptions {
   mockLocationPolicy?: 'allow' | 'flag' | 'drop';
 
   /**
+   * v4.4 — Stamp device battery percentage (0-100) and charging state on every location
+   * sent to the backend. Default `true`. Set `false` to opt out.
+   *
+   * - With `bodyTemplate`/`postTemplate`, use placeholders `'@battery'` and `'@isCharging'`.
+   * - Default JSON includes `battery` and `isCharging` keys automatically.
+   *
+   * Android: read via `BatteryManager` sticky broadcast (no permission required).
+   * iOS: read via `UIDevice.batteryLevel` (free).
+   *
+   * Platform: Android, iOS
+   * @since 4.4.0
+   */
+  includeBattery?: boolean;
+
+  /**
+   * v4.5.1 — WakeLock policy (Android only). Controls whether the service holds a
+   * `PARTIAL_WAKE_LOCK` while tracking. Default `'posting'`.
+   *
+   * - `'none'`     — never acquire a wake lock. Best battery, but the device may
+   *                  sleep mid-POST. Recommended only with `httpMode: 'batch'`.
+   * - `'posting'`  — acquire a 30 s wake lock on every fix while writing to SQLite
+   *                  and posting. Default. Good battery / reliability trade-off.
+   * - `'always'`   — keep CPU awake the whole time the service is running. Most
+   *                  reliable, worst battery. Use only for fleet/emergency apps.
+   *
+   * @platform Android
+   * @since 4.5.1
+   */
+  wakeLockMode?: 'none' | 'posting' | 'always';
+
+  /**
+   * v4.5.1 — Stationary detection knobs (Android `DISTANCE_FILTER_PROVIDER`).
+   * Override the previously hard-coded constants. All values in milliseconds.
+   *
+   * - `stationaryTimeout` (default 300_000) — time of no movement before declaring stationary.
+   * - `stationaryPollInterval` (default 180_000) — lazy poll while stationary.
+   * - `stationaryPollFast` (default 60_000) — aggressive poll near boundary.
+   *
+   * @platform Android
+   * @since 4.5.1
+   */
+  stationaryTimeout?: number;
+  stationaryPollInterval?: number;
+  stationaryPollFast?: number;
+
+  /**
    * v4.0 Phase 6 — Driver insights configuration. Enables a GPS-based state machine
    * that emits `moving`, `stopped`, `tripStart`, `tripEnd`, `speeding` and
    * `providerChange` events without additional sensors.
@@ -643,6 +689,31 @@ export interface Location {
    * True if location was simulated by software (e.g. Simulator). (iOS 15+)
    */
   simulated?: boolean;
+
+  /**
+   * v4.3 — Driving events anexados a este fix por el detector interno.
+   *
+   * Solo presente cuando un evento se disparó al mismo tiempo que esta location y
+   * `drivingEvents.enabled` está activo. Cada elemento es `{ type, time, ...payload }`,
+   * donde `payload` depende del tipo:
+   *   - hardBrake / rapidAcceleration / sharpTurn → `value: number`
+   *   - speeding → `speedKmh: number, limitKmh: number`
+   *   - tripEnd → `distance: number, durationMs: number`
+   *   - possibleCrash → `value: number, source: 'gps' | 'sensor'`
+   *   - providerChange → `provider: string`
+   *   - moving / stopped / tripStart / phoneUsageWhileDriving → solo type+time.
+   *
+   * Desde v4.5.0, `events` se persiste en la cola de sync y sobrevive a POST fallidos.
+   *
+   * @since 4.3.0
+   */
+  events?: Array<{ type: string; time: number; [key: string]: any }>;
+
+  /** v4.4 — Device battery percentage (0-100) at the time of the fix. Disabled with
+   *  `includeBattery: false` in ConfigureOptions. @since 4.4.0 */
+  battery?: number;
+  /** v4.4 — Whether the device is charging at the time of the fix. @since 4.4.0 */
+  isCharging?: boolean;
 }
 
 export interface StationaryLocation extends Location {
@@ -973,6 +1044,39 @@ export interface BackgroundGeolocationPlugin {
   ): Promise<void>;
 
   /**
+   * v4.5 — Request `ACCESS_BACKGROUND_LOCATION` runtime permission (Android 10+).
+   * On Android < 10 resolves immediately as `{ granted: true, notRequired: true }`.
+   * On iOS resolves as `{ granted: true, notRequired: true }` (Apple does not surface
+   * a separate background permission — the standard "Always" authorization covers it).
+   * @since 4.5.0
+   */
+  requestBackgroundLocationPermission(
+    success?: (result: { granted: boolean; denied?: string[]; notRequired?: boolean }) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<{ granted: boolean; denied?: string[]; notRequired?: boolean }>;
+
+  /**
+   * v4.5 — Request `ACTIVITY_RECOGNITION` runtime permission (Android 10+).
+   * Required by `ActivityLocationProvider`. iOS / Android < 10 resolve `granted: true, notRequired`.
+   * @since 4.5.0
+   */
+  requestActivityRecognitionPermission(
+    success?: (result: { granted: boolean; denied?: string[]; notRequired?: boolean }) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<{ granted: boolean; denied?: string[]; notRequired?: boolean }>;
+
+  /**
+   * v4.5 — Request `POST_NOTIFICATIONS` runtime permission (Android 13+).
+   * Without it the foreground-service notification is invisible. iOS / Android < 13
+   * resolve `granted: true, notRequired`.
+   * @since 4.5.0
+   */
+  requestNotificationPermission(
+    success?: (result: { granted: boolean; denied?: string[]; notRequired?: boolean }) => void,
+    fail?: (error: BackgroundGeolocationError) => void
+  ): Promise<{ granted: boolean; denied?: string[]; notRequired?: boolean }>;
+
+  /**
    * Show app settings to allow change of app location permissions.
    *
    * Platform: Android >= 6, iOS >= 8.0
@@ -1245,12 +1349,19 @@ export interface BackgroundGeolocationPlugin {
   ): Promise<void>;
 
   /**
-   * A special task that gets executed when the app is terminated, but
-   * the plugin was configured to continue running in the background
+   * **Android only.** A special task that gets executed when the app is terminated,
+   * but the plugin was configured to continue running in the background
    * (option <code>stopOnTerminate: false</code>).
    *
    * In this scenario the Activity was killed by the system and all registered
    * event listeners will not be triggered until the app is relaunched.
+   *
+   * **iOS:** Apple does not support running JS in a killed-app scenario the same
+   * way; on iOS this method is a no-op. Use `significantLocationChanges` and the
+   * normal `BackgroundGeolocation.on(...)` listeners with the standard background
+   * location mode instead.
+   *
+   * Platform: Android
    *
    * @example
    *  BackgroundGeolocation.headlessTask(function(event) {

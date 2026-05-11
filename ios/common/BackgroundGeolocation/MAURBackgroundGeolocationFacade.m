@@ -104,6 +104,8 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     NSTimeInterval drLastHardBrakeAt, drLastRapidAccelAt, drLastSharpTurnAt, drLastCrashAt;
     // v4.2 sensor fusion
     MAURSensorFusionDetector *sensorFusion;
+    // v4.3 — events buffered when no simultaneous fix is available; drained onto next location.
+    NSMutableArray *pendingDrivingEvents;
 }
 
 
@@ -132,12 +134,27 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     
     postLocationTask = [[MAURPostLocationTask alloc] init];
     postLocationTask.delegate = self;
-    
+
     localNotification = [[UILocalNotification alloc] init];
     localNotification.timeZone = [NSTimeZone defaultTimeZone];
-    
+
     isStarted = NO;
-    
+    pendingDrivingEvents = [[NSMutableArray alloc] init];
+
+    // v4.5.1 — wire pending events + battery snapshot into the post task so they run AFTER
+    // any locationTransform that may produce a new instance / return nil. The previous flow
+    // (flush BEFORE add:) lost buffered events whenever the transform returned nil.
+    postLocationTask.pendingDrivingEventsBuffer = pendingDrivingEvents;
+    __weak typeof(self) weakSelf = self;
+    postLocationTask.attachBatterySnapshot = ^(MAURLocation * _Nonnull loc) {
+        __strong typeof(self) strongSelf = weakSelf;
+        if (strongSelf == nil) return;
+        BOOL includeBat = (strongSelf->_config == nil
+                || strongSelf->_config.includeBattery == nil
+                || [strongSelf->_config.includeBattery boolValue]);
+        if (includeBat) [strongSelf attachBatterySnapshotTo:loc];
+    };
+
     return self;
 }
 
@@ -401,6 +418,7 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
 // MAURSensorFusionListener
 - (void) onSensorCrashWithImpactG:(double)impactG location:(MAURLocation *)location
 {
+    [self bufferPendingEvent:@"possibleCrash" extra:@{@"value": @(impactG), @"source": @"sensor"}];
     NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
     if (location != nil) userInfo[@"location"] = location;
     userInfo[@"value"] = @(impactG);
@@ -411,11 +429,83 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
 }
 - (void) onPhoneUsageWhileDriving:(MAURLocation *)location
 {
+    [self bufferPendingEvent:@"phoneUsageWhileDriving" extra:nil];
     NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
     if (location != nil) userInfo[@"location"] = location;
     [[NSNotificationCenter defaultCenter] postNotificationName:MAURPhoneUsageWhileDrivingNotification
                                                         object:self
                                                       userInfo:userInfo];
+}
+
+// v4.3 — driving event helpers
+- (void) attachDrivingEvent:(NSString *)type to:(MAURLocation *)loc extra:(NSDictionary *)extra
+{
+    if (loc == nil || type == nil) return;
+    NSMutableDictionary *ev = [NSMutableDictionary dictionary];
+    ev[@"type"] = type;
+    ev[@"time"] = @((long long)([[NSDate date] timeIntervalSince1970] * 1000.0));
+    if (extra != nil) [ev addEntriesFromDictionary:extra];
+    if (loc.drivingEvents == nil) loc.drivingEvents = [NSMutableArray array];
+    [loc.drivingEvents addObject:ev];
+}
+
+// v4.4.1 — pending driving events: cap + TTL.
+static NSInteger      const kPendingDrivingEventsMax     = 20;
+static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
+
+- (void) bufferPendingEvent:(NSString *)type extra:(NSDictionary *)extra
+{
+    if (type == nil) return;
+    NSMutableDictionary *ev = [NSMutableDictionary dictionary];
+    ev[@"type"] = type;
+    ev[@"time"] = @((long long)([[NSDate date] timeIntervalSince1970] * 1000.0));
+    if (extra != nil) [ev addEntriesFromDictionary:extra];
+    @synchronized (pendingDrivingEvents) {
+        while ((NSInteger)[pendingDrivingEvents count] >= kPendingDrivingEventsMax) {
+            [pendingDrivingEvents removeObjectAtIndex:0];
+        }
+        [pendingDrivingEvents addObject:ev];
+    }
+}
+
+- (void) flushPendingDrivingEventsTo:(MAURLocation *)loc
+{
+    if (loc == nil) return;
+    NSTimeInterval nowMs = [[NSDate date] timeIntervalSince1970] * 1000.0;
+    @synchronized (pendingDrivingEvents) {
+        if ([pendingDrivingEvents count] == 0) return;
+        if (loc.drivingEvents == nil) loc.drivingEvents = [NSMutableArray array];
+        for (NSDictionary *ev in pendingDrivingEvents) {
+            NSNumber *t = ev[@"time"];
+            NSTimeInterval evMs = t != nil ? [t doubleValue] : nowMs;
+            if (nowMs - evMs <= kPendingDrivingEventsTTLMs) {
+                [loc.drivingEvents addObject:ev];
+            }
+        }
+        [pendingDrivingEvents removeAllObjects];
+    }
+}
+
+// v4.4 — read device battery via UIDevice. Calling main thread; safe from any thread.
+- (void) attachBatterySnapshotTo:(MAURLocation *)loc
+{
+    if (loc == nil) return;
+    void (^read)(void) = ^{
+        UIDevice *device = [UIDevice currentDevice];
+        if (!device.batteryMonitoringEnabled) device.batteryMonitoringEnabled = YES;
+        float lvl = device.batteryLevel; // 0.0 - 1.0, or -1 if unknown
+        if (lvl >= 0) {
+            loc.batteryLevel = @((int) round(lvl * 100.0));
+        }
+        UIDeviceBatteryState state = device.batteryState;
+        BOOL charging = (state == UIDeviceBatteryStateCharging || state == UIDeviceBatteryStateFull);
+        loc.isCharging = @(charging);
+    };
+    if ([NSThread isMainThread]) {
+        read();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), read);
+    }
 }
 
 - (void) drivingDetectorFeed:(MAURLocation *)loc
@@ -446,6 +536,7 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     NSString *provider = loc.provider;
     if (provider != nil && ![provider isEqualToString:drLastProvider]) {
         drLastProvider = provider;
+        [self attachDrivingEvent:@"providerChange" to:loc extra:@{@"provider": provider}];
         [[NSNotificationCenter defaultCenter] postNotificationName:MAURProviderChangeNotification
                                                             object:self
                                                           userInfo:@{@"provider": provider}];
@@ -465,6 +556,7 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
         drBelowMovingSince = 0;
         if (!drIsMoving) {
             drIsMoving = YES;
+            [self attachDrivingEvent:@"moving" to:loc extra:nil];
             [[NSNotificationCenter defaultCenter] postNotificationName:MAURMovingNotification
                                                                 object:self
                                                               userInfo:@{@"location": loc}];
@@ -476,6 +568,7 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
                     drTripActive = YES;
                     drTripStartedAt = now;
                     drTripDistanceMeters = 0;
+                    [self attachDrivingEvent:@"tripStart" to:loc extra:nil];
                     [[NSNotificationCenter defaultCenter] postNotificationName:MAURTripStartNotification
                                                                         object:self
                                                                       userInfo:@{@"location": loc}];
@@ -490,6 +583,7 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
         if (drBelowMovingSince == 0) drBelowMovingSince = now;
         if (drIsMoving && (now - drBelowMovingSince) >= stoppedDuration) {
             drIsMoving = NO;
+            [self attachDrivingEvent:@"stopped" to:loc extra:nil];
             [[NSNotificationCenter defaultCenter] postNotificationName:MAURStoppedNotification
                                                                 object:self
                                                               userInfo:@{@"location": loc}];
@@ -497,6 +591,7 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
                 NSTimeInterval durMs = (now - drTripStartedAt) * 1000.0;
                 double dist = drTripDistanceMeters;
                 drTripActive = NO;
+                [self attachDrivingEvent:@"tripEnd" to:loc extra:@{@"distance": @(dist), @"durationMs": @((long long)durMs)}];
                 [[NSNotificationCenter defaultCenter] postNotificationName:MAURTripEndNotification
                                                                     object:self
                                                                   userInfo:@{
@@ -514,6 +609,7 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
         if (kmh > speedLimit) {
             if (!drWasSpeeding) {
                 drWasSpeeding = YES;
+                [self attachDrivingEvent:@"speeding" to:loc extra:@{@"speedKmh": @(kmh), @"limitKmh": @(speedLimit)}];
                 [[NSNotificationCenter defaultCenter] postNotificationName:MAURSpeedingNotification
                                                                     object:self
                                                                   userInfo:@{
@@ -546,12 +642,14 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
             double accel = dv / dt;
             if (hardBrakeMps2 > 0 && accel <= -hardBrakeMps2 && (now - drLastHardBrakeAt) >= kCooldown) {
                 drLastHardBrakeAt = now;
+                [self attachDrivingEvent:@"hardBrake" to:loc extra:@{@"value": @(accel)}];
                 [[NSNotificationCenter defaultCenter] postNotificationName:MAURHardBrakeNotification
                                                                     object:self
                                                                   userInfo:@{@"location": loc, @"value": @(accel)}];
             }
             if (rapidAccelMps2 > 0 && accel >= rapidAccelMps2 && (now - drLastRapidAccelAt) >= kCooldown) {
                 drLastRapidAccelAt = now;
+                [self attachDrivingEvent:@"rapidAcceleration" to:loc extra:@{@"value": @(accel)}];
                 [[NSNotificationCenter defaultCenter] postNotificationName:MAURRapidAccelerationNotification
                                                                     object:self
                                                                   userInfo:@{@"location": loc, @"value": @(accel)}];
@@ -563,6 +661,7 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
                     && drPrevSpeed * 3.6 >= crashImpactKmh
                     && (now - drLastCrashAt) >= kCooldown) {
                     drLastCrashAt = now;
+                    [self attachDrivingEvent:@"possibleCrash" to:loc extra:@{@"value": @(dropKmh), @"source": @"gps"}];
                     [[NSNotificationCenter defaultCenter] postNotificationName:MAURPossibleCrashNotification
                                                                         object:self
                                                                       userInfo:@{@"location": loc, @"value": @(dropKmh), @"source": @"gps"}];
@@ -581,6 +680,7 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
             double rate = diff / dt;
             if (rate >= sharpTurnDegPerSec && (now - drLastSharpTurnAt) >= kCooldown) {
                 drLastSharpTurnAt = now;
+                [self attachDrivingEvent:@"sharpTurn" to:loc extra:@{@"value": @(rate)}];
                 [[NSNotificationCenter defaultCenter] postNotificationName:MAURSharpTurnNotification
                                                                     object:self
                                                                   userInfo:@{@"location": loc, @"value": @(rate)}];
@@ -917,7 +1017,10 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
 {
     DDLogDebug(@"%@ #onStationaryChanged", TAG);
     stationaryLocation = location;
-    
+
+    // v4.5.1 — enrichment moved into MAURPostLocationTask.add: so pending events / battery
+    // land on the post-transform instance (and survive transforms that return new instances).
+
     [postLocationTask add:location];
     
     MAURConfig *config = [self getConfig];
@@ -946,10 +1049,13 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     stationaryLocation = nil;
     lastReceivedLocation = location; // v3.5 Phase 4: cached for heartbeat payload
 
-    // v4.0 Phase 6: feed driver-insights state machine.
+    // v4.0 Phase 6: feed driver-insights state machine. Listener may attach events to `location`.
     [self drivingDetectorFeed:location];
     // v4.2 Phase 8: keep sensor pipeline aware of the latest fix.
     sensorFusion.lastLocation = location;
+    // v4.5.1 — pending events drain + battery snapshot moved into MAURPostLocationTask.add:
+    // so they run AFTER any user-supplied locationTransform. The previous order lost them
+    // whenever the transform returned nil.
 
     [postLocationTask add:location];
     

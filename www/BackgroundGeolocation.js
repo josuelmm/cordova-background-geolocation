@@ -3,10 +3,6 @@
 
  This is fork of christocracy cordova-plugin-background-geolocation plugin
  https://github.com/christocracy/cordova-plugin-background-geolocation
-
- Differences to original version:
-
- 1. new method isLocationEnabled
  */
 
 var exec = require('cordova/exec');
@@ -248,6 +244,17 @@ var BackgroundGeolocation = {
   // v4.0 Phase 6 — Driver insights
   triggerSOS: function (payload, success, failure) {
     return execWithPromise(success, failure, 'triggerSOS', [payload || {}]);
+  },
+
+  // v4.5 — runtime permission helpers (Android). Resolve with { granted: bool, denied?: string[] }.
+  requestBackgroundLocationPermission: function (success, failure) {
+    return execWithPromise(success, failure, 'requestBackgroundLocationPermission');
+  },
+  requestActivityRecognitionPermission: function (success, failure) {
+    return execWithPromise(success, failure, 'requestActivityRecognitionPermission');
+  },
+  requestNotificationPermission: function (success, failure) {
+    return execWithPromise(success, failure, 'requestNotificationPermission');
   },
 
   startTask: function (success, failure) {

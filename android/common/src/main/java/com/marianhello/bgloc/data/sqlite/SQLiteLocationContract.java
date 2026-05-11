@@ -37,6 +37,10 @@ public final class SQLiteLocationContract {
         public static final String COLUMN_NAME_STATUS = "valid";
         public static final String COLUMN_NAME_BATCH_START_MILLIS = "batch_start";
         public static final String COLUMN_NAME_MOCK_FLAGS = "mock_flags";
+        // v4.5 — survive sync queue: events JSON, battery percentage and charging state.
+        public static final String COLUMN_NAME_EVENTS_JSON = "events_json";
+        public static final String COLUMN_NAME_BATTERY_LEVEL = "battery_level";
+        public static final String COLUMN_NAME_IS_CHARGING = "is_charging";
 
         public static final String SQL_CREATE_LOCATION_TABLE =
                 "CREATE TABLE " + LocationEntry.TABLE_NAME + " (" +
@@ -60,7 +64,10 @@ public final class SQLiteLocationContract {
                         LocationEntry.COLUMN_NAME_LOCATION_PROVIDER + INTEGER_TYPE + COMMA_SEP +
                         LocationEntry.COLUMN_NAME_STATUS + INTEGER_TYPE + COMMA_SEP +
                         LocationEntry.COLUMN_NAME_BATCH_START_MILLIS + INTEGER_TYPE + COMMA_SEP +
-                        LocationEntry.COLUMN_NAME_MOCK_FLAGS + INTEGER_TYPE +
+                        LocationEntry.COLUMN_NAME_MOCK_FLAGS + INTEGER_TYPE + COMMA_SEP +
+                        LocationEntry.COLUMN_NAME_EVENTS_JSON + TEXT_TYPE + COMMA_SEP +
+                        LocationEntry.COLUMN_NAME_BATTERY_LEVEL + INTEGER_TYPE + COMMA_SEP +
+                        LocationEntry.COLUMN_NAME_IS_CHARGING + INTEGER_TYPE +
                         " )";
 
         public static final String SQL_DROP_LOCATION_TABLE =
@@ -106,7 +113,10 @@ public final class SQLiteLocationContract {
                 COLUMN_NAME_LOCATION_PROVIDER,
                 COLUMN_NAME_STATUS,
                 COLUMN_NAME_BATCH_START_MILLIS,
-                COLUMN_NAME_MOCK_FLAGS
+                COLUMN_NAME_MOCK_FLAGS,
+                COLUMN_NAME_EVENTS_JSON,
+                COLUMN_NAME_BATTERY_LEVEL,
+                COLUMN_NAME_IS_CHARGING
         };
     }
 }

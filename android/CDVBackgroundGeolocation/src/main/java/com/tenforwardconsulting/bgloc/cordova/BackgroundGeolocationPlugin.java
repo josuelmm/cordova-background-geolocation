@@ -14,6 +14,7 @@ package com.tenforwardconsulting.bgloc.cordova;
 import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
+import android.os.Build;
 
 import com.marianhello.bgloc.BackgroundGeolocationFacade;
 import com.marianhello.bgloc.Config;
@@ -87,9 +88,15 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     public static final String ACTION_OPEN_AUTOSTART_SETTINGS       = "openAutoStartSettings";
     public static final String ACTION_GET_MANUFACTURER_HELP         = "getManufacturerHelp";
     public static final String ACTION_TRIGGER_SOS                   = "triggerSOS";
+    // v4.5: runtime permission helpers — opt-in. The app drives the flow; the plugin
+    // simply asks the OS dialog (or returns the current state on iOS where Apple does
+    // not surface separate runtime gates for background location / activity recognition).
+    public static final String ACTION_REQUEST_BACKGROUND_PERMISSION   = "requestBackgroundLocationPermission";
+    public static final String ACTION_REQUEST_ACTIVITY_PERMISSION     = "requestActivityRecognitionPermission";
+    public static final String ACTION_REQUEST_NOTIFICATION_PERMISSION = "requestNotificationPermission";
 
     /** Plugin version; keep in sync with plugin.xml. */
-    public static final String PLUGIN_VERSION = "4.2.3";
+    public static final String PLUGIN_VERSION = "4.5.1";
 
     private BackgroundGeolocationFacade facade;
 
@@ -507,9 +514,62 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
                 callbackContext.sendPluginResult(ErrorPluginResult.from("triggerSOS failed", e, PluginException.SERVICE_ERROR));
             }
             return true;
+        } else if (ACTION_REQUEST_BACKGROUND_PERMISSION.equals(action)) {
+            // Android 10+ (API 29+). Returns {granted: bool}.
+            return requestPermissionAction(callbackContext,
+                    Build.VERSION.SDK_INT >= 29 ? android.Manifest.permission.ACCESS_BACKGROUND_LOCATION : android.Manifest.permission.ACCESS_FINE_LOCATION);
+        } else if (ACTION_REQUEST_ACTIVITY_PERMISSION.equals(action)) {
+            // Android 10+ (API 29+) needs runtime grant for activity recognition.
+            return requestPermissionAction(callbackContext,
+                    Build.VERSION.SDK_INT >= 29 ? "android.permission.ACTIVITY_RECOGNITION" : null);
+        } else if (ACTION_REQUEST_NOTIFICATION_PERMISSION.equals(action)) {
+            // Android 13+ (API 33+) requires POST_NOTIFICATIONS at runtime.
+            return requestPermissionAction(callbackContext,
+                    Build.VERSION.SDK_INT >= 33 ? "android.permission.POST_NOTIFICATIONS" : null);
         }
 
         return false;
+    }
+
+    /** v4.5: shared helper — request a single runtime permission via PermissionManager.
+     *  Returns {granted: true} if already granted (or unsupported on this OS version).
+     *  Returns {granted: false, denied: [name]} if user denies.
+     */
+    private boolean requestPermissionAction(final CallbackContext cb, final String permission) {
+        if (permission == null) {
+            // OS version where this permission does not exist: act as already granted.
+            try {
+                JSONObject r = new JSONObject();
+                r.put("granted", true);
+                r.put("notRequired", true);
+                cb.success(r);
+            } catch (JSONException e) { cb.success(); }
+            return true;
+        }
+        Context ctx = cordova.getActivity().getApplicationContext();
+        if (hasPermission(ctx, permission)) {
+            try { JSONObject r = new JSONObject(); r.put("granted", true); cb.success(r); }
+            catch (JSONException e) { cb.success(); }
+            return true;
+        }
+        com.intentfilter.androidpermissions.PermissionManager pm =
+                com.intentfilter.androidpermissions.PermissionManager.getInstance(ctx);
+        pm.checkPermissions(java.util.Arrays.asList(permission),
+                new com.intentfilter.androidpermissions.PermissionManager.PermissionRequestListener() {
+            @Override public void onPermissionGranted() {
+                try { JSONObject r = new JSONObject(); r.put("granted", true); cb.success(r); }
+                catch (JSONException e) { cb.success(); }
+            }
+            @Override public void onPermissionDenied(com.intentfilter.androidpermissions.models.DeniedPermissions deniedPermissions) {
+                try {
+                    JSONObject r = new JSONObject();
+                    r.put("granted", false);
+                    r.put("denied", new org.json.JSONArray().put(permission));
+                    cb.success(r);
+                } catch (JSONException e) { cb.success(); }
+            }
+        });
+        return true;
     }
 
     /** v3.5 Phase 4: extended diagnostics. */

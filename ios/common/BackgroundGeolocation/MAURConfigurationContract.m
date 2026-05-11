@@ -43,7 +43,9 @@
         @{ @"name": @CC_COLUMN_NAME_MAX_LOCATIONS, @"type": [SQLColumnType sqlColumnWithType: kInteger]},
         @{ @"name": @CC_COLUMN_NAME_PAUSE_LOCATION_UPDATES, @"type": [SQLColumnType sqlColumnWithType: kInteger]},
         @{ @"name": @CC_COLUMN_NAME_TEMPLATE, @"type": [SQLColumnType sqlColumnWithType: kText]},
-        @{ @"name": @CC_COLUMN_NAME_LAST_UPDATED_AT, @"type": [SQLColumnType sqlColumnWithType: kInteger]}        
+        @{ @"name": @CC_COLUMN_NAME_LAST_UPDATED_AT, @"type": [SQLColumnType sqlColumnWithType: kInteger]},
+        // v4.5: full Config JSON blob
+        @{ @"name": @CC_COLUMN_NAME_CONFIG_JSON, @"type": [SQLColumnType sqlColumnWithType: kText]}
     ];
     
     return [MAURSQLiteHelper createTableSqlStatement:@CC_TABLE_NAME columns:columns];

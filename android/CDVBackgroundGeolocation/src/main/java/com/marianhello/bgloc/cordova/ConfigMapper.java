@@ -181,6 +181,23 @@ public class ConfigMapper {
         if (jObject.has("showDistance")) {
             config.setShowDistance(jObject.getBoolean("showDistance"));
         }
+        // v4.4: opt-out for battery snapshot in payload.
+        if (jObject.has("includeBattery")) {
+            config.setIncludeBattery(jObject.getBoolean("includeBattery"));
+        }
+        // v4.5.1: battery-saving knobs.
+        if (jObject.has("wakeLockMode") && !jObject.isNull("wakeLockMode")) {
+            config.setWakeLockMode(jObject.getString("wakeLockMode"));
+        }
+        if (jObject.has("stationaryTimeout") && !jObject.isNull("stationaryTimeout")) {
+            config.setStationaryTimeout(jObject.getInt("stationaryTimeout"));
+        }
+        if (jObject.has("stationaryPollInterval") && !jObject.isNull("stationaryPollInterval")) {
+            config.setStationaryPollInterval(jObject.getInt("stationaryPollInterval"));
+        }
+        if (jObject.has("stationaryPollFast") && !jObject.isNull("stationaryPollFast")) {
+            config.setStationaryPollFast(jObject.getInt("stationaryPollFast"));
+        }
 
         return config;
     }
@@ -264,6 +281,13 @@ public class ConfigMapper {
             deJson.put("phoneUsageCooldownMs", de.phoneUsageCooldownMs);
             json.put("drivingEvents", deJson);
         }
+        // v4.4 battery
+        json.put("includeBattery", config.getIncludeBattery() != null ? config.getIncludeBattery() : true);
+        // v4.5.1 battery-saving knobs
+        json.put("wakeLockMode", config.getWakeLockMode() != null ? config.getWakeLockMode() : "posting");
+        json.put("stationaryTimeout", config.getStationaryTimeout());
+        json.put("stationaryPollInterval", config.getStationaryPollInterval());
+        json.put("stationaryPollFast", config.getStationaryPollFast());
 
         return json;
     }

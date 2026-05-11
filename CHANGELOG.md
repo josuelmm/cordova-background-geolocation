@@ -1,5 +1,208 @@
 # Changelog
 
+## [4.5.1](https://github.com/josuelmm/cordova-background-geolocation/tree/4.5.1) (2026-05-09)
+
+### Fixed (BLOQUEANTES)
+- **Android no compilaba**: faltaba `import android.os.Build;` en `BackgroundGeolocationPlugin.java` después de los handlers v4.5.0 que usaban `Build.VERSION.SDK_INT`.
+- **Android UPDATE en `maxLocations` mezclaba events/battery viejos**: cuando la cola SQLite alcanzaba `maxLocations`, el row más viejo se reciclaba con UPDATE pero NO actualizaba `events_json`, `battery_level`, `is_charging`. Resultado: un `possibleCrash`/`hardBrake`/batería vieja podía quedarse pegada a una location nueva. `SQLiteLocationDAO` extendido con esas 3 columnas (con `null` cuando la nueva no las tiene, para limpiar valores viejos).
+- **iOS UPDATE en `persistLocation:limitRows:`**: mismo bug que Android. `MAURSQLiteLocationDAO.m` ahora setea `events_json`, `battery_level`, `is_charging` (con `[NSNull null]` cuando faltan).
+
+### Added — Optimización de batería
+
+- **`wakeLockMode: 'none' | 'posting' | 'always'`** (default `'posting'`). Antes el servicio mantenía un `PARTIAL_WAKE_LOCK` permanente todo el tiempo de tracking → drenaba batería sin necesidad. Ahora:
+  - `'posting'` (default): solo 30 s al recibir cada fix (suficiente para SQLite + POST).
+  - `'none'`: nunca. Mejor batería; usa solo con `httpMode: 'batch'`.
+  - `'always'`: comportamiento legacy. Solo para fleet/emergency apps.
+- **Watchdog moving-only**: `enableWatchdog` ya no reinicia el provider cuando estamos en estacionario. Antes despertaba el GPS cada 60 s aunque el plugin estuviera intencionalmente quieto. Ahora solo reinicia si `tripActive` (driver insights) está marcado.
+- **Stationary params configurables**: `stationaryTimeout` (default 300_000 ms), `stationaryPollInterval` (default 180_000 ms), `stationaryPollFast` (default 60_000 ms). Ya no son constantes hard-coded en `DistanceFilterLocationProvider`.
+
+### Fixed (otros)
+- `android/common/src/main/AndroidManifest.xml` interno: `<uses-permission android:name="android.hardware.location" />` → `<uses-feature ... required="false" />` (paridad con `plugin.xml` raíz).
+- `README.md` y `www/BackgroundGeolocation.d.ts`: removido caveat obsoleto que decía "events no sobrevive sync queue" (sí sobrevive desde 4.5.0).
+- `.npmignore`: limpieza para no publicar `CLAUDE.md`, tests internos, scripts, etc.
+
+### Fixed (post-auditoría 4 — flujos end-to-end + casos edge)
+- **iOS `MAURLocationMapper._location` declarado a nivel de archivo**: race real entre real-time post + background sync (queues concurrentes). El segundo `+map:` pisaba la referencia del primer mapper → backend recibía fixes con campos mezclados. Migrado a ivar de instancia.
+- **iOS pending events se perdían si `locationTransform` retornaba `nil`**: la facade drenaba `pendingDrivingEventsBuffer` al `location` ANTES de `[postLocationTask add:]`; cuando el transform descartaba el fix, esos eventos no llegaban nunca al backend. Movidos al `MAURPostLocationTask.add:` DESPUÉS del transform (vía property weak `pendingDrivingEventsBuffer` + block `attachBatterySnapshot`).
+- **iOS re-attach con `==` sobrescribía events** del transform en lugar de hacer merge. Paridad con Android: ahora hace `addObjectsFromArray:` cuando la nueva instancia tiene su propio array de events.
+- **Android `wakeLockMode` no hot-reload**: al cambiar `'always' → 'posting'/'none'` el lock permanente se mantenía hasta `stop()`; inverso tampoco lo adquiría. Añadida lógica en `configure()` que compara prev/new y llama `release()` / `acquire()` según corresponda.
+- **`d.ts` `headlessTask`** no marcaba iOS como no soportado. Añadido `Platform: Android` + nota explicando que en iOS es no-op.
+- **README**: bloque corrupto de líneas 638-712 (duplicado de Angular + License) eliminado. Tabla `Compatibility` extendida con `4.2.x – 4.5.x`.
+- **docs/api.md**: tabla `configure` extendida con `drivingEvents`, `includeBattery`, `wakeLockMode`, `stationaryTimeout`, `stationaryPollInterval`, `stationaryPollFast`. Documentados los 3 helpers de permisos runtime.
+
+### Fixed (post-auditoría 3 — payload default y serialización)
+- **Payload default no incluía `events` / `battery` / `isCharging`.** `Config.getTemplate()` siempre cae a `LocationTemplateFactory.getDefault()` cuando no hay `postTemplate` custom, y el default omitía los placeholders nuevos. README/CHANGELOG decían "el payload default los incluye" pero **el backend recibía sin esos campos**. Añadidos `@events`, `@battery`, `@isCharging` al default (Android `LocationTemplateFactory.getDefault`, iOS `MAURConfig.getDefaultTemplate`).
+- **iOS default template tenía bug**: `@"provider": @"provider"` enviaba la string literal `"provider"` en lugar del valor real. Corregido a `@"@provider"`.
+- **iOS mapper (`MAURLocation.mapValue`) devolvía el placeholder literal** (`"@events"`, `"@battery"`) cuando la location no tenía valor para esa clave. Ahora retorna `NSNull` para keys que empiezan con `@`; preserva el comportamiento legacy para strings estáticos (ej. `deviceId` literal en postTemplate).
+- **Android `BatchManager.writeValue`** no manejaba `JSONArray` / `JSONObject` — cuando una location de la cola de sync salía con `events` poblado, el array se serializaba como string escapado `"[{\"type\":\"hardBrake\"}]"` en lugar de JSON real. Añadido manejo de tipos JSON + helper `resolveTemplateValue` que devuelve `JSONObject.NULL` para placeholders `@…` sin valor.
+- **`onStationary` Android e iOS** no enriquecían el fix con events/battery — el backend recibía updates stationary sin esos campos aunque las features estuvieran habilitadas. Añadido `flushPendingDrivingEvents` + `attachBatterySnapshot` en ambos.
+- `.npmignore`: añadido `/ios/common/scripts` para no publicar `xcode-refactor.js`.
+
+### Fixed (post-auditoría 2)
+- **Android `toContentValues` / `SQLiteLocationDAO.getContentValues` ahora limpian con `putNull`** las columnas `events_json`, `battery_level`, `is_charging` cuando la nueva location no las trae. Sin esto, el flujo `ContentProviderLocationDAO.persistLocation(location, maxRows)` que recicla el row más viejo via UPDATE dejaba pegados los valores del row anterior (ej. un `possibleCrash` viejo aparecía adherido a una location nueva).
+- **`registerReceiver` override**: guard por SDK. `RECEIVER_NOT_EXPORTED` y el 5-arg overload solo se usan en API ≥ 33 / ≥ 26. En APIs viejas se cae al 2-arg estándar.
+- **`checkSelfPermission`** migrado a `ContextCompat.checkSelfPermission` en `BootCompletedReceiver`, `LocationServiceImpl`, `LocationServiceProxy`. Funciona seguro en API < 23 (permisos auto-granted al install).
+- **iOS recovery de `SyncPending` stale**: nuevo `restoreStaleSyncLocationsOlderThan:` que se invoca al inicio de cada `MAURPostLocationTask.sync`. Si la app/proceso murió entre `getLocationsForSync` y el callback success/failure, las locations quedaban atascadas en `SyncPending` y nunca se reintentaban. Ahora se restauran a `PostPending` automáticamente si tienen más de 15 min.
+- **iOS `locationTransform` que retorna nueva instancia**: ahora `MAURPostLocationTask.add` copia `drivingEvents` / `batteryLevel` / `isCharging` de la location original a la transformada si el transform no las propagó. Paridad con el fix Android.
+
+### Fixed (post-auditoría — BLOQUEANTE iOS sync)
+- **iOS `getLocationsForSync` borraba TODA la tabla antes del upload.** Bug heredado: `UPDATE location SET valid = Deleted` sin `WHERE`. Si la red caía a mitad del POST, todas las ubicaciones se perdían silenciosamente. Ahora usa transición de estados:
+  - `getLocationsForSync` → `PostPending → SyncPending` (in-flight, no se re-incluye en otros sync windows).
+  - Success → `deleteSyncedLocationsBefore:cutoff` opera sobre `SyncPending` (no `PostPending` que estarían esperando POST real-time).
+  - Failure (network/HTTP) → nuevo `restoreFailedSyncLocations`: `SyncPending → PostPending` para reintento. Sin esto un solo fallo dropeaba todas.
+
+### Fixed (post-auditoría)
+- **`LocationServiceImpl.onLocation`** — ahora `attachBatterySnapshot()` y `flushPendingDrivingEvents()` se ejecutan DESPUÉS de `transformLocation()`. Antes, si el usuario configuraba un `LocationTransform` que retornaba una nueva instancia, los `events` y la batería se perdían (se anexaban a la location original que el plugin descartaba). Adicionalmente, los eventos del detector que se anexaron a la location RAW se copian a la transformada via `addDrivingEvent`.
+- **Watchdog smart**: la lógica `mDrivingTripActive` solo aplica cuando `drivingEvents.enabled == true`. Si el usuario tiene `enableWatchdog: true` SIN `drivingEvents`, el watchdog mantiene comportamiento legacy (reinicia el provider tras 60s sin fix). Sin esto, watchdog no se activaría nunca con drivingEvents desactivado.
+- **`Config(Parcel)`** — `in.readBundle(Config.class.getClassLoader())` para que `LocationTemplate`/HashMaps subclase se deserialicen correctamente cuando el Parcel cruza el proceso `:sync`.
+- **iOS race en `deletePendingSyncLocations` tras success** — nuevo método `deleteSyncedLocationsBefore:` que solo borra rows con `recorded_at <= cutoff`, donde `cutoff` se captura ANTES del upload. Las locations persistidas DURANTE el upload (window de race entre POST y delete) se preservan correctamente.
+
+## [4.5.0](https://github.com/josuelmm/cordova-background-geolocation/tree/4.5.0) (2026-05-09)
+
+### Added — Paridad de persistencia + helpers de permisos
+
+#### Persistencia events / battery / charging en cola de sync
+- **Android (DB v22)**: nuevas columnas `events_json TEXT`, `battery_level INTEGER`, `is_charging INTEGER` en tabla `location`. Migración v21→v22 automática. `BackgroundLocation.toContentValues` / `fromCursor` actualizados; campos ya NO transient — sobreviven Parcel y SQLite.
+- **iOS (DB v6)**: mismas 3 columnas en `location`. `MAURSQLiteLocationDAO` `persistLocation` / `convertToLocation` actualizados.
+- **Resultado**: si el POST en real-time falla y la location entra a la cola de sync, los `events`, `battery`, `isCharging` ahora viajan con ella cuando se sincroniza después. Antes se perdían.
+
+#### Persistencia config completa iOS (paridad con Android)
+- **DB v7** añade columna `config_json TEXT` en `configuration`. `MAURSQLiteConfigurationDAO.persistConfiguration` ahora serializa todas las keys post-3.2.0 (`httpMethod`, `syncHttpMethod`, `httpMode`, `syncMode`, `queryParams`, `heartbeatInterval`, `mockLocationPolicy`, `drivingEvents`, `includeBattery`) a JSON. `retrieveConfiguration` rehidrata desde el blob.
+
+#### Helpers de permisos runtime (Android)
+Tres nuevos métodos JS para que la app pueda controlar el flujo de permisos modernos:
+- `requestBackgroundLocationPermission()` — pide `ACCESS_BACKGROUND_LOCATION` (Android 10+).
+- `requestActivityRecognitionPermission()` — pide `ACTIVITY_RECOGNITION` (Android 10+).
+- `requestNotificationPermission()` — pide `POST_NOTIFICATIONS` (Android 13+).
+
+Resuelven con `{ granted: boolean, denied?: string[], notRequired?: boolean }`.
+En iOS y Android < versión mínima resuelven inmediatamente con `notRequired: true`.
+
+#### iOS sync cleanup tras success (bug fix)
+- `MAURBackgroundSync` ahora llama `deletePendingSyncLocations` tras un POST batch exitoso (2xx). Antes la cola SQLite no se vaciaba, provocando re-uploads de los mismos rows en cada ciclo.
+
+### Migraciones
+- Android DB v21 → v22 (location columns).
+- iOS DB v5 → v7 (location + configuration columns). v5→v6 añade location columns; v6→v7 añade config_json.
+
+## [4.4.1](https://github.com/josuelmm/cordova-background-geolocation/tree/4.4.1) (2026-05-09)
+
+### Fixed — stability patch
+
+#### Crítico
+- **Android: persistencia de configuración**. Tras un reboot + `startOnBoot`, las opciones añadidas desde 3.3.0 (`httpMethod`, `syncHttpMethod`, `httpMode`, `syncMode`, `queryParams`, `heartbeatInterval`, `mockLocationPolicy`, `drivingEvents`, `includeBattery`) volvían a default porque `SQLiteConfigurationDAO` solo persistía las columnas de 3.2.0. Solución: nueva columna `config_json TEXT` (DB v20→v21) que serializa todo el `Config`. Las columnas viejas se mantienen pobladas para retrocompat.
+- **Android: `Config.merge()` ignoraba `includeBattery`**. `configure({includeBattery: false})` se descartaba en el merge interno y el plugin seguía estampando batería en cada location. Arreglado.
+
+#### Real
+- **Android: `attachBatterySnapshot` rompía con el override interno de `registerReceiver`**. El servicio sobrescribe `registerReceiver` para forzar `RECEIVER_NOT_EXPORTED` + handler — incompatible con la lectura sticky-only que necesita batería. Ahora la batería se lee con `getApplicationContext().registerReceiver(null, filter)` para bypassear el override.
+- **iOS `MAURPostLocationTask.m:258`**: `*outError == nil` sin guard de `outError == NULL`. Crash defensivo si futuro caller pasa NULL. Añadido `if (outError == NULL || *outError == nil)`.
+- **`pendingDrivingEvents` (Android+iOS)**: ahora capped a 20 entradas (oldest evicted) y al drenar descarta las que tengan `time` > 60s para no anexar eventos cuyo contexto ya no es relevante.
+
+#### Menor
+- `plugin.xml`: `<uses-permission android:name="android.hardware.location" />` → `<uses-feature android:name="android.hardware.location" android:required="false" />`. `android.hardware.location` es feature, no permiso.
+- `www/BackgroundGeolocation.js`: removido comentario huérfano "1. new method isLocationEnabled" (no existe método).
+
+#### Diseño
+- Para evitar dependencia circular `common → cordova`, la serialización JSON del Config vive en una nueva clase `com.marianhello.bgloc.data.ConfigJsonMapper` (en `common/`). Tanto el SQLite DAO (common) como el `ConfigMapper` Cordova (cordova) pueden reusarla. **Registrada en `plugin.xml` como `<source-file>`** para que llegue al APK.
+- `template` (postTemplate) se mantiene en su columna SQLite dedicada porque tiene serialización propia (`LocationTemplateFactory`). El DAO la rehidrata después de leer el JSON para no perderla.
+- Strings con `Config.NullString` sentinel (cuando el usuario hace `configure({notificationTitle: null})`) sobreviven el round-trip via JSONObject.NULL.
+
+#### Decisiones conscientes (no cambiadas en este patch)
+- Eventos/batería NO sobreviven a la cola de sync. Documentado en 4.3.0/4.4.0. Cambiar el schema de `locations` rompería migraciones de apps existentes.
+- Permisos runtime modernos (`ACCESS_BACKGROUND_LOCATION`, `ACTIVITY_RECOGNITION`) NO se piden automáticamente por el plugin — convención: la app controla el flujo. Posibles helpers `requestBackgroundLocationPermission()` / `requestActivityRecognitionPermission()` quedan para una v4.5.
+- **iOS `MAURSQLiteConfigurationDAO`** tiene la misma limitación que tenía Android antes: solo persiste columnas heredadas de 3.2.0. Impacto práctico bajo en iOS porque Apple no permite auto-start al boot — la app siempre llama `configure()` al arrancar. Si más adelante se quiere paridad, se replicará el approach `config_json` de Android.
+
+## [4.4.0](https://github.com/josuelmm/cordova-background-geolocation/tree/4.4.0) (2026-05-09)
+
+### Added — Battery snapshot in every location payload
+
+Cada `location` enviada al backend incluye automáticamente:
+- `battery: number` (0-100, porcentaje)
+- `isCharging: boolean`
+
+Ejemplo:
+
+```json
+{
+  "latitude": 40.4168,
+  "longitude": -3.7038,
+  "time": 1730000000000,
+  "speed": 8.2,
+  "battery": 78,
+  "isCharging": false
+}
+```
+
+#### Configuración
+- Default: **ON**.
+- Opt-out: `configure({ includeBattery: false })`.
+
+#### Templates custom
+Si usas `postTemplate` / `bodyTemplate`, añade los placeholders `'@battery'` / `'@isCharging'`:
+
+```js
+bodyTemplate: {
+  deviceId: 'ABC',
+  lat: '@latitude',
+  lon: '@longitude',
+  bat: '@battery',
+  charging: '@isCharging'
+}
+```
+
+#### Detalles técnicos
+- Android: lectura instantánea via `Intent.ACTION_BATTERY_CHANGED` sticky broadcast (sin permisos extra). Stamp en `LocationServiceImpl.onLocation`.
+- iOS: lectura via `UIDevice.batteryLevel` y `UIDevice.batteryState` (activa `batteryMonitoringEnabled` automáticamente). Stamp en `MAURBackgroundGeolocationFacade.onLocationChanged`.
+- Reemplaza la dependencia de `cordova-plugin-battery-status` para apps que solo querían enviar la batería al backend con cada fix.
+
+## [4.3.0](https://github.com/josuelmm/cordova-background-geolocation/tree/4.3.0) (2026-05-09)
+
+### Added — Driving events anexados al payload de location
+
+Cuando un driving event se dispara, ahora se anexa al location del momento como atributo `events: [...]` y viaja al backend en el mismo POST. La emisión por JS (`on('hardBrake', ...)`) sigue funcionando exactamente igual — esto solo añade el evento al payload.
+
+```json
+{
+  "latitude": 40.4168,
+  "longitude": -3.7038,
+  "time": 1730000000000,
+  "speed": 8.2,
+  "events": [
+    { "type": "hardBrake", "value": -4.1, "time": 1730000000000 }
+  ]
+}
+```
+
+Tipos posibles: `moving`, `stopped`, `tripStart`, `tripEnd`, `speeding`, `providerChange`, `hardBrake`, `rapidAcceleration`, `sharpTurn`, `possibleCrash`, `phoneUsageWhileDriving`. Cada uno con su payload adicional (`value`, `distance`, `source`, etc.).
+
+#### Detalles técnicos
+- Android: nuevo campo `transient JSONArray drivingEvents` en `BackgroundLocation`. Helpers `addDrivingEvent`/`getDrivingEvents`/`clearDrivingEvents`. `toJSONObject()` lo incluye si está populado.
+- iOS: nueva property `NSMutableArray *drivingEvents` en `MAURLocation`. `toDictionary` la incluye. `copyWithZone:` la copia.
+- Buffer de "pending events" para eventos que disparan sin un fix simultáneo (sensor crash, phone usage, providerChange) — se drenan al próximo `onLocation`.
+- Eventos GPS-derived (hardBrake, sharpTurn, etc.) se anexan en el mismo callback del detector, antes del broadcast a JS.
+
+#### Caveat
+Si el POST en real-time falla y la location entra a la cola de sync (SQLite/Core Data), el array `events` NO sobrevive — los eventos siguen emitiéndose por JS para que la app pueda postearlos por separado. La cola de sync solo guarda el formato GPS estándar (no se cambió el schema para preservar migraciones existentes).
+
+Si usas `postTemplate`/`bodyTemplate` custom, los `events` no se incluyen automáticamente — el template solo serializa los keys que declara. Para incluirlos, añade `events: '@events'` (o el nombre que prefieras) a tu template:
+
+```js
+postTemplate: {
+  lat: '@latitude',
+  lon: '@longitude',
+  t:   '@time',
+  events: '@events'   // ← v4.3
+}
+```
+
+## [4.2.4](https://github.com/josuelmm/cordova-background-geolocation/tree/4.2.4) (2026-05-09)
+
+### Fixed (CRÍTICO)
+- **Foreground service no arrancaba en Android 14+** cuando la reflexión sobre `ServiceInfo.foregroundServiceType` fallaba o el manifest merged no incluía el atributo. Síntomas: sin notificación, sin tracking en background, sin envío de ubicaciones al minimizar/cerrar la app.
+  - `LocationServiceImpl.startForeground()`: si `getManifestForegroundServiceType()` devuelve `0`, ahora hace fallback a `0x00000008` (`FOREGROUND_SERVICE_TYPE_LOCATION`) con un `logger.warn` visible — antes retornaba silenciosamente y dejaba el servicio en background sin promover.
+  - `try/catch` defensivo alrededor de `super.startForeground(...)` con retry sin tipo si la primera llamada falla.
+  - El tipo se aplica desde API 30+ (antes solo desde 34); Android 12-13 (API 31-33) lo aceptan opcionalmente y mejora el comportamiento bajo Doze/restricciones.
+
 ## [4.2.3](https://github.com/josuelmm/cordova-background-geolocation/tree/4.2.3) (2026-05-09)
 
 ### Fixed

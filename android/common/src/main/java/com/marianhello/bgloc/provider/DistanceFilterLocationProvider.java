@@ -33,9 +33,10 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
     private static final String SINGLE_LOCATION_UPDATE_ACTION   = P_NAME + ".SINGLE_LOCATION_UPDATE_ACTION";
     private static final String STATIONARY_LOCATION_MONITOR_ACTION = P_NAME + ".STATIONARY_LOCATION_MONITOR_ACTION";
 
-    private static final long STATIONARY_TIMEOUT                                = 5 * 1000 * 60;    // 5 minutes.
-    private static final long STATIONARY_LOCATION_POLLING_INTERVAL_LAZY         = 3 * 1000 * 60;    // 3 minutes.
-    private static final long STATIONARY_LOCATION_POLLING_INTERVAL_AGGRESSIVE   = 1 * 1000 * 60;    // 1 minute.
+    // v4.5.1: defaults — overridable per-config via config.stationaryTimeout / stationaryPollInterval / stationaryPollFast
+    private static final long DEFAULT_STATIONARY_TIMEOUT                                = 5 * 1000 * 60;
+    private static final long DEFAULT_STATIONARY_LOCATION_POLLING_INTERVAL_LAZY         = 3 * 1000 * 60;
+    private static final long DEFAULT_STATIONARY_LOCATION_POLLING_INTERVAL_AGGRESSIVE   = 1 * 1000 * 60;
     private static final int MAX_STATIONARY_ACQUISITION_ATTEMPTS = 5;
     private static final int MAX_SPEED_ACQUISITION_ATTEMPTS = 3;
 
@@ -50,6 +51,20 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
     private PendingIntent stationaryAlarmPI;
     private PendingIntent stationaryLocationPollingPI;
     private long stationaryLocationPollingInterval;
+
+    /** v4.5.1: read overrides from {@link com.marianhello.bgloc.Config}; fall back to defaults. */
+    private long getStationaryTimeout() {
+        Integer v = mConfig != null ? mConfig.getStationaryTimeout() : null;
+        return v != null ? v.longValue() : DEFAULT_STATIONARY_TIMEOUT;
+    }
+    private long getStationaryPollLazy() {
+        Integer v = mConfig != null ? mConfig.getStationaryPollInterval() : null;
+        return v != null ? v.longValue() : DEFAULT_STATIONARY_LOCATION_POLLING_INTERVAL_LAZY;
+    }
+    private long getStationaryPollFast() {
+        Integer v = mConfig != null ? mConfig.getStationaryPollFast() : null;
+        return v != null ? v.longValue() : DEFAULT_STATIONARY_LOCATION_POLLING_INTERVAL_AGGRESSIVE;
+    }
     private PendingIntent stationaryRegionPI;
     private PendingIntent singleUpdatePI;
     private Integer scaledDistanceFilter;
@@ -367,7 +382,7 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
     public void resetStationaryAlarm() {
         if (alarmManager == null || stationaryAlarmPI == null) return;
         alarmManager.cancel(stationaryAlarmPI);
-        alarmManager.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + STATIONARY_TIMEOUT, stationaryAlarmPI);
+        alarmManager.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + getStationaryTimeout(), stationaryAlarmPI);
     }
 
     private Integer calculateDistanceFilter(Float speed) {
@@ -401,7 +416,7 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
 
             this.stationaryRadius = proximityRadius;
 
-            startPollingStationaryLocation(STATIONARY_LOCATION_POLLING_INTERVAL_LAZY);
+            startPollingStationaryLocation(getStationaryPollLazy());
         } catch (SecurityException e) {
             logger.error("Security exception: {}", e.getMessage());
             this.handleSecurityException(e);
@@ -464,9 +479,9 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
         if (distance > stationaryRadius) {
             onExitStationaryRegion(location);
         } else if (distance > 0) {
-            startPollingStationaryLocation(STATIONARY_LOCATION_POLLING_INTERVAL_AGGRESSIVE);
-        } else if (stationaryLocationPollingInterval != STATIONARY_LOCATION_POLLING_INTERVAL_LAZY) {
-            startPollingStationaryLocation(STATIONARY_LOCATION_POLLING_INTERVAL_LAZY);
+            startPollingStationaryLocation(getStationaryPollFast());
+        } else if (stationaryLocationPollingInterval != getStationaryPollLazy()) {
+            startPollingStationaryLocation(getStationaryPollLazy());
         }
     }
 

@@ -30,6 +30,15 @@
 
 @property (nonatomic, weak) MAURConfig * _Nullable config;
 @property (nonatomic, weak) id<MAURPostLocationTaskDelegate> _Nullable delegate;
+/** v4.5.1 — pending driving events buffer owned by the facade; the task drains it onto the
+ *  post-transform location so events fired without a simultaneous fix (provider change,
+ *  sensor crash, phone usage) survive even if `locationTransform` returns a new instance.
+ *  Weak ref: if the facade is gone, no flush — by design. */
+@property (nonatomic, weak) NSMutableArray * _Nullable pendingDrivingEventsBuffer;
+/** v4.5.1 — same idea for the battery snapshot block. The facade installs a block that the
+ *  task invokes AFTER a successful transform, so even when `locationTransform` returns a
+ *  fresh instance, battery/charging fields land on what actually gets POSTed. */
+@property (nonatomic, copy) void (^ _Nullable attachBatterySnapshot)(MAURLocation * _Nonnull);
 
 - (void) add:(MAURLocation * _Nonnull)location;
 - (void) start;

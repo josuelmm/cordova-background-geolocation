@@ -83,6 +83,17 @@ public class Config implements Parcelable
     private String mockLocationPolicy;    // allow | flag | drop (default allow)
     // v4.0 (Phase 6): driver insights
     private DrivingEventsOptions drivingEvents;
+    // v4.4: include device battery in every location payload (default true).
+    private Boolean includeBattery;
+    // v4.5.1: battery-saving knobs.
+    /** WakeLock policy: 'none' | 'posting' | 'always'. Default 'posting'. */
+    private String wakeLockMode;
+    /** ms before declaring stationary. DistanceFilterLocationProvider default 5*60_000. */
+    private Integer stationaryTimeout;
+    /** Lazy poll interval while stationary (ms). Default 3*60_000. */
+    private Integer stationaryPollInterval;
+    /** Aggressive poll interval while stationary (ms). Default 60_000. */
+    private Integer stationaryPollFast;
 
     /** v4.0 Phase 6 + v4.1: driver-insights configuration. Plain holder; no Parcelable to keep this class diff small. */
     public static class DrivingEventsOptions {
@@ -149,6 +160,11 @@ public class Config implements Parcelable
         this.queryParams = CloneHelper.deepCopy(config.queryParams);
         this.heartbeatInterval = config.heartbeatInterval;
         this.mockLocationPolicy = config.mockLocationPolicy;
+        this.includeBattery = config.includeBattery;
+        this.wakeLockMode = config.wakeLockMode;
+        this.stationaryTimeout = config.stationaryTimeout;
+        this.stationaryPollInterval = config.stationaryPollInterval;
+        this.stationaryPollFast = config.stationaryPollFast;
         if (config.drivingEvents != null) {
             DrivingEventsOptions de = new DrivingEventsOptions();
             de.enabled            = config.drivingEvents.enabled;
@@ -251,7 +267,16 @@ public class Config implements Parcelable
             de.phoneUsageCooldownMs = dePhoneUsageCooldown;
             this.drivingEvents = de;
         }
-        Bundle bundle = in.readBundle();
+        // v4.4: includeBattery
+        setIncludeBattery((Boolean) in.readValue(null));
+        // v4.5.1: battery-saving knobs
+        setWakeLockMode(in.readString());
+        setStationaryTimeout((Integer) in.readValue(null));
+        setStationaryPollInterval((Integer) in.readValue(null));
+        setStationaryPollFast((Integer) in.readValue(null));
+        // v4.5.1 — pass the plugin's classloader so getSerializable() can deserialize
+        // LocationTemplate / HashMap subclasses across IPC boundaries (e.g. SyncService :sync process).
+        Bundle bundle = in.readBundle(Config.class.getClassLoader());
         setHttpHeaders((HashMap<String, String>) bundle.getSerializable("httpHeaders"));
         setQueryParams((HashMap<String, String>) bundle.getSerializable("queryParams"));
         setTemplate((LocationTemplate) bundle.getSerializable(AbstractLocationTemplate.BUNDLE_KEY));
@@ -298,6 +323,11 @@ public class Config implements Parcelable
         config.queryParams = null;
         config.heartbeatInterval = 0;
         config.mockLocationPolicy = "allow";
+        config.includeBattery = true; // v4.4: on by default
+        config.wakeLockMode = "posting";  // v4.5.1: hold wake lock only while posting/syncing
+        config.stationaryTimeout = 5 * 60 * 1000;
+        config.stationaryPollInterval = 3 * 60 * 1000;
+        config.stationaryPollFast = 60 * 1000;
 
         return config;
     }
@@ -365,6 +395,13 @@ public class Config implements Parcelable
         out.writeLong  (de != null ? de.phoneUsageWindowMs    : 4_000L);
         out.writeLong  (de != null ? de.phoneUsageCooldownMs  : 60_000L);
         out.writeInt   (de != null ? 1 : 0);
+        // v4.4: includeBattery
+        out.writeValue(getIncludeBattery());
+        // v4.5.1
+        out.writeString(getWakeLockMode());
+        out.writeValue(getStationaryTimeout());
+        out.writeValue(getStationaryPollInterval());
+        out.writeValue(getStationaryPollFast());
         Bundle bundle = new Bundle();
         bundle.putSerializable("httpHeaders", getHttpHeaders());
         bundle.putSerializable("queryParams", getQueryParams());
@@ -762,6 +799,24 @@ public class Config implements Parcelable
         this.enableWatchdog = enableWatchdog;
     }
 
+    @Nullable
+    public Boolean getIncludeBattery() {
+        return includeBattery;
+    }
+
+    public void setIncludeBattery(Boolean includeBattery) {
+        this.includeBattery = includeBattery;
+    }
+
+    @Nullable public String getWakeLockMode() { return wakeLockMode; }
+    public void setWakeLockMode(String mode) { this.wakeLockMode = mode; }
+    @Nullable public Integer getStationaryTimeout() { return stationaryTimeout; }
+    public void setStationaryTimeout(Integer ms) { this.stationaryTimeout = ms; }
+    @Nullable public Integer getStationaryPollInterval() { return stationaryPollInterval; }
+    public void setStationaryPollInterval(Integer ms) { this.stationaryPollInterval = ms; }
+    @Nullable public Integer getStationaryPollFast() { return stationaryPollFast; }
+    public void setStationaryPollFast(Integer ms) { this.stationaryPollFast = ms; }
+
     public boolean hasShowTime() {
         return showTime != null;
     }
@@ -1056,6 +1111,15 @@ public class Config implements Parcelable
         if (config2.drivingEvents != null) {
             merger.setDrivingEvents(config2.drivingEvents);
         }
+        // v4.4.1 — was missing: configure({includeBattery: false}) was being ignored.
+        if (config2.includeBattery != null) {
+            merger.setIncludeBattery(config2.getIncludeBattery());
+        }
+        // v4.5.1 — battery-saving knobs.
+        if (config2.wakeLockMode != null) merger.setWakeLockMode(config2.wakeLockMode);
+        if (config2.stationaryTimeout != null) merger.setStationaryTimeout(config2.stationaryTimeout);
+        if (config2.stationaryPollInterval != null) merger.setStationaryPollInterval(config2.stationaryPollInterval);
+        if (config2.stationaryPollFast != null) merger.setStationaryPollFast(config2.stationaryPollFast);
 
         return merger;
     }

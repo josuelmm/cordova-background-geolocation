@@ -10,6 +10,7 @@ import org.json.JSONObject;
 import org.json.JSONException;
 
 import com.marianhello.bgloc.Config;
+import com.marianhello.bgloc.data.ConfigJsonMapper;
 import com.marianhello.bgloc.data.ConfigurationDAO;
 import com.marianhello.bgloc.data.LocationTemplateFactory;
 import com.marianhello.bgloc.data.sqlite.SQLiteConfigurationContract.ConfigurationEntry;
@@ -63,7 +64,8 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
       ConfigurationEntry.COLUMN_NAME_MAX_LOCATIONS,
       ConfigurationEntry.COLUMN_NAME_TEMPLATE,
       ConfigurationEntry.COLUMN_NAME_SHOW_TIME,
-      ConfigurationEntry.COLUMN_NAME_SHOW_DISTANCE
+      ConfigurationEntry.COLUMN_NAME_SHOW_DISTANCE,
+      ConfigurationEntry.COLUMN_NAME_CONFIG_JSON
     };
 
     String whereClause = null;
@@ -105,6 +107,26 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
   }
 
   private Config hydrate(Cursor c) throws JSONException {
+    // v4.4.1: prefer the full JSON blob if present (covers all keys, including post-3.2 ones).
+    // Note: `template` (postTemplate) lives in its dedicated column — restore it after the
+    // JSON deserialization so it's not lost when the config arrived via config_json only.
+    int idxJson = c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_CONFIG_JSON);
+    if (idxJson >= 0 && !c.isNull(idxJson)) {
+      String json = c.getString(idxJson);
+      if (json != null && !json.isEmpty()) {
+        try {
+          Config restored = ConfigJsonMapper.fromJSONObject(new JSONObject(json));
+          int idxTpl = c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_TEMPLATE);
+          if (idxTpl >= 0 && !c.isNull(idxTpl)) {
+            restored.setTemplate(LocationTemplateFactory.fromJSONString(c.getString(idxTpl)));
+          }
+          return restored;
+        } catch (JSONException ex) {
+          Log.w(TAG, "config_json parse failed; falling back to legacy columns: " + ex.getMessage());
+        }
+      }
+    }
+    // Legacy hydration (DBs upgraded from v20 or earlier where config_json is still NULL).
     Config config = Config.getDefault();
     config.setStationaryRadius(c.getFloat(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_RADIUS)));
     config.setDistanceFilter(c.getInt(c.getColumnIndex(ConfigurationEntry.COLUMN_NAME_DISTANCE_FILTER)));
@@ -190,6 +212,15 @@ public class SQLiteConfigurationDAO implements ConfigurationDAO {
     values.put(ConfigurationEntry.COLUMN_NAME_TEMPLATE, config.hasTemplate() ? config.getTemplate().toString() : null);
     values.put(ConfigurationEntry.COLUMN_NAME_SHOW_TIME, Boolean.TRUE.equals(config.getShowTime()) ? 1 : 0);
     values.put(ConfigurationEntry.COLUMN_NAME_SHOW_DISTANCE, Boolean.TRUE.equals(config.getShowDistance()) ? 1 : 0);
+    // v4.4.1: persist the full Config as JSON so post-3.2 fields (httpMethod, queryParams,
+    // drivingEvents, includeBattery, mockLocationPolicy, heartbeatInterval, ...) survive
+    // a reboot / startOnBoot. Legacy columns are kept populated above for backward compat.
+    try {
+      values.put(ConfigurationEntry.COLUMN_NAME_CONFIG_JSON,
+              ConfigJsonMapper.toJSONObject(config).toString());
+    } catch (JSONException e) {
+      Log.w(TAG, "config_json serialize failed: " + e.getMessage());
+    }
 
     return values;
   }

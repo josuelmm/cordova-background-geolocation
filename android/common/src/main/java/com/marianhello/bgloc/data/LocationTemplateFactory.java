@@ -60,6 +60,12 @@ public class LocationTemplateFactory {
         attrs.put("altitude", "@altitude");
         attrs.put("bearing", "@bearing");
         attrs.put("radius", "@radius");
+        // v4.5.1 — README/CHANGELOG promete que el payload default incluye events/battery/isCharging.
+        // Como Config.getTemplate() siempre cae a este default si no hay postTemplate custom, hay
+        // que añadirlos aquí para que PostLocationTask + BatchManager los serialicen al backend.
+        attrs.put("events", "@events");
+        attrs.put("battery", "@battery");
+        attrs.put("isCharging", "@isCharging");
         return new HashMapLocationTemplate(attrs);
     }
 }

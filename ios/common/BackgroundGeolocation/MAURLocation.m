@@ -20,13 +20,25 @@ enum {
 + (instancetype) map:(MAURLocation*)location;
 @end
 
-@implementation MAURLocationMapper
-MAURLocation* _location;
+// v4.5.1 — _location was previously a file-scope global. With real-time post (background queue)
+// and background sync (NSURLSession queue) running concurrently, the second [+map:] invocation
+// overwrote _location while the first mapper was mid-serialize, producing mixed location fields
+// at the backend. Now per-instance ivar.
+@implementation MAURLocationMapper {
+    MAURLocation *_location;
+}
 
 - (id) mapValue:(id)value
 {
     if ([value isKindOfClass:[NSString class]]) {
         id locationValue = [_location getValueForKey:value];
+        // v4.5.1 — for placeholder keys ("@time", "@events", "@battery", ...), if the location
+        // has no value, return NSNull instead of leaking the literal "@events" string to the
+        // backend. For non-placeholder static strings (e.g. a `deviceId` literal in postTemplate)
+        // keep the previous behaviour and return the string as-is.
+        if ([value hasPrefix:@"@"]) {
+            return locationValue != nil ? locationValue : [NSNull null];
+        }
         return locationValue != nil ? locationValue : value;
     } else if ([value isKindOfClass:[NSDictionary class]]) {
         return [self withDictionary:value];
@@ -63,7 +75,7 @@ MAURLocation* _location;
 + (instancetype) map:(MAURLocation*)location
 {
     MAURLocationMapper *instance = [[MAURLocationMapper alloc] init];
-    _location = location;
+    instance->_location = location;
     return instance;
 }
 @end
@@ -71,7 +83,7 @@ MAURLocation* _location;
 
 @implementation MAURLocation
 
-@synthesize locationId, time, accuracy, altitudeAccuracy, speed, heading, altitude, latitude, longitude, provider, locationProvider, radius, isValid, recordedAt, simulated;
+@synthesize locationId, time, accuracy, altitudeAccuracy, speed, heading, altitude, latitude, longitude, provider, locationProvider, radius, isValid, recordedAt, simulated, drivingEvents, batteryLevel, isCharging;
 
 + (instancetype) fromCLLocation:(CLLocation*)location;
 {
@@ -172,6 +184,11 @@ MAURLocation* _location;
     if (radius != nil) [dict setObject:radius forKey:@"radius"];
     if (recordedAt != nil) [dict setObject:[NSNumber numberWithDouble:([recordedAt timeIntervalSince1970] * 1000)] forKey:@"recordedAt"];
     if (simulated != nil) [dict setObject:simulated forKey:@"simulated"];
+    // v4.3 — driving events anexados a este fix
+    if (drivingEvents != nil && [drivingEvents count] > 0) [dict setObject:drivingEvents forKey:@"events"];
+    // v4.4 — battery snapshot
+    if (batteryLevel != nil) [dict setObject:batteryLevel forKey:@"battery"];
+    if (isCharging != nil)   [dict setObject:isCharging   forKey:@"isCharging"];
 
     return dict;
 }
@@ -227,6 +244,13 @@ MAURLocation* _location;
     if ([key isEqualToString:@"@simulated"]) {
         return simulated;
     }
+    // v4.3 — driving events array (nil when no events on this fix; mapper drops nil keys).
+    if ([key isEqualToString:@"@events"]) {
+        return (drivingEvents != nil && [drivingEvents count] > 0) ? drivingEvents : nil;
+    }
+    // v4.4 — battery snapshot
+    if ([key isEqualToString:@"@battery"])    return batteryLevel;
+    if ([key isEqualToString:@"@isCharging"]) return isCharging;
 
     return nil;
 }
@@ -355,6 +379,11 @@ MAURLocation* _location;
         copy.radius = radius;
         copy.isValid = isValid;
         copy.simulated = simulated;
+        // v4.3: copy driving events array reference (transient; mutating one affects the other,
+        // but in practice the original is discarded right after the copy is posted).
+        copy.drivingEvents = drivingEvents != nil ? [drivingEvents mutableCopy] : nil;
+        copy.batteryLevel = batteryLevel;
+        copy.isCharging = isCharging;
     }
 
     return copy;

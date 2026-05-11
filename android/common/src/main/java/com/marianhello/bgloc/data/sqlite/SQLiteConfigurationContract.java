@@ -47,6 +47,9 @@ public final class SQLiteConfigurationContract {
         public static final String COLUMN_NAME_TEMPLATE = "template";
         public static final String COLUMN_NAME_SHOW_TIME = "show_time";
         public static final String COLUMN_NAME_SHOW_DISTANCE = "show_distance";
+        // v4.4.1 — single JSON blob holding the full config (replaces per-field columns
+        // for new keys). Old columns are kept for backward compat with v20 databases.
+        public static final String COLUMN_NAME_CONFIG_JSON = "config_json";
 
         public static final String SQL_CREATE_CONFIG_TABLE =
                 "CREATE TABLE " + ConfigurationEntry.TABLE_NAME + " (" +
@@ -81,7 +84,8 @@ public final class SQLiteConfigurationContract {
                         ConfigurationEntry.COLUMN_NAME_MAX_LOCATIONS + INTEGER_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_TEMPLATE + TEXT_TYPE + COMMA_SEP +
                         ConfigurationEntry.COLUMN_NAME_SHOW_TIME + INTEGER_TYPE + COMMA_SEP +
-                        ConfigurationEntry.COLUMN_NAME_SHOW_DISTANCE + INTEGER_TYPE +
+                        ConfigurationEntry.COLUMN_NAME_SHOW_DISTANCE + INTEGER_TYPE + COMMA_SEP +
+                        ConfigurationEntry.COLUMN_NAME_CONFIG_JSON + TEXT_TYPE +
                         " )";
 
         public static final String SQL_DROP_CONFIG_TABLE =

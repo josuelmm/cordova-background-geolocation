@@ -83,11 +83,63 @@ static MAURLocationTransform s_locationTransform = nil;
         MAURLocation *location = inLocation;
 
         if (locationTransform != nil) {
+            // v4.5.1 — snapshot v4.3+ fields BEFORE transform so they survive a transform
+            // that returns a brand new MAURLocation instance (otherwise events/battery would
+            // be lost en route to SQLite / backend).
+            NSMutableArray *rawEvents = inLocation.drivingEvents;
+            NSNumber *rawBattery = inLocation.batteryLevel;
+            NSNumber *rawCharging = inLocation.isCharging;
+
             location = locationTransform(location);
 
             if (location == nil) {
                 return;
             }
+
+            // v4.5.1 — re-attach fields the transform may have dropped. When the transform
+            // produced a NEW instance (`location != inLocation`), MERGE rawEvents into the new
+            // instance's array instead of overwriting — same semantics as Android
+            // `LocationServiceImpl.onLocation` re-attach. If the transform returned the same
+            // instance (mutated in place) the rawEvents are already there.
+            if (location != inLocation) {
+                if (rawEvents != nil && [rawEvents count] > 0) {
+                    if (location.drivingEvents == nil) {
+                        location.drivingEvents = [rawEvents mutableCopy];
+                    } else {
+                        [location.drivingEvents addObjectsFromArray:rawEvents];
+                    }
+                }
+                if (location.batteryLevel == nil) location.batteryLevel = rawBattery;
+                if (location.isCharging == nil)   location.isCharging   = rawCharging;
+            }
+        }
+
+        // v4.5.1 — drain pending driving events ONTO the post-transform location. Previously
+        // the facade drained them BEFORE [postLocationTask add:], so a transform that returned
+        // nil silently lost every buffered event. Now: if transform succeeded we're guaranteed
+        // `location != nil` here and the buffer is drained safely.
+        NSMutableArray *pendingBuffer = self.pendingDrivingEventsBuffer;
+        if (pendingBuffer != nil) {
+            @synchronized (pendingBuffer) {
+                if ([pendingBuffer count] > 0) {
+                    NSTimeInterval nowMs = [[NSDate date] timeIntervalSince1970] * 1000.0;
+                    if (location.drivingEvents == nil) location.drivingEvents = [NSMutableArray array];
+                    for (NSDictionary *ev in pendingBuffer) {
+                        NSNumber *t = ev[@"time"];
+                        NSTimeInterval evMs = t != nil ? [t doubleValue] : nowMs;
+                        if (nowMs - evMs <= 60000.0) {
+                            [location.drivingEvents addObject:ev];
+                        }
+                    }
+                    [pendingBuffer removeAllObjects];
+                }
+            }
+        }
+        // v4.5.1 — stamp battery snapshot AFTER transform so it lands on the POSTed instance
+        // even if the transform created a new one.
+        void (^attachBattery)(MAURLocation *) = self.attachBatterySnapshot;
+        if (attachBattery != nil) {
+            attachBattery(location);
         }
 
         // v3.5 Phase 4: mock location policy. Detection already exists in MAURLocation.simulated.
@@ -255,7 +307,8 @@ static MAURLocationTransform s_locationTransform = nil;
         return YES;
     }
     
-    if (*outError == nil) {
+    // v4.4.1: guard against outError == NULL (defensive — current callers pass &error).
+    if (outError == NULL || *outError == nil) {
         DDLogDebug(@"%@ Server error while posting locations responseCode: %ld", TAG, (long)statusCode);
     } else {
         DDLogError(@"%@ Error while posting locations %@", TAG, [*outError localizedDescription]);
@@ -269,6 +322,11 @@ static MAURLocationTransform s_locationTransform = nil;
     if (![self.config syncEnabled] || ![self.config hasValidSyncUrl]) {
         return;
     }
+    // v4.5.1 — rescue rows stuck in SyncPending from a previous upload that never completed
+    // (app/process killed mid-flight). Anything older than 15 min is safe to revert to
+    // PostPending; rows younger than that may still be uploading on a background NSURLSession.
+    NSTimeInterval staleCutoff = [[NSDate date] timeIntervalSince1970] - (15 * 60);
+    [[MAURSQLiteLocationDAO sharedInstance] restoreStaleSyncLocationsOlderThan:staleCutoff error:nil];
     // For sync (batch) only static queryParams placeholders apply; per-location templating
     // belongs in real-time post (httpMode="single" + httpMethod=GET) instead.
     NSString *resolvedSyncUrl = [MAURUrlTemplateResolver resolve:self.config.syncUrl location:nil queryParams:self.config.queryParams];

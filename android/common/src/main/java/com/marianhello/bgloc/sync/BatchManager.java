@@ -188,12 +188,22 @@ public class BatchManager {
         }
 
         private void writeValue(Object value) throws IOException {
-            if (value instanceof String ) {
+            if (value == null || value == JSONObject.NULL) {
+                writer.nullValue();
+            } else if (value instanceof String ) {
                 writer.value((String) value);
             } else if (value instanceof Map) {
                 writeMap((Map) value);
             } else if (value instanceof List) {
                 writeList((List) value);
+            // v4.5.1 — handle JSONArray / JSONObject so that placeholders that resolve to
+            // structured data (@events → JSONArray of events) are written as real JSON arrays /
+            // objects, not as escaped strings. Without this, a fix coming out of the sync queue
+            // serialised "events" as "[{\"type\":\"hardBrake\"}]" literal.
+            } else if (value instanceof org.json.JSONArray) {
+                writeJsonArray((org.json.JSONArray) value);
+            } else if (value instanceof org.json.JSONObject) {
+                writeJsonObject((org.json.JSONObject) value);
             } else if (Integer.class.isInstance(value)) {
                 writer.value((Integer) value);
             } else if (Double.class.isInstance(value)) {
@@ -204,11 +214,42 @@ public class BatchManager {
                 writer.value((Long) value);
             } else if (Boolean.class.isInstance(value)) {
                 writer.value((Boolean) value);
-            } else if (value == JSONObject.NULL) {
-                writer.nullValue();
             } else {
                 writer.value(String.valueOf(value));
             }
+        }
+
+        private void writeJsonArray(org.json.JSONArray arr) throws IOException {
+            writer.beginArray();
+            for (int i = 0; i < arr.length(); i++) {
+                Object v = arr.opt(i);
+                writeValue(v == null ? JSONObject.NULL : v);
+            }
+            writer.endArray();
+        }
+
+        private void writeJsonObject(org.json.JSONObject obj) throws IOException {
+            writer.beginObject();
+            Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                writer.name(k);
+                writeValue(obj.opt(k));
+            }
+            writer.endObject();
+        }
+
+        /** v4.5.1 — resolve a template string. If it is a placeholder ("@foo") and the location
+         *  has no value, return JSONObject.NULL so the writer emits `null` instead of the literal
+         *  "@foo" string. */
+        private Object resolveTemplateValue(Object value) {
+            if (value instanceof String) {
+                String s = (String) value;
+                Object resolved = location.getValueForKey(s);
+                if (resolved != null) return resolved;
+                if (s.startsWith("@")) return JSONObject.NULL;
+            }
+            return value;
         }
 
         public void writeMap(Map values) throws IOException {
@@ -218,12 +259,8 @@ public class BatchManager {
                 Map.Entry<String, Object> pair = (Map.Entry) it.next();
                 String key = pair.getKey();
                 Object value = pair.getValue();
-                Object locationValue = null;
-                if (value instanceof String) {
-                    locationValue = location.getValueForKey((String)value);
-                }
                 writer.name(key);
-                writeValue(locationValue != null ? locationValue : value);
+                writeValue(resolveTemplateValue(value));
             }
             writer.endObject();
         }
@@ -233,11 +270,7 @@ public class BatchManager {
             Iterator<?> it = values.iterator();
             while (it.hasNext()) {
                 Object value = it.next();
-                Object locationValue = null;
-                if (value instanceof  String) {
-                    locationValue = location.getValueForKey((String) value);
-                }
-                writeValue(locationValue != null ? locationValue : value);
+                writeValue(resolveTemplateValue(value));
             }
             writer.endArray();
         }

@@ -117,6 +117,10 @@ NSString * const MAURBackgroundSyncDidProgressNotification = @"MAURBackgroundSyn
 
     // Stash count so didCompleteWithError can report it as syncSuccess payload.
     objc_setAssociatedObject(task, "locationsSent", @([jsonArray count]), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // v4.5.1: capture cutoff timestamp NOW so on success we delete only the rows that existed
+    // before the upload started. Locations persisted DURING the upload are preserved.
+    objc_setAssociatedObject(task, "uploadCutoff",
+        @([[NSDate date] timeIntervalSince1970]), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     [task resume];
 
@@ -216,6 +220,10 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend
 
     dispatch_async(dispatch_get_main_queue(), ^{
         if (error != nil) {
+            // v4.5.1 — restore SyncPending → PostPending so the failed locations get retried
+            // on the next sync window. Without this, a single network drop loses everything.
+            NSError *restErr = nil;
+            [[MAURSQLiteLocationDAO sharedInstance] restoreFailedSyncLocations:&restErr];
             NSString *msg = error.localizedDescription ?: @"";
             if (_delegate && [_delegate respondsToSelector:@selector(backgroundSyncFailed:httpStatus:message:)]) {
                 [_delegate backgroundSyncFailed:self httpStatus:0 message:msg];
@@ -225,6 +233,9 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend
                               object:self
                             userInfo:@{@"httpStatus": @0, @"message": msg}];
         } else if (!isStatusOkay) {
+            // v4.5.1 — server-side failure (5xx, 4xx other than 285/401): also restore the rows.
+            NSError *restErr = nil;
+            [[MAURSQLiteLocationDAO sharedInstance] restoreFailedSyncLocations:&restErr];
             NSString *msg = [NSString stringWithFormat:@"HTTP %ld", (long)statusCode];
             if (_delegate && [_delegate respondsToSelector:@selector(backgroundSyncFailed:httpStatus:message:)]) {
                 [_delegate backgroundSyncFailed:self httpStatus:statusCode message:msg];
@@ -234,6 +245,15 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend
                               object:self
                             userInfo:@{@"httpStatus": @(statusCode), @"message": msg}];
         } else {
+            // v4.5.1: drop SYNC_PENDING locations whose recorded_at is <= the captured upload-start
+            // cutoff. This preserves any new locations persisted DURING the upload (race window).
+            NSNumber *cutoffNum = objc_getAssociatedObject(task, "uploadCutoff");
+            NSTimeInterval cutoff = cutoffNum != nil ? [cutoffNum doubleValue] : [[NSDate date] timeIntervalSince1970];
+            NSError *delErr = nil;
+            BOOL deleted = [[MAURSQLiteLocationDAO sharedInstance] deleteSyncedLocationsBefore:cutoff error:&delErr];
+            if (!deleted) {
+                NSLog(@"deleteSyncedLocationsBefore after success failed: %@", delErr.localizedDescription ?: @"unknown");
+            }
             if (_delegate && [_delegate respondsToSelector:@selector(backgroundSyncSucceeded:locationsSent:)]) {
                 [_delegate backgroundSyncSucceeded:self locationsSent:locationsSent];
             }

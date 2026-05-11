@@ -11,6 +11,7 @@ import androidx.core.util.TimeUtils;
 
 import com.marianhello.bgloc.data.sqlite.SQLiteLocationContract.LocationEntry;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -42,6 +43,20 @@ public class BackgroundLocation implements Parcelable {
     private int mockFlags = 0x0000;
     private int status = POST_PENDING;
     private Bundle extras = null;
+
+    /**
+     * v4.3 — Driving events anexados al fix actual.
+     * v4.5: ahora se persiste en SQLite (events_json TEXT) y se propaga vía Parcel para
+     * sobrevivir a la cola de sync. Si el POST en real-time falla, los eventos llegan al
+     * backend cuando la location se sincroniza más tarde.
+     */
+    private JSONArray drivingEvents;
+
+    /** v4.4 — Device battery percentage (0-100) at the time of this fix, or null if unknown
+     *  or {@code includeBattery} is disabled. v4.5: persisted in SQLite + Parcel. */
+    private Integer batteryLevel;
+    /** v4.4 — Whether the device is charging at the time of this fix. v4.5: persisted. */
+    private Boolean isCharging;
 
     private static final long TWO_MINUTES_IN_NANOS = 1000000000L * 60 * 2;
 
@@ -106,6 +121,12 @@ public class BackgroundLocation implements Parcelable {
         mockFlags = l.mockFlags;
         status = l.status;
         extras = (l.extras == null) ? null : new Bundle(l.extras);
+        // v4.5: copy v4.3+ persisted fields
+        if (l.drivingEvents != null) {
+            try { drivingEvents = new JSONArray(l.drivingEvents.toString()); } catch (JSONException ignored) {}
+        }
+        batteryLevel = l.batteryLevel;
+        isCharging = l.isCharging;
     }
 
     private static BackgroundLocation fromParcel(Parcel in) {
@@ -134,6 +155,13 @@ public class BackgroundLocation implements Parcelable {
         l.mockFlags = in.readInt();
         l.status = in.readInt();
         l.extras = in.readBundle();
+        // v4.5: read driving events / battery / charging
+        String evJson = in.readString();
+        if (evJson != null) {
+            try { l.drivingEvents = new JSONArray(evJson); } catch (JSONException ignored) {}
+        }
+        l.batteryLevel = (Integer) in.readValue(null);
+        l.isCharging = (Boolean) in.readValue(null);
 
         return l;
     }
@@ -205,6 +233,18 @@ public class BackgroundLocation implements Parcelable {
         l.setStatus(c.getInt(c.getColumnIndex(LocationEntry.COLUMN_NAME_STATUS)));
         l.setLocationId(c.getLong(c.getColumnIndex(LocationEntry._ID)));
         l.setMockFlags(c.getInt((c.getColumnIndex(LocationEntry.COLUMN_NAME_MOCK_FLAGS))));
+        // v4.5: events / battery / charging — guarded for DBs that may have NULL after migration.
+        int idxEv = c.getColumnIndex(LocationEntry.COLUMN_NAME_EVENTS_JSON);
+        if (idxEv >= 0 && !c.isNull(idxEv)) {
+            String s = c.getString(idxEv);
+            if (s != null && !s.isEmpty()) {
+                try { l.drivingEvents = new JSONArray(s); } catch (JSONException ignored) {}
+            }
+        }
+        int idxBat = c.getColumnIndex(LocationEntry.COLUMN_NAME_BATTERY_LEVEL);
+        if (idxBat >= 0 && !c.isNull(idxBat)) l.batteryLevel = c.getInt(idxBat);
+        int idxChg = c.getColumnIndex(LocationEntry.COLUMN_NAME_IS_CHARGING);
+        if (idxChg >= 0 && !c.isNull(idxChg)) l.isCharging = (c.getInt(idxChg) == 1);
 
         return l;
     }
@@ -239,6 +279,10 @@ public class BackgroundLocation implements Parcelable {
         dest.writeInt(mockFlags);
         dest.writeInt(status);
         dest.writeBundle(extras);
+        // v4.5: persist driving events / battery / charging through Parcel.
+        dest.writeString(drivingEvents != null ? drivingEvents.toString() : null);
+        dest.writeValue(batteryLevel);
+        dest.writeValue(isCharging);
     }
 
     public static final Parcelable.Creator<BackgroundLocation> CREATOR
@@ -899,9 +943,36 @@ public class BackgroundLocation implements Parcelable {
         if (hasRadius) json.put("radius", radius);
         if (hasIsFromMockProvider()) json.put("isFromMockProvider", isFromMockProvider());
         if (hasMockLocationsEnabled()) json.put("mockLocationsEnabled", areMockLocationsEnabled());
+        // v4.3: driving events anexados a este fix (si los hay).
+        if (drivingEvents != null && drivingEvents.length() > 0) {
+            json.put("events", drivingEvents);
+        }
+        // v4.4: device battery snapshot.
+        if (batteryLevel != null) json.put("battery", batteryLevel);
+        if (isCharging != null) json.put("isCharging", isCharging);
 
         return json;
   	}
+
+    // v4.3 — driving event helpers
+    /** Append a driving event to this location. The event survives only until the next
+     *  serialization in real-time POST. NOT persisted in SQLite. */
+    public void addDrivingEvent(JSONObject event) {
+        if (event == null) return;
+        if (drivingEvents == null) drivingEvents = new JSONArray();
+        drivingEvents.put(event);
+    }
+    public JSONArray getDrivingEvents() { return drivingEvents; }
+    public boolean hasDrivingEvents() { return drivingEvents != null && drivingEvents.length() > 0; }
+    public void clearDrivingEvents() { drivingEvents = null; }
+    /** v4.5: bulk setter used by SQLite hydration to restore the persisted events array. */
+    public void setDrivingEvents(JSONArray events) { this.drivingEvents = events; }
+
+    // v4.4 — battery helpers
+    public void setBatteryLevel(Integer level) { this.batteryLevel = level; }
+    public Integer getBatteryLevel() { return batteryLevel; }
+    public void setCharging(Boolean charging) { this.isCharging = charging; }
+    public Boolean isCharging() { return isCharging; }
 
     /**
      * Returns location as JSON object containing location id
@@ -942,6 +1013,18 @@ public class BackgroundLocation implements Parcelable {
         values.put(LocationEntry.COLUMN_NAME_STATUS, status);
         values.put(LocationEntry.COLUMN_NAME_BATCH_START_MILLIS, batchStartMillis);
         values.put(LocationEntry.COLUMN_NAME_MOCK_FLAGS, mockFlags);
+        // v4.5.1 — always write these columns (with NULL when absent) so that recycled rows
+        // in ContentProviderLocationDAO's max-rows UPDATE path do not inherit stale events,
+        // battery or charging state from the location previously stored at that _id.
+        if (drivingEvents != null && drivingEvents.length() > 0) {
+            values.put(LocationEntry.COLUMN_NAME_EVENTS_JSON, drivingEvents.toString());
+        } else {
+            values.putNull(LocationEntry.COLUMN_NAME_EVENTS_JSON);
+        }
+        if (batteryLevel != null) values.put(LocationEntry.COLUMN_NAME_BATTERY_LEVEL, batteryLevel);
+        else values.putNull(LocationEntry.COLUMN_NAME_BATTERY_LEVEL);
+        if (isCharging != null) values.put(LocationEntry.COLUMN_NAME_IS_CHARGING, isCharging ? 1 : 0);
+        else values.putNull(LocationEntry.COLUMN_NAME_IS_CHARGING);
         return values;
     }
 
@@ -987,6 +1070,17 @@ public class BackgroundLocation implements Parcelable {
         }
         if ("@mockLocationsEnabled".equals(key)) {
             return hasMockLocationsEnabled() ? areMockLocationsEnabled() : JSONObject.NULL;
+        }
+        // v4.3 — driving events array (only present if events were attached during this fix).
+        if ("@events".equals(key)) {
+            return drivingEvents != null ? drivingEvents : JSONObject.NULL;
+        }
+        // v4.4 — battery snapshot
+        if ("@battery".equals(key)) {
+            return batteryLevel != null ? batteryLevel : JSONObject.NULL;
+        }
+        if ("@isCharging".equals(key)) {
+            return isCharging != null ? isCharging : JSONObject.NULL;
         }
 
         return null;

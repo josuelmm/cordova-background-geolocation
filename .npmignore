@@ -8,6 +8,12 @@
 /REVIEW_*.md
 /RELEASE.MD
 /NPM_PUBLISH.md
+/CLAUDE.md
+# exclude dev tooling, CI, tarballs, workspace
+/scripts
+/.github
+/josuelmm-cordova-background-geolocation-*.tgz
+/cordova-background-geolocation-plugin.code-workspace
 !/plugin.xml
 !/package.json
 !/www
@@ -26,11 +32,16 @@
 !/android/common
 /android/common/*
 !/android/common/src
+/android/common/src/test
+/android/common/src/androidTest
 !/android/CDVBackgroundGeolocation
 /android/CDVBackgroundGeolocation/*
 !/android/CDVBackgroundGeolocation/src
+/android/CDVBackgroundGeolocation/src/test
 !/ios
 /ios/*
 !/ios/common
+/ios/common/BackgroundGeolocationTests
+/ios/common/scripts
 !/ios/CDVBackgroundGeolocation
 !/LICENSE

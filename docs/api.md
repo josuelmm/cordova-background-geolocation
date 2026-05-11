@@ -72,6 +72,52 @@ Configure options:
 | `showsBackgroundLocationIndicator` | `Boolean` | iOS         | **Since 3.4.0.** iOS 11+. When `true`, iOS shows the blue status bar / pill while the app uses location in the background. Apple recommends this for transparency in apps that track continuously.                                                                                                                                                | all         | `false`                    |
 | `heartbeatInterval`       | `Number`          | Android, iOS | **Since 3.5.0.** Interval (ms) at which the plugin emits a `heartbeat` event with the latest known location. `0` (default) disables the heartbeat. Native emission is wired end-to-end (Android `ScheduledExecutorService`, iOS `NSTimer`). On the first ticks before any GPS fix is received the event arrives without a location payload. | all         | `0`                        |
 | `mockLocationPolicy`      | `String`          | Android, iOS | **Since 3.5.0.** Policy for mocked locations (`isFromMockProvider` Android / `simulated` iOS). One of `allow` (default, keep), `flag` (deliver with the existing mocked flag set so the app/server can filter) or `drop` (discard before persisting/posting).                                                                                       | all         | `allow`                    |
+| `drivingEvents`           | `Object`          | Android, iOS | **Since 4.0.0.** Driver-insights configuration (GPS state machine + sensor fusion in 4.2+). See [Driver insights](#driver-insights-since-400).                                                                                                                                                                                                       | all         | `{ enabled: false }`       |
+| `includeBattery`          | `Boolean`         | Android, iOS | **Since 4.4.0.** Stamp `battery` (0-100) and `isCharging` on every fix sent to the backend. Set `false` to opt out.                                                                                                                                                                                                                                 | all         | `true`                     |
+| `wakeLockMode`            | `String`          | Android      | **Since 4.5.1.** WakeLock policy. `'none'` never; `'posting'` only during 30 s after each fix (default); `'always'` permanent while service runs (legacy).                                                                                                                                                                                          | all         | `'posting'`                |
+| `stationaryTimeout`       | `Number`          | Android      | **Since 4.5.1.** ms of no movement before declaring stationary. Was hardcoded 5*60_000.                                                                                                                                                                                                                                                              | DIS         | `300000`                   |
+| `stationaryPollInterval`  | `Number`          | Android      | **Since 4.5.1.** Lazy poll interval while stationary. Was hardcoded 3*60_000.                                                                                                                                                                                                                                                                        | DIS         | `180000`                   |
+| `stationaryPollFast`      | `Number`          | Android      | **Since 4.5.1.** Aggressive poll near stationary boundary. Was hardcoded 60_000.                                                                                                                                                                                                                                                                     | DIS         | `60000`                    |
+
+### Custom post template
+
+`postTemplate` (alias: `bodyTemplate`) lets you control the JSON body sent to `url` / `syncUrl`. **Important: it REPLACES the default template completely — there is no merge.**
+
+If you define `postTemplate`, the plugin only serialises the keys you list. Built-in placeholders (`@latitude`, `@longitude`, `@time`, etc.) resolve from each location; keys starting with `@` for which the location has no value resolve to JSON `null`. Static strings (e.g. `"deviceId": "ABC"`) pass through unchanged.
+
+**Available placeholders** (all start with `@`):
+
+`@id`, `@time`, `@provider`, `@locationProvider`, `@latitude`, `@longitude`, `@accuracy`, `@altitudeAccuracy`, `@speed`, `@altitude`, `@bearing`, `@radius`, `@isFromMockProvider`, `@mockLocationsEnabled` (Android), `@simulated` (iOS), `@events`, `@battery`, `@isCharging`, `@recordedAt` (iOS only).
+
+**If you want `events`, `battery`, `isCharging` in your custom payload, include them explicitly**:
+
+```js
+BackgroundGeolocation.configure({
+  url: 'https://my.api/locations',
+  postTemplate: {
+    deviceId: 'ABC-123',          // static — passes through
+    lat: '@latitude',             // → number from location
+    lon: '@longitude',
+    t:   '@time',
+    spd: '@speed',
+    battery: '@battery',          // → number 0-100, or null
+    charging: '@isCharging',      // → boolean, or null
+    events: '@events'             // → JSON array of driving events, or null
+  }
+});
+```
+
+If you OMIT a placeholder from `postTemplate`, that field will NOT be sent — even if the plugin computed it internally. The default template (when no `postTemplate` is configured) includes all of the above automatically.
+
+### Runtime permission helpers (since 4.5.0)
+
+These are convenience wrappers around the OS runtime permission dialog. iOS / Android < min-API for the permission resolve immediately with `{ granted: true, notRequired: true }`.
+
+```ts
+BackgroundGeolocation.requestBackgroundLocationPermission(); // → { granted, denied?, notRequired? }
+BackgroundGeolocation.requestActivityRecognitionPermission(); // Android 10+
+BackgroundGeolocation.requestNotificationPermission();         // Android 13+
+```
 
 \*
 DIS = DISTANCE\_FILTER\_PROVIDER

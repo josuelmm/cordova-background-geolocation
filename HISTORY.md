@@ -2,6 +2,73 @@
 
 **for cordova-plugin-background-geolocation**
 
+## [4.5.1] - 2026-05-09
+
+### Fixed (blockers)
+- Android compile: missing `import android.os.Build;` in BackgroundGeolocationPlugin.
+- Android `SQLiteLocationDAO` UPDATE on `maxLocations` now writes `events_json`, `battery_level`, `is_charging` (with NULL when absent).
+- iOS `MAURSQLiteLocationDAO` UPDATE on `persistLocation:limitRows:` now writes the same 3 columns.
+
+### Added (battery optimization)
+- `wakeLockMode: 'none' | 'posting' | 'always'`. Default `'posting'`. Replaces previous always-on wake lock.
+- Watchdog only restarts provider when `tripActive` — no needless GPS wake-ups while stationary.
+- Stationary detection knobs now configurable: `stationaryTimeout`, `stationaryPollInterval`, `stationaryPollFast`.
+
+### Fixed (other)
+- Internal Android manifest cleaned (`uses-feature` instead of bogus `uses-permission` for `android.hardware.location`).
+- README and `.d.ts` no longer claim that `events` is lost in sync queue (false since 4.5.0).
+- `.npmignore` no longer ships `CLAUDE.md`, internal tests, scripts.
+
+### Plugin version: `4.5.1`.
+
+## [4.5.0] - 2026-05-09
+
+### Added
+- Persistir `events`, `battery`, `isCharging` en SQLite (Android v22 + iOS v6) — sobreviven cola de sync.
+- iOS `config_json` (DB v7) — paridad con Android, persiste todas las keys post-3.2.0.
+- Helpers JS de permisos runtime: `requestBackgroundLocationPermission`, `requestActivityRecognitionPermission`, `requestNotificationPermission`. iOS/Android viejos resuelven `notRequired: true`.
+
+### Fixed
+- iOS `MAURBackgroundSync`: borrar SQLite pendientes tras success (antes re-subía los mismos rows).
+- Plugin version: `4.5.0`.
+
+## [4.4.1] - 2026-05-09
+
+### Fixed (stability)
+- Android: persistencia de config completa via `config_json` TEXT (DB v21 migration). Soluciona pérdida de `httpMethod`, `queryParams`, `drivingEvents`, `includeBattery`, etc. tras reboot + startOnBoot.
+- Android: `Config.merge()` ahora copia `includeBattery` (faltaba — `configure({includeBattery: false})` era ignorado).
+- Android: `attachBatterySnapshot` usa `getApplicationContext().registerReceiver()` para evitar el override interno.
+- Android: `<uses-permission android.hardware.location>` → `<uses-feature ... required="false">`.
+- iOS: `MAURPostLocationTask` guard `outError == NULL`.
+- Android+iOS: `pendingDrivingEvents` capped a 20 entradas, TTL 60s al drenar.
+- JS: removido comentario huérfano `isLocationEnabled` (no existe método).
+- Plugin version: `4.4.1`.
+
+### Diseño
+- Nueva `ConfigJsonMapper` en `common/` — serialización JSON reusable por DAO (common) y ConfigMapper (cordova) sin crear dependencia común→cordova.
+
+## [4.4.0] - 2026-05-09
+
+### Added
+- Battery snapshot stamped on every location: `battery` (0-100) + `isCharging` (boolean).
+- Default ON. Opt-out: `includeBattery: false`. Placeholders for templates: `'@battery'`, `'@isCharging'`.
+- Android via `BatteryManager` sticky broadcast; iOS via `UIDevice.batteryLevel`. No extra permissions.
+- Plugin version: `4.4.0`.
+
+## [4.3.0] - 2026-05-09
+
+### Added
+- Driving events anexados al payload de location como `events: [{type, time, ...payload}]`. Se incluyen en el POST real-time al `url` configurado. La emisión vía `on(...)` JS sigue funcionando idéntico.
+- Android: campo `drivingEvents` (transient) en `BackgroundLocation`; iOS: property en `MAURLocation`. Buffer de pending events para los que firan sin fix simultáneo.
+- Caveat: si la location entra a cola de sync (SQLite), `events` no sobrevive. Los eventos siguen llegando por JS.
+- Plugin version: `4.3.0`.
+
+## [4.2.4] - 2026-05-09
+
+### Fixed (CRITICAL)
+- Foreground service silently aborted on Android 14+ when manifest reflection returned `0`. The plugin now falls back to `FOREGROUND_SERVICE_TYPE_LOCATION` (`0x8`) and retries without type if the typed call throws. Restores notification + background tracking on devices where the manifest merge did not pick up `foregroundServiceType="location"`.
+- Plugin version: `4.2.4`.
+
 ## [4.2.3] - 2026-05-09
 
 ### Fixed

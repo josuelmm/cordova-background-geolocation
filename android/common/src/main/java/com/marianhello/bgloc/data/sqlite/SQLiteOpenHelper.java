@@ -22,7 +22,7 @@ import static com.marianhello.bgloc.data.sqlite.SQLiteLocationContract.LocationE
 public class SQLiteOpenHelper extends android.database.sqlite.SQLiteOpenHelper {
     private static final String TAG = SQLiteOpenHelper.class.getName();
     public static final String SQLITE_DATABASE_NAME = "cordova_bg_geolocation.db";
-    public static final int DATABASE_VERSION = 20;
+    public static final int DATABASE_VERSION = 22;
 
     public static final String TEXT_TYPE = " TEXT";
     public static final String INTEGER_TYPE = " INTEGER";
@@ -143,6 +143,20 @@ public class SQLiteOpenHelper extends android.database.sqlite.SQLiteOpenHelper {
             case 19:
                 alterSql.add(SessionEntry.SQL_CREATE_SESSION_TABLE);
                 alterSql.add(SessionEntry.SQL_CREATE_SESSION_TABLE_TIME_IDX);
+            case 20:
+                // v4.4.1: store the full Config as a single JSON blob so future-added fields
+                // do not require a per-field schema bump.
+                alterSql.add("ALTER TABLE " + ConfigurationEntry.TABLE_NAME +
+                        " ADD COLUMN " + ConfigurationEntry.COLUMN_NAME_CONFIG_JSON + TEXT_TYPE);
+            case 21:
+                // v4.5.0: persist driving events / battery / isCharging on each location so
+                // they survive the sync queue (POST failure → SQLite → background sync).
+                alterSql.add("ALTER TABLE " + LocationEntry.TABLE_NAME +
+                        " ADD COLUMN " + LocationEntry.COLUMN_NAME_EVENTS_JSON + TEXT_TYPE);
+                alterSql.add("ALTER TABLE " + LocationEntry.TABLE_NAME +
+                        " ADD COLUMN " + LocationEntry.COLUMN_NAME_BATTERY_LEVEL + INTEGER_TYPE);
+                alterSql.add("ALTER TABLE " + LocationEntry.TABLE_NAME +
+                        " ADD COLUMN " + LocationEntry.COLUMN_NAME_IS_CHARGING + INTEGER_TYPE);
 
                 break; // DO NOT FORGET TO MOVE DOWN BREAK ON DB UPGRADE!!!
             default:

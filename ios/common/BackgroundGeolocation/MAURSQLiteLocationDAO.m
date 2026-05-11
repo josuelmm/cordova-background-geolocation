@@ -94,9 +94,17 @@
         }
         [rs close];
 
-        sql = @"UPDATE " @LC_TABLE_NAME @" SET " @LC_COLUMN_NAME_STATUS @" = ?";
-        if (![database executeUpdate:sql, [NSString stringWithFormat:@"%ld", MAURLocationDeleted]]) {
-            NSLog(@"Deleting all location failed code: %d: message: %@", [database lastErrorCode], [database lastErrorMessage]);
+        // v4.5.1 FIX (CRITICAL): mark the rows we just selected as SyncPending — NOT Deleted.
+        // The previous code UPDATEd the WHOLE table to Deleted before the upload had even started,
+        // losing every fix on HTTP failure / network drop. Now:
+        //   PostPending → SyncPending  (in-flight, do not re-include)
+        //   on success in the network task: SyncPending → Deleted (deleteSyncedLocationsBefore:)
+        //   on failure in the network task: SyncPending → PostPending (restoreFailedSyncLocations)
+        NSString *upd = @"UPDATE " @LC_TABLE_NAME @" SET " @LC_COLUMN_NAME_STATUS @" = ? WHERE " @LC_COLUMN_NAME_STATUS @" = ?";
+        if (![database executeUpdate:upd,
+                [NSString stringWithFormat:@"%ld", MAURLocationSyncPending],
+                [NSString stringWithFormat:@"%ld", MAURLocationPostPending]]) {
+            NSLog(@"Marking PostPending → SyncPending failed code: %d: message: %@", [database lastErrorCode], [database lastErrorMessage]);
         }
     }];
 
@@ -139,7 +147,18 @@
     @COMMA_SEP @LC_COLUMN_NAME_LOCATION_PROVIDER
     @COMMA_SEP @LC_COLUMN_NAME_STATUS
     @COMMA_SEP @LC_COLUMN_NAME_RECORDED_AT
-    @") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+    @COMMA_SEP @LC_COLUMN_NAME_EVENTS_JSON
+    @COMMA_SEP @LC_COLUMN_NAME_BATTERY_LEVEL
+    @COMMA_SEP @LC_COLUMN_NAME_IS_CHARGING
+    @") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+
+    // v4.5: serialize driving events array to JSON for SQLite storage.
+    NSString *eventsJson = nil;
+    if (location.drivingEvents != nil && [location.drivingEvents count] > 0) {
+        NSError *jerr = nil;
+        NSData *jd = [NSJSONSerialization dataWithJSONObject:location.drivingEvents options:0 error:&jerr];
+        if (jd != nil) eventsJson = [[NSString alloc] initWithData:jd encoding:NSUTF8StringEncoding];
+    }
 
     BOOL success = [database executeUpdate:sql,
         [NSNumber numberWithDouble:[location.time timeIntervalSince1970]],
@@ -152,7 +171,10 @@
         location.provider ?: [NSNull null],
         location.locationProvider ?: [NSNull null],
         location.isValid == YES ? @(1) : @(0),
-        recordedAt
+        recordedAt,
+        eventsJson ?: [NSNull null],
+        location.batteryLevel ?: [NSNull null],
+        location.isCharging ?: [NSNull null]
     ];
 
     if (success) {
@@ -223,7 +245,18 @@
         @COMMA_SEP @LC_COLUMN_NAME_LOCATION_PROVIDER @EQ_BIND
         @COMMA_SEP @LC_COLUMN_NAME_STATUS @EQ_BIND
         @COMMA_SEP @LC_COLUMN_NAME_RECORDED_AT @EQ_BIND
+        @COMMA_SEP @LC_COLUMN_NAME_EVENTS_JSON @EQ_BIND
+        @COMMA_SEP @LC_COLUMN_NAME_BATTERY_LEVEL @EQ_BIND
+        @COMMA_SEP @LC_COLUMN_NAME_IS_CHARGING @EQ_BIND
         @" WHERE " @LC_COLUMN_NAME_ID @EQ_BIND;
+
+        // v4.5.1: serialize events for UPDATE path so old values don't bleed onto new locations
+        NSString *eventsJsonForUpdate = nil;
+        if (location.drivingEvents != nil && [location.drivingEvents count] > 0) {
+            NSError *jerr = nil;
+            NSData *jd = [NSJSONSerialization dataWithJSONObject:location.drivingEvents options:0 error:&jerr];
+            if (jd != nil) eventsJsonForUpdate = [[NSString alloc] initWithData:jd encoding:NSUTF8StringEncoding];
+        }
 
         BOOL success = [database executeUpdate:sql,
             [NSNumber numberWithDouble:[location.time timeIntervalSince1970]],
@@ -237,6 +270,9 @@
             location.locationProvider ?: [NSNull null],
             location.isValid == YES ? @(1) : @(0),
             recordedAt,
+            eventsJsonForUpdate ?: [NSNull null],
+            location.batteryLevel ?: [NSNull null],
+            location.isCharging ?: [NSNull null],
             locationId
         ];
 
@@ -304,6 +340,77 @@
     return success;
 }
 
+- (BOOL) deleteSyncedLocationsBefore:(NSTimeInterval)cutoff error:(NSError * __autoreleasing *)outError
+{
+    __block BOOL success = YES;
+    // v4.5.1 — operate on SyncPending (the rows the network task is/was uploading), not on
+    // PostPending (those are still queued for real-time POST and must NOT be touched).
+    NSString *sql = @"UPDATE " @LC_TABLE_NAME
+        @" SET " @LC_COLUMN_NAME_STATUS @" = ? "
+        @" WHERE " @LC_COLUMN_NAME_STATUS @" = ? AND " @LC_COLUMN_NAME_RECORDED_AT @" <= ?";
+    [queue inDatabase:^(FMDatabase *database) {
+        if (![database executeUpdate:sql,
+                @(MAURLocationDeleted),
+                @(MAURLocationSyncPending),
+                @(cutoff)]) {
+            int errorCode = [database lastErrorCode];
+            NSString *errorMessage = [database lastErrorMessage];
+            NSLog(@"deleteSyncedLocationsBefore failed code: %d: message: %@", errorCode, errorMessage);
+            if (outError != NULL) {
+                *outError = [NSError errorWithDomain:Domain code:errorCode userInfo:@{ NSLocalizedDescriptionKey: errorMessage ?: @"" }];
+            }
+            success = NO;
+        }
+    }];
+    return success;
+}
+
+- (BOOL) restoreStaleSyncLocationsOlderThan:(NSTimeInterval)cutoff error:(NSError * __autoreleasing *)outError
+{
+    // v4.5.1 — rows left as SyncPending because the previous sync's task was killed
+    // (app suspended mid-upload, OS process death, manual kill) never reach their
+    // success/failure callback. Call at the start of each sync window to rescue them.
+    __block BOOL success = YES;
+    NSString *sql = @"UPDATE " @LC_TABLE_NAME
+        @" SET " @LC_COLUMN_NAME_STATUS @" = ? "
+        @" WHERE " @LC_COLUMN_NAME_STATUS @" = ? AND " @LC_COLUMN_NAME_RECORDED_AT @" < ?";
+    [queue inDatabase:^(FMDatabase *database) {
+        if (![database executeUpdate:sql,
+                @(MAURLocationPostPending),
+                @(MAURLocationSyncPending),
+                @(cutoff)]) {
+            int errorCode = [database lastErrorCode];
+            NSString *errorMessage = [database lastErrorMessage];
+            NSLog(@"restoreStaleSyncLocations failed code: %d: message: %@", errorCode, errorMessage);
+            if (outError != NULL) {
+                *outError = [NSError errorWithDomain:Domain code:errorCode userInfo:@{ NSLocalizedDescriptionKey: errorMessage ?: @"" }];
+            }
+            success = NO;
+        }
+    }];
+    return success;
+}
+
+- (BOOL) restoreFailedSyncLocations:(NSError * __autoreleasing *)outError
+{
+    // v4.5.1 — undo the in-flight transition: SyncPending → PostPending so the next sync window
+    // (or real-time post) re-tries them.
+    __block BOOL success = YES;
+    NSString *sql = @"UPDATE " @LC_TABLE_NAME @" SET " @LC_COLUMN_NAME_STATUS @" = ? WHERE " @LC_COLUMN_NAME_STATUS @" = ?";
+    [queue inDatabase:^(FMDatabase *database) {
+        if (![database executeUpdate:sql, @(MAURLocationPostPending), @(MAURLocationSyncPending)]) {
+            int errorCode = [database lastErrorCode];
+            NSString *errorMessage = [database lastErrorMessage];
+            NSLog(@"restoreFailedSyncLocations failed code: %d: message: %@", errorCode, errorMessage);
+            if (outError != NULL) {
+                *outError = [NSError errorWithDomain:Domain code:errorCode userInfo:@{ NSLocalizedDescriptionKey: errorMessage ?: @"" }];
+            }
+            success = NO;
+        }
+    }];
+    return success;
+}
+
 - (BOOL) deletePendingSyncLocations:(NSError * __autoreleasing *)outError
 {
     __block BOOL success = YES;
@@ -368,6 +475,9 @@
     @COMMA_SEP @LC_COLUMN_NAME_LOCATION_PROVIDER
     @COMMA_SEP @LC_COLUMN_NAME_STATUS
     @COMMA_SEP @LC_COLUMN_NAME_RECORDED_AT
+    @COMMA_SEP @LC_COLUMN_NAME_EVENTS_JSON
+    @COMMA_SEP @LC_COLUMN_NAME_BATTERY_LEVEL
+    @COMMA_SEP @LC_COLUMN_NAME_IS_CHARGING
     @" FROM " @LC_TABLE_NAME;
 }
 
@@ -387,6 +497,16 @@
     location.isValid = [rs intForColumnIndex:10] == 1 ? YES : NO;
     NSTimeInterval recordedAt = [rs longForColumnIndex:11];
     location.recordedAt = [NSDate dateWithTimeIntervalSince1970:recordedAt];
+    // v4.5: events / battery / charging
+    NSString *eventsJson = [rs stringForColumnIndex:12];
+    if (eventsJson != nil && eventsJson.length > 0) {
+        NSError *jerr = nil;
+        id parsed = [NSJSONSerialization JSONObjectWithData:[eventsJson dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingMutableContainers error:&jerr];
+        if ([parsed isKindOfClass:[NSMutableArray class]]) location.drivingEvents = parsed;
+        else if ([parsed isKindOfClass:[NSArray class]]) location.drivingEvents = [parsed mutableCopy];
+    }
+    if (![rs columnIndexIsNull:13]) location.batteryLevel = @([rs intForColumnIndex:13]);
+    if (![rs columnIndexIsNull:14]) location.isCharging = @([rs intForColumnIndex:14] == 1);
     return location;
 }
 

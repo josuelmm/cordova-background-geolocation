@@ -40,6 +40,9 @@
 #define CC_COLUMN_NAME_PAUSE_LOCATION_UPDATES "pause_updates"
 #define CC_COLUMN_NAME_TEMPLATE               "template"
 #define CC_COLUMN_NAME_LAST_UPDATED_AT        "updated_at"
+// v4.5: full Config JSON blob — paridad con Android. Storage of post-3.2 keys without
+// new per-field columns (httpMethod, queryParams, drivingEvents, includeBattery, ...).
+#define CC_COLUMN_NAME_CONFIG_JSON            "config_json"
 
 @interface MAURConfigurationContract : NSObject
 

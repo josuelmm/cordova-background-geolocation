@@ -88,7 +88,8 @@
         @COMMA_SEP @CC_COLUMN_NAME_PAUSE_LOCATION_UPDATES
         @COMMA_SEP @CC_COLUMN_NAME_TEMPLATE
         @COMMA_SEP @CC_COLUMN_NAME_LAST_UPDATED_AT
-        @") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,DateTime('now'))";
+        @COMMA_SEP @CC_COLUMN_NAME_CONFIG_JSON
+        @") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,DateTime('now'),?)";
 
     [queue inDatabase:^(FMDatabase *database) {
         success = [database executeUpdate:sql,
@@ -119,7 +120,9 @@
                     [config hasSaveBatteryOnBackground] ? config._saveBatteryOnBackground : @CC_COLUMN_NAME_NULLABLE,
                     [config hasMaxLocations] ? config.maxLocations : @CC_COLUMN_NAME_NULLABLE,
                     [config hasPauseLocationUpdates] ? config._pauseLocationUpdates : @CC_COLUMN_NAME_NULLABLE,
-                    (templateString != nil) ? templateString : @CC_COLUMN_NAME_NULLABLE
+                    (templateString != nil) ? templateString : @CC_COLUMN_NAME_NULLABLE,
+                    // v4.5: full Config as JSON for paridad con Android
+                    [self serializeConfigToJson:config]
                 ];
 
         if (success) {
@@ -165,6 +168,7 @@
     @COMMA_SEP @CC_COLUMN_NAME_MAX_LOCATIONS
     @COMMA_SEP @CC_COLUMN_NAME_PAUSE_LOCATION_UPDATES
     @COMMA_SEP @CC_COLUMN_NAME_TEMPLATE
+    @COMMA_SEP @CC_COLUMN_NAME_CONFIG_JSON
     @" FROM " @CC_TABLE_NAME @" WHERE " @CC_COLUMN_NAME_ID @" = 1";
     
     [queue inDatabase:^(FMDatabase *database) {
@@ -231,12 +235,58 @@
                     config._template = [NSJSONSerialization JSONObjectWithData:jsonTemplate options:0 error:nil];
                 }
             }
+            // v4.5: rehydrate post-3.2 keys from config_json blob (paridad Android).
+            // Index 28 is the new column. Strict NULL check (no NULLHACK sentinel for JSON column).
+            if (![rs columnIndexIsNull:28]) {
+                NSString *jsonString = [rs stringForColumnIndex:28];
+                if (jsonString != nil && jsonString.length > 0) {
+                    [self applyConfigJson:jsonString to:config];
+                }
+            }
         }
-        
+
         [rs close];
     }];
-    
+
     return config;
+}
+
+// v4.5: serialize all post-3.2 keys to JSON for storage. Mirrors Android ConfigJsonMapper.
+- (NSString*) serializeConfigToJson:(MAURConfig*)config
+{
+    NSMutableDictionary *j = [NSMutableDictionary dictionary];
+    if (config.httpMethod != nil)       j[@"httpMethod"]       = config.httpMethod;
+    if (config.syncHttpMethod != nil)   j[@"syncHttpMethod"]   = config.syncHttpMethod;
+    if (config.httpMode != nil)         j[@"httpMode"]         = config.httpMode;
+    if (config.syncMode != nil)         j[@"syncMode"]         = config.syncMode;
+    if (config.queryParams != nil)      j[@"queryParams"]      = config.queryParams;
+    if (config.heartbeatInterval != nil) j[@"heartbeatInterval"] = config.heartbeatInterval;
+    if (config.mockLocationPolicy != nil) j[@"mockLocationPolicy"] = config.mockLocationPolicy;
+    if (config.drivingEvents != nil)    j[@"drivingEvents"]    = config.drivingEvents;
+    if (config.includeBattery != nil)   j[@"includeBattery"]   = config.includeBattery;
+    if (config._showsBackgroundLocationIndicator != nil) j[@"showsBackgroundLocationIndicator"] = config._showsBackgroundLocationIndicator;
+    NSError *err = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:j options:0 error:&err];
+    if (err != nil || data == nil) return @"";
+    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+}
+
+- (void) applyConfigJson:(NSString*)jsonString to:(MAURConfig*)config
+{
+    NSData *data = [jsonString dataUsingEncoding:NSUTF8StringEncoding];
+    NSError *err = nil;
+    NSDictionary *j = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
+    if (err != nil || ![j isKindOfClass:[NSDictionary class]]) return;
+    if (j[@"httpMethod"])         config.httpMethod         = j[@"httpMethod"];
+    if (j[@"syncHttpMethod"])     config.syncHttpMethod     = j[@"syncHttpMethod"];
+    if (j[@"httpMode"])           config.httpMode           = j[@"httpMode"];
+    if (j[@"syncMode"])           config.syncMode           = j[@"syncMode"];
+    if ([j[@"queryParams"] isKindOfClass:[NSDictionary class]]) config.queryParams = [j[@"queryParams"] mutableCopy];
+    if (j[@"heartbeatInterval"]) config.heartbeatInterval   = j[@"heartbeatInterval"];
+    if (j[@"mockLocationPolicy"]) config.mockLocationPolicy = j[@"mockLocationPolicy"];
+    if ([j[@"drivingEvents"] isKindOfClass:[NSDictionary class]]) config.drivingEvents = j[@"drivingEvents"];
+    if (j[@"includeBattery"] != nil) config.includeBattery = j[@"includeBattery"];
+    if (j[@"showsBackgroundLocationIndicator"] != nil) config._showsBackgroundLocationIndicator = j[@"showsBackgroundLocationIndicator"];
 }
 
 - (BOOL) clearDatabase

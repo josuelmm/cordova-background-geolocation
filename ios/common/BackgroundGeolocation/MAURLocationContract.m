@@ -26,7 +26,11 @@
         @{ @"name": @LC_COLUMN_NAME_PROVIDER, @"type": [SQLColumnType sqlColumnWithType: kText]},
         @{ @"name": @LC_COLUMN_NAME_LOCATION_PROVIDER, @"type": [SQLColumnType sqlColumnWithType: kText]},
         @{ @"name": @LC_COLUMN_NAME_STATUS, @"type": [SQLColumnType sqlColumnWithType: kInteger]},
-        @{ @"name": @LC_COLUMN_NAME_RECORDED_AT, @"type": [SQLColumnType sqlColumnWithType: kInteger]}
+        @{ @"name": @LC_COLUMN_NAME_RECORDED_AT, @"type": [SQLColumnType sqlColumnWithType: kInteger]},
+        // v4.5 — survive sync queue
+        @{ @"name": @LC_COLUMN_NAME_EVENTS_JSON, @"type": [SQLColumnType sqlColumnWithType: kText]},
+        @{ @"name": @LC_COLUMN_NAME_BATTERY_LEVEL, @"type": [SQLColumnType sqlColumnWithType: kInteger]},
+        @{ @"name": @LC_COLUMN_NAME_IS_CHARGING, @"type": [SQLColumnType sqlColumnWithType: kInteger]}
     ];
     
     return [MAURSQLiteHelper createTableSqlStatement:@LC_TABLE_NAME columns:columns];

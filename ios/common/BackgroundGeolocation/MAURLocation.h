@@ -39,6 +39,18 @@ typedef NS_ENUM(NSInteger, MAURLocationStatus) {
 @property (nonatomic, retain) NSDate *recordedAt;
 /** True if location was simulated by software (e.g. Simulator). iOS 15+. */
 @property (nonatomic, retain) NSNumber *simulated;
+/**
+ * v4.3 — Driving events anexados a este fix.
+ * v4.5: persiste en SQLite (events_json TEXT) — sobrevive a la cola de sync.
+ * Cada elemento es un NSDictionary con al menos { "type": NSString, "time": NSNumber }.
+ */
+@property (nonatomic, retain) NSMutableArray *drivingEvents;
+/** v4.4 — Battery percentage (0-100) at the time of this fix.
+ *  v4.5: persisted in SQLite (battery_level INTEGER). */
+@property (nonatomic, retain) NSNumber *batteryLevel;
+/** v4.4 — Whether the device is charging at the time of this fix.
+ *  v4.5: persisted in SQLite (is_charging INTEGER). */
+@property (nonatomic, retain) NSNumber *isCharging;
 
 + (instancetype) fromCLLocation:(CLLocation*)location;
 + (NSTimeInterval) locationAge:(CLLocation*)location;

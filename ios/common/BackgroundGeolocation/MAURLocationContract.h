@@ -23,6 +23,10 @@
 #define LC_COLUMN_NAME_LOCATION_PROVIDER   "service_provider"
 #define LC_COLUMN_NAME_STATUS              "valid"
 #define LC_COLUMN_NAME_RECORDED_AT         "recorded_at"
+// v4.5 — survive sync queue
+#define LC_COLUMN_NAME_EVENTS_JSON         "events_json"
+#define LC_COLUMN_NAME_BATTERY_LEVEL       "battery_level"
+#define LC_COLUMN_NAME_IS_CHARGING         "is_charging"
 
 @interface MAURLocationContract : NSObject
 

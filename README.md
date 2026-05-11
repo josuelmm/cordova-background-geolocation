@@ -368,6 +368,48 @@ Subscribe with `BackgroundGeolocation.on(eventName, callback)`. Unsubscribe with
 
 Full event payloads and options: [Events](docs/events.md). Full API (all options, all methods): [API](docs/api.md).
 
+### New in 4.4.0
+
+Cada location enviada al backend incluye `battery` (0-100) y `isCharging` automáticamente. Sin dependencias externas (no necesitas `cordova-plugin-battery-status`).
+
+```json
+{
+  "latitude": 40.4168, "longitude": -3.7038, "speed": 8.2,
+  "battery": 78, "isCharging": false
+}
+```
+
+Default ON. Opt-out: `configure({ includeBattery: false })`. Con templates custom usa los placeholders `'@battery'` y `'@isCharging'`.
+
+### New in 4.3.0
+
+Driving events ahora se **anexan al location** que se envía al backend, en un atributo `events`:
+
+```json
+{
+  "latitude": 40.4168,
+  "longitude": -3.7038,
+  "time": 1730000000000,
+  "speed": 8.2,
+  "events": [
+    { "type": "hardBrake", "value": -4.1, "time": 1730000000000 }
+  ]
+}
+```
+
+Tipos: `moving`, `stopped`, `tripStart`, `tripEnd`, `speeding`, `providerChange`, `hardBrake`, `rapidAcceleration`, `sharpTurn`, `possibleCrash`, `phoneUsageWhileDriving`. La emisión por JS sigue funcionando idéntica (no rompe Opción A).
+
+Desde v4.5.0, `events`, `battery` e `isCharging` se persisten en la cola de sync (Android DB v22, iOS DB v7) y sobreviven a POST fallido → SQLite/Core Data → background sync.
+
+Si usas `postTemplate`/`bodyTemplate` custom, añade el placeholder `'@events'` para incluirlos:
+
+```js
+postTemplate: {
+  lat: '@latitude', lon: '@longitude', t: '@time',
+  events: '@events'
+}
+```
+
 ### New in 4.2.2
 
 - Build hotfixes — required when consuming the plugin via Capacitor (Gradle 8.x):
@@ -543,8 +585,11 @@ No extra wrapper (e.g. Awesome Cordova Plugins) is required.
 | 2.x            | ≥ 10.0.0    | ≥ 10.0.0        | ≥ 6.0.0     |
 | 3.0.x – 3.2.x  | ≥ 10.0.0    | ≥ 10.0.0        | ≥ 6.0.0     |
 | 3.3.x – 4.1.x  | ≥ 10.0.0    | ≥ 12.0.0        | ≥ 6.2.0     |
+| 4.2.x – 4.5.x  | ≥ 10.0.0    | ≥ 12.0.0        | ≥ 6.2.0     |
 
 > 3.3.0+: `cordova-android >= 12` is required for `targetSdk 34+` and the modernised foreground-service handling. The new iOS APIs (`showsBackgroundLocationIndicator` iOS 11+, `locationManagerDidChangeAuthorization:` iOS 14+) are gated by runtime `@available` checks, so older iOS versions still link and run.
+>
+> 4.5.0+: SQLite schemas bumped (Android v22, iOS v7) to persist `events`, `battery`, `isCharging` across the sync queue. Upgrades from any earlier version auto-migrate.
 
 ---
 
@@ -563,80 +608,6 @@ This README is the main entry point. For more detail, edge cases and examples us
 | **[HTTP posting](docs/http_posting.md)** | `url` vs `syncUrl`, Content-Type (JSON = one POST with array; form-urlencoded = one POST per location), headers, retries, `postTemplate`, sync behaviour. |
 | **[Events](docs/events.md)** | All events (`location`, `error`, `stationary`, `activity`, `http_authorization`, etc.) and payloads. |
 | **[Angular / Ionic](docs/angular.md)** | Injectable service, module, lazy-loaded modules and token "must be defined", `ng serve` / browser build. |
-| **[Example](docs/example.md)** | Full example with events and sync. |
-| **[CHANGELOG](CHANGELOG.md)** | Version history. |
-
-This project is based on [@mauron85/cordova-plugin-background-geolocation](https://github.com/mauron85/cordova-plugin-background-geolocation) and the original by [christocracy](https://github.com/christocracy). Maintained at [josuelmm/cordova-background-geolocation](https://github.com/josuelmm/cordova-background-geolocation). Issues and PRs welcome.
-
----
-
-## Licence
-
-[Apache License](http://www.apache.org/licenses/LICENSE-2.0)
-
-Copyright (c) 2013 Christopher Scott, Transistor Software
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-    return this.bg.on('location', (loc: BackgroundGeolocationResponse) => console.log(loc));
-    // subscription.unsubscribe() when done
-  }
-}
-```
-
-**You must import `BackgroundGeolocationModule`** in your `AppModule` (or feature module) so the service is provided and AOT builds work. Then inject `BackgroundGeolocationService` as in the example above. See [docs/angular.md](docs/angular.md) for the full snippet.
-
-**`ng serve` / browser:** From 3.1.1 the plugin includes browser stubs so `ng serve` and web builds complete without "Can't resolve 'cordova/exec'" — see [docs/angular.md](docs/angular.md#build-ng-serve--browser).
-
-**Lazy-loaded pages:** If you see **NG0202** or *"dependency at index N is invalid"* when opening a page that injects this service, use an app-defined token and inject by that token (the plugin token can be undefined in the lazy chunk). See [docs/angular.md](docs/angular.md) (Lazy-loaded modules).
-
-**Migrating from @awesome-cordova-plugins/background-geolocation:** there you inject a class named `BackgroundGeolocation`. In this package, `BackgroundGeolocation` is the **global plugin object**, not an injectable class. Use `BackgroundGeolocationService` instead (same API). See [docs/angular.md](docs/angular.md) for details.
-
-### Summary
-
-| Use case              | What to do |
-|-----------------------|------------|
-| **Without Angular**   | Use global `BackgroundGeolocation` after `deviceready`. Types: main package or Awesome-style aliases (see [TypeScript imports](#typescript-imports) above). |
-| **With Angular**      | Import from `@josuelmm/cordova-background-geolocation/angular`: add `BackgroundGeolocationModule` to your module `imports`, then inject `BackgroundGeolocationService`. Do **not** inject the global `BackgroundGeolocation`. |
-
-No extra wrapper (e.g. Awesome Cordova Plugins) is required.
-
----
-
-## Compatibility
-
-| Plugin version | Cordova CLI | Cordova Android | Cordova iOS |
-|----------------|-------------|-----------------|-------------|
-| 1.x            | ≥ 8.0.0     | ≥ 8.0.0         | ≥ 6.0.0     |
-| 2.x            | ≥ 10.0.0    | ≥ 10.0.0        | ≥ 6.0.0     |
-
----
-
-## Documentation and changelog
-
-This README is the main entry point. For more detail, edge cases and examples use the docs below (and the [online documentation](https://josuelmm.github.io/cordova-background-geolocation/)).
-
-| Doc | What you’ll find |
-|-----|------------------|
-| **[API reference](docs/api.md)** | Every `configure` option, every method (`configure`, `start`, `stop`, `getPendingSyncCount`, `forceSync`, `clearSync`, `startSession`, `getSessionLocations`, `clearSession`, `getSessionLocationsCount`, `getConfig`, `getLocations`, etc.), TypeScript types. |
-| **[HTTP posting](docs/http_posting.md)** | `url` vs `syncUrl`, Content-Type (JSON = one POST with array; form-urlencoded = one POST per location), headers, retries, `postTemplate`, sync behaviour. |
-| **[Events](docs/events.md)** | All events (`location`, `error`, `stationary`, `activity`, `http_authorization`, etc.) and payloads. |
-| **[Angular / Ionic](docs/angular.md)** | Injectable service, module, lazy-loaded modules and token “must be defined”, `ng serve` / browser build. |
 | **[Example](docs/example.md)** | Full example with events and sync. |
 | **[CHANGELOG](CHANGELOG.md)** | Version history. |
 

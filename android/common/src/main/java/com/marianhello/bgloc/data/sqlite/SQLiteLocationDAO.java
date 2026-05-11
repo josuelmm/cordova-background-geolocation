@@ -300,7 +300,10 @@ public class SQLiteLocationDAO implements LocationDAO {
             .append(LocationEntry.COLUMN_NAME_LOCATION_PROVIDER).append("= ?,")
             .append(LocationEntry.COLUMN_NAME_BATCH_START_MILLIS).append("= ?,")
             .append(LocationEntry.COLUMN_NAME_STATUS).append("= ?,")
-            .append(LocationEntry.COLUMN_NAME_MOCK_FLAGS).append("= ?")
+            .append(LocationEntry.COLUMN_NAME_MOCK_FLAGS).append("= ?,")
+            .append(LocationEntry.COLUMN_NAME_EVENTS_JSON).append("= ?,")
+            .append(LocationEntry.COLUMN_NAME_BATTERY_LEVEL).append("= ?,")
+            .append(LocationEntry.COLUMN_NAME_IS_CHARGING).append("= ?")
             .append(" WHERE ").append(LocationEntry._ID)
             .append("= ?")
             .toString();
@@ -325,6 +328,9 @@ public class SQLiteLocationDAO implements LocationDAO {
             location.getBatchStartMillis(),
             location.getStatus(),
             location.getMockFlags(),
+            location.hasDrivingEvents() ? location.getDrivingEvents().toString() : null,
+            location.getBatteryLevel(),
+            location.isCharging() != null ? (location.isCharging() ? 1 : 0) : null,
             locationId
     });
 
@@ -459,6 +465,18 @@ public class SQLiteLocationDAO implements LocationDAO {
     l.setStatus(c.getInt(c.getColumnIndex(LocationEntry.COLUMN_NAME_STATUS)));
     l.setLocationId(c.getLong(c.getColumnIndex(LocationEntry._ID)));
     l.setMockFlags(c.getInt((c.getColumnIndex(LocationEntry.COLUMN_NAME_MOCK_FLAGS))));
+    // v4.5: events / battery / charging
+    int idxEv = c.getColumnIndex(LocationEntry.COLUMN_NAME_EVENTS_JSON);
+    if (idxEv >= 0 && !c.isNull(idxEv)) {
+      String s = c.getString(idxEv);
+      if (s != null && !s.isEmpty()) {
+        try { l.setDrivingEvents(new org.json.JSONArray(s)); } catch (org.json.JSONException ignored) {}
+      }
+    }
+    int idxBat = c.getColumnIndex(LocationEntry.COLUMN_NAME_BATTERY_LEVEL);
+    if (idxBat >= 0 && !c.isNull(idxBat)) l.setBatteryLevel(c.getInt(idxBat));
+    int idxChg = c.getColumnIndex(LocationEntry.COLUMN_NAME_IS_CHARGING);
+    if (idxChg >= 0 && !c.isNull(idxChg)) l.setCharging(c.getInt(idxChg) == 1);
 
     return l;
   }
@@ -485,6 +503,16 @@ public class SQLiteLocationDAO implements LocationDAO {
     values.put(LocationEntry.COLUMN_NAME_STATUS, l.getStatus());
     values.put(LocationEntry.COLUMN_NAME_BATCH_START_MILLIS, l.getBatchStartMillis());
     values.put(LocationEntry.COLUMN_NAME_MOCK_FLAGS, l.getMockFlags());
+    // v4.5.1: always write — NULL when absent — to clear stale values on maxRows recycle.
+    if (l.hasDrivingEvents()) {
+      values.put(LocationEntry.COLUMN_NAME_EVENTS_JSON, l.getDrivingEvents().toString());
+    } else {
+      values.putNull(LocationEntry.COLUMN_NAME_EVENTS_JSON);
+    }
+    if (l.getBatteryLevel() != null) values.put(LocationEntry.COLUMN_NAME_BATTERY_LEVEL, l.getBatteryLevel());
+    else values.putNull(LocationEntry.COLUMN_NAME_BATTERY_LEVEL);
+    if (l.isCharging() != null) values.put(LocationEntry.COLUMN_NAME_IS_CHARGING, l.isCharging() ? 1 : 0);
+    else values.putNull(LocationEntry.COLUMN_NAME_IS_CHARGING);
 
     return values;
   }
@@ -511,7 +539,10 @@ public class SQLiteLocationDAO implements LocationDAO {
             LocationEntry.COLUMN_NAME_LOCATION_PROVIDER,
             LocationEntry.COLUMN_NAME_STATUS,
             LocationEntry.COLUMN_NAME_BATCH_START_MILLIS,
-            LocationEntry.COLUMN_NAME_MOCK_FLAGS
+            LocationEntry.COLUMN_NAME_MOCK_FLAGS,
+            LocationEntry.COLUMN_NAME_EVENTS_JSON,
+            LocationEntry.COLUMN_NAME_BATTERY_LEVEL,
+            LocationEntry.COLUMN_NAME_IS_CHARGING
     };
 
     return columns;

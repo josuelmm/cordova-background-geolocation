@@ -135,6 +135,28 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
                                 callbackId:command.callbackId];
 }
 
+// v4.5: runtime permission helpers — paridad de API con Android. iOS no expone gates
+// separados para background location / activity recognition / notifications, así que
+// resolvemos siempre con notRequired:YES.
+- (void) requestBackgroundLocationPermission:(CDVInvokedUrlCommand *)command
+{
+    [self sendNotRequiredPermissionResult:command];
+}
+- (void) requestActivityRecognitionPermission:(CDVInvokedUrlCommand *)command
+{
+    [self sendNotRequiredPermissionResult:command];
+}
+- (void) requestNotificationPermission:(CDVInvokedUrlCommand *)command
+{
+    [self sendNotRequiredPermissionResult:command];
+}
+- (void) sendNotRequiredPermissionResult:(CDVInvokedUrlCommand *)command
+{
+    NSDictionary *r = @{ @"granted": @YES, @"notRequired": @YES };
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:r]
+                                callbackId:command.callbackId];
+}
+
 // v4.1 GPS-derived sensor-like events
 - (void) sendDrivingEventN:(NSString *)name note:(NSNotification *)note
 {
@@ -513,7 +535,7 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 - (void) getPluginVersion:(CDVInvokedUrlCommand*)command
 {
     NSLog(@"%@ #%@", TAG, @"getPluginVersion");
-    NSString *version = @"4.2.3"; // keep in sync with plugin.xml and Android PLUGIN_VERSION
+    NSString *version = @"4.5.1"; // keep in sync with plugin.xml and Android PLUGIN_VERSION
     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:version];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
