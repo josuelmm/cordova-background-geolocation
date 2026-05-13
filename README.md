@@ -185,7 +185,7 @@ This is the **most important choice**. It changes how often, how accurately, and
 
 | Value | Constant | Internals | When to use |
 |---|---|---|---|
-| `0` | `BackgroundGeolocation.DISTANCE_FILTER_PROVIDER` (default) | **Hybrid (v4.5.2+)**: `FusedLocationProviderClient` cuando Google Play Services está disponible, fallback automático a `LocationManager` cuando no (Huawei/HMS, AOSP, ChinaROMs). Implementa una **state machine de detección stationary**: mientras se mueve muestrea normal; al detenerse usa **polling lazy** (3 min) y **polling aggressive** (1 min cerca del borde) vía `AlarmManager`. **No usa geofences** (eliminados por decisión de producto); la salida del estado stationary se detecta solo por polling. | **Default para la mayoría de apps.** Tracking personal, couriers de delivery, cualquiera que necesite ubicación sin drenar batería al estar parado. **Funciona con o sin Google Play Services.** |
+| `0` | `BackgroundGeolocation.DISTANCE_FILTER_PROVIDER` (default) | **Hybrid (v4.5.4+)**: `FusedLocationProviderClient` cuando Google Play Services está disponible, fallback automático a `LocationManager` cuando no (Huawei/HMS, AOSP, ChinaROMs). Implementa una **state machine de detección stationary**: mientras se mueve muestrea normal; al detenerse usa **polling lazy** (3 min) y **polling aggressive** (1 min cerca del borde) vía `AlarmManager`. **No usa geofences** (eliminados por decisión de producto); la salida del estado stationary se detecta solo por polling. | **Default para la mayoría de apps.** Tracking personal, couriers de delivery, cualquiera que necesite ubicación sin drenar batería al estar parado. **Funciona con o sin Google Play Services.** |
 | `1` | `BackgroundGeolocation.ACTIVITY_PROVIDER` | Google Play Services `FusedLocationProviderClient` + **Activity Recognition** (walking / driving / still). When `STILL` is detected, the provider stops requesting fixes; when activity resumes, it restarts. Uses `LocationRequest.Builder` + `Priority.PRIORITY_HIGH_ACCURACY` (or balanced, per `desiredAccuracy`). | Apps where the **activity matters** (fitness, fleet, ride-hailing). Best battery profile when the user spends a lot of time still. **Requires Google Play Services** on the device and `ACTIVITY_RECOGNITION` runtime permission on Android 10+. |
 | `2` | `BackgroundGeolocation.RAW_PROVIDER` | Direct `LocationManager` requests with **no stationary detection, no batching, no filtering**. Every fix the OS produces is forwarded. | Vehicle tracking with a **constant interval**, dashcams, anything where you want raw GPS without the plugin trying to be smart. **Highest battery cost.** |
 
@@ -331,14 +331,14 @@ BackgroundGeolocation.configure({
 | `stationaryPollInterval` | Lazy poll interval while stationary (ms). Default 180 000. |
 | `stationaryPollFast` | Aggressive poll near the stationary boundary (ms). Default 60 000. |
 
-**Provider hardening (4.5.2):**
+**Provider hardening (4.5.4):**
 
 | Option | Description |
 |--------|-------------|
 | `activityConfidenceThreshold` | 0-100. Ignore STILL/ACTIVE transitions below this confidence (prevents jittery GPS start/stop). iOS normalizes Low/Med/High → 20/40/80. Default 50. Applies to `ACTIVITY_PROVIDER`. |
 | `maxAcceptedAccuracy` | Maximum accepted horizontal accuracy in meters. Fixes worse than this are dropped before persist/POST/JS emission. **Off by default (`null`)** to avoid regressing existing apps. Recommended values: `100` for vehicular tracking, `500` for tolerant scenarios. All providers. |
 
-> **Caveats v4.5.2:**
+> **Caveats v4.5.4:**
 > - `maxAcceptedAccuracy` está **apagado por defecto**. Si quieres descartar fixes ruidosos (típico en GPS vehicular o indoor), seteá explícito un valor (ej. `100`).
 > - **ACTIVITY_PROVIDER sin `ACTIVITY_RECOGNITION`** (Android 10+): el provider emite `PERMISSION_DENIED_ERROR` pero **degrada a tracking continuo** (no puede detectar STILL/ACTIVE). Si querés ahorro real, pedí el permiso antes de iniciar o cambiá a `DISTANCE_FILTER_PROVIDER`.
 > - **`enableWatchdog`** está **apagado por defecto**. Reinicia el provider si deja de llegar `location` por ~60s (solo si `tripActive`). Útil en apps vehiculares/críticas; aumenta consumo. Recomendado `false` salvo necesidad real.
@@ -486,7 +486,7 @@ More on sync (headers, retries, postTemplate): [HTTP posting](https://github.com
 | `deleteLocation(id, success, fail)` | 1.0 | Delete one location by id. |
 | `deleteAllLocations(success, fail)` | 1.0 | Delete all stored locations. |
 | `getCurrentLocation(success, fail, options)` | 1.0 | One-shot location (e.g. timeout, maximumAge). |
-| `getPluginVersion(success, fail)` | 1.0 | Plugin version string (e.g. `"4.5.3"`). |
+| `getPluginVersion(success, fail)` | 1.0 | Plugin version string (e.g. `"4.5.4"`). |
 | `checkStatus(success, fail)` | 1.0 | Service status (isRunning, authorization, etc.). |
 | `showAppSettings()` / `openSettings()` | 1.0 | Open app settings. |
 | `showLocationSettings()` | 1.0 | Open system location settings. |
@@ -806,7 +806,7 @@ No extra wrapper (e.g. Awesome Cordova Plugins) is required.
 >
 > 4.5.0+: SQLite schemas bumped (Android v22, iOS v7) to persist `events`, `battery`, `isCharging` across the sync queue. Upgrades from any earlier version auto-migrate.
 >
-> 4.5.2+ — **Google Play Services matrix (Android)**:
+> 4.5.4+ — **Google Play Services matrix (Android)**:
 > - `RAW_PROVIDER` — no requiere Play Services (usa OS LocationManager). Funciona en Huawei/HMS, AOSP, China ROMs.
 > - `DISTANCE_FILTER_PROVIDER` — **híbrido**: usa `FusedLocationProviderClient` cuando hay Play Services, fallback automático a `LocationManager` cuando no. Funciona en todos los Android.
 > - `ACTIVITY_PROVIDER` — **requiere Play Services** (depende de `ActivityRecognitionClient`, sin equivalente OS). En dispositivos sin Play Services usar `DISTANCE_FILTER_PROVIDER` o `RAW_PROVIDER`.

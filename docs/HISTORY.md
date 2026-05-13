@@ -2,12 +2,12 @@
 
 **for cordova-plugin-background-geolocation**
 
-## [4.5.3] - 2026-05-13
+## [4.5.4] - 2026-05-13
 
 ### Fixed (blocker — sync HTTP 400 with Traccar-style servers)
 - Form-urlencoded body no longer sends `speed=null`, `events=null`, etc. when placeholders resolve to no value. Traccar's `OsmAndProtocolDecoder.parseDouble("null")` was throwing `NumberFormatException` → HTTP 400. Fix omits `JSONObject.NULL` / `NSNull` / literal `"null"` from the request body. Applies to real-time POST (foreground + background), `forceSync()`, automatic sync, both `httpMode='single'` and `httpMode='batch'`.
 
-### Plugin version: `4.5.3`.
+### Plugin version: `4.5.4`.
 
 ## [4.5.2] - 2026-05-10
 
@@ -951,23 +951,4 @@ Since alpha.49:
 
 #### Added
 
-- Android open activity when notification clicked [69989e79a8a67485fc88463eec8d69bb713c2dbe](https://github.com/erikkemperman/cordova-plugin-background-geolocation/commit/69989e79a8a67485fc88463eec8d69bb713c2dbe)
-
-#### Fixed
-
-- Android duplicate desiredAccuracy extra
-- Android [compilation error](https://github.com/coletivoEITA/cordova-plugin-background-geolocation/commit/813f1695144823d2a61f9733ced5b9fdedf15ff3)
-
-### [0.4.1] - 2015-09-21
-
-- maintenance version
-
-### [0.4.0] - 2015-03-08
-
-#### Added
-
-- Android using callbacks same as iOS
-
-#### Removed
-
-- Android storing position into sqlite
+- Android open activity when notification cli

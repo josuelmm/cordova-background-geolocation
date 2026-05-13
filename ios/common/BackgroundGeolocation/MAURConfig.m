@@ -40,7 +40,7 @@
     syncMode = @"batch";
     heartbeatInterval = [NSNumber numberWithInt:0];
     mockLocationPolicy = @"allow";
-    // v4.5.2 — match Android defaults so the JS layer sees the same behavior
+    // v4.5.4 — match Android defaults so the JS layer sees the same behavior
     // regardless of platform when the host doesn't override these.
     activityConfidenceThreshold = [NSNumber numberWithInt:50];
     maxAcceptedAccuracy = nil; // off by default
@@ -124,7 +124,7 @@
     if (isNotNull(config[@"includeBattery"])) {
         instance.includeBattery = config[@"includeBattery"];
     }
-    // v4.5.2 provider hardening
+    // v4.5.4 provider hardening
     if (isNotNull(config[@"activityConfidenceThreshold"])) {
         instance.activityConfidenceThreshold = config[@"activityConfidenceThreshold"];
     }

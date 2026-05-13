@@ -33,7 +33,7 @@ import static java.lang.Math.round;
 
 
 /**
- * v4.5.2 — Distance-filter provider with a runtime-chosen backend:
+ * v4.5.4 — Distance-filter provider with a runtime-chosen backend:
  * <ul>
  *   <li><b>Fused path</b> (Play Services available): {@link FusedLocationProviderClient}
  *       + {@link LocationCallback}. Better fused GPS+Network blending and battery.</li>
@@ -61,7 +61,7 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
     private static final int MAX_STATIONARY_ACQUISITION_ATTEMPTS = 5;
     private static final int MAX_SPEED_ACQUISITION_ATTEMPTS = 3;
 
-    // v4.5.2 — Aggressive interval used while acquiring stationary location or speed (FLP path).
+    // v4.5.4 — Aggressive interval used while acquiring stationary location or speed (FLP path).
     private static final long ACQUISITION_INTERVAL_MS = 1000L;
 
     private Boolean isMoving = false;
@@ -144,7 +144,7 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
         locationManager = (LocationManager) mContext.getSystemService(Context.LOCATION_SERVICE);
         alarmManager = (AlarmManager) mContext.getSystemService(Context.ALARM_SERVICE);
 
-        // v4.5.2 — pick the location backend at runtime. Play Services missing
+        // v4.5.4 — pick the location backend at runtime. Play Services missing
         // (Huawei/HMS, AOSP, China ROMs) → use the OS LocationManager so the
         // provider still works.
         int gps = GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(mContext);
@@ -159,7 +159,7 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
         int updateCurrentFlag = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                 ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
                 : PendingIntent.FLAG_UPDATE_CURRENT;
-        // v4.5.2: singleUpdatePI must be MUTABLE on API 31+ because
+        // v4.5.4: singleUpdatePI must be MUTABLE on API 31+ because
         // LocationManager.requestSingleUpdate() fills the resulting Location
         // into the intent's extras at delivery time. FLAG_IMMUTABLE blocks that
         // population, so the receiver would never see the fix.
@@ -389,7 +389,7 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
                     }
                 }
             } else {
-                // v4.5.2 — subscribe to GPS AND Network simultaneously when both
+                // v4.5.4 — subscribe to GPS AND Network simultaneously when both
                 // are available. The previous version only used GPS-or-Network
                 // (excluyente), which on cheap/vehicular Androids could leave the
                 // app waiting for a GPS fix while a quick Network fix was available.
@@ -438,7 +438,7 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
     @Override
     public void onProviderDisabled(String provider) {
         logger.warn("Provider {} was disabled", provider);
-        // v4.5.2: surface as an error so JS layer can prompt the user to enable
+        // v4.5.4: surface as an error so JS layer can prompt the user to enable
         // location services. Only when no fallback provider is left.
         if (locationManager != null && pickProvider() == null) {
             handleServiceError("Location provider '" + provider + "' disabled and no fallback available.");
@@ -523,7 +523,7 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
     }
 
     /**
-     * v4.5.2 — Stop active updates and start the polling-based stationary monitor.
+     * v4.5.4 — Stop active updates and start the polling-based stationary monitor.
      * The previous version also called {@code addProximityAlert} (geofence); that
      * path has been removed per product decision (no geofencing).
      */

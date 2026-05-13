@@ -1,6 +1,6 @@
 # Roadmap
 
-Estado actual: **v4.5.3** (Fases 1-8 completadas + provider hardening + fix BLOQUEANTE sync HTTP 400 con Traccar).
+Estado actual: **v4.5.4** (Fases 1-8 completadas + provider hardening + fix BLOQUEANTE sync HTTP 400 con Traccar).
 
 > **Principio de diseño.** Este es un plugin **global y backend-agnóstico**. No incorpora lógica de Traccar, GPSWox, OsmAnd ni de ninguna API propietaria. La compatibilidad con cualquier backend se logra mediante **transporte HTTP personalizable** (URL templating + body templating + métodos HTTP genéricos). Traccar y similares solo se documentan como **ejemplos de integración**, nunca como modo interno.
 
@@ -14,11 +14,11 @@ Orden de implementación (de mayor a menor impacto):
 6. ✅ Driver insights GPS-only (Fase 6, v4.0)
 7. ✅ Driving events GPS-derived: hardBrake / rapidAcceleration / sharpTurn / possibleCrash (Fase 6.1, v4.1)
 8. ✅ Sensor fusion real con acelerómetro + giroscopio (Fase 8, v4.2)
-9. ✅ Provider hardening v4.5.2 (CMMotionActivityManager iOS, FLP híbrido Android, confidence threshold, accuracy filter, no geozonas)
+9. ✅ Provider hardening v4.5.4 (CMMotionActivityManager iOS, FLP híbrido Android, confidence threshold, accuracy filter, no geozonas)
 
 ---
 
-## Mejoras futuras (no programadas) — Roadmap post 4.5.2
+## Mejoras futuras (no programadas) — Roadmap post 4.5.4
 
 Estas no son bugs ni regresiones; son trabajo nuevo opcional. Si se hacen, idealmente cada una en su propia minor.
 
@@ -205,3 +205,4 @@ Acelerómetro + giroscopio reales para refinar `possibleCrash` y nuevo `phoneUsa
 ## Backend layer (opcional, fuera del plugin)
 
 Si la app necesita geocercas, eventos espaciales, historial server-side, viajes/paradas o reportes, esa lógica vive en una capa backend, **no** en el plugin. Traccar es una opción razonable; ver [traccar.md](traccar.md) como ejemplo de integración HTTP. El plugin se conecta a Traccar (o a cualquier otra API) usando únicamente el HTTP transport personalizable entregado en v3.3.
+                                

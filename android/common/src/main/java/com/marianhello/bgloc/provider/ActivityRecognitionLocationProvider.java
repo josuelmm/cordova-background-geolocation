@@ -48,7 +48,7 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
     private boolean stopOnStillWarningEmitted = false;
     private DetectedActivity lastActivity = new DetectedActivity(DetectedActivity.UNKNOWN, 100);
 
-    // v4.5.2: snapshot of fields that require restarting tracking when they change.
+    // v4.5.4: snapshot of fields that require restarting tracking when they change.
     private Integer prevDesiredAccuracy;
     private Integer prevInterval;
     private Integer prevFastestInterval;
@@ -77,7 +77,7 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
     public void onCreate() {
         super.onCreate();
 
-        // v4.5.2: ACTIVITY_PROVIDER strictly depends on Google Play Services
+        // v4.5.4: ACTIVITY_PROVIDER strictly depends on Google Play Services
         // (FusedLocationProviderClient + ActivityRecognitionClient). If GPS is
         // missing/outdated we cannot operate — surface a clear error instead of
         // silently failing.
@@ -108,7 +108,7 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
         logger.info("Start recording");
         this.isStarted = true;
 
-        // v4.5.2: ACTIVITY_PROVIDER hinges on the STILL/ACTIVE state machine.
+        // v4.5.4: ACTIVITY_PROVIDER hinges on the STILL/ACTIVE state machine.
         // If the host turned that off, the provider degenerates into a tracker
         // that never pauses — warn so it shows up in logcat for the integrator.
         if (mConfig != null && Boolean.FALSE.equals(mConfig.getStopOnStillActivity()) && !stopOnStillWarningEmitted) {
@@ -129,7 +129,7 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
 
     @Override
     public void onConfigure(Config config) {
-        // v4.5.2: only restart tracking if a field that actually affects the
+        // v4.5.4: only restart tracking if a field that actually affects the
         // LocationRequest / activity-updates subscription has changed. A no-op
         // reconfigure used to drop+re-add the location callback and momentarily
         // leave the service without updates.
@@ -204,7 +204,7 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
         int priority = translateDesiredAccuracy(mConfig.getDesiredAccuracy());
         // v3.4: LocationRequest.Builder (play-services-location 21.0.0+) replaces deprecated
         // LocationRequest.create() + setPriority/setInterval/setFastestInterval.
-        // v4.5.2: also honor distanceFilter (was ignored on ACTIVITY_PROVIDER), so the
+        // v4.5.4: also honor distanceFilter (was ignored on ACTIVITY_PROVIDER), so the
         // FusedLocationProvider can throttle by distance and not just by interval.
         LocationRequest.Builder builder = new LocationRequest.Builder(priority, mConfig.getInterval())
                 .setMinUpdateIntervalMillis(mConfig.getFastestInterval())
@@ -257,7 +257,7 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
         startTracking();
 
         if (!isWatchingActivity && mConfig.getStopOnStillActivity()) {
-            // v4.5.2: on Android 10+ ACTIVITY_RECOGNITION is a runtime permission.
+            // v4.5.4: on Android 10+ ACTIVITY_RECOGNITION is a runtime permission.
             // Without it, requestActivityUpdates() silently returns no broadcasts and
             // STILL/ACTIVE never flips — the provider then runs as a continuous tracker
             // by accident. Emit a one-shot error so the host app knows to request it.
@@ -341,7 +341,7 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
 
             DetectedActivity candidate = getProbableActivity(detectedActivities);
 
-            // v4.5.2: skip transitions whose confidence is below the configured
+            // v4.5.4: skip transitions whose confidence is below the configured
             // threshold (default 50). Prevents jittery STILL/ACTIVE flips when the
             // motion classifier is unsure — which translated into spurious GPS
             // start/stop bursts in earlier versions.

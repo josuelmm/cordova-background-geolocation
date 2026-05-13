@@ -89,7 +89,7 @@ public abstract class AbstractLocationProvider implements LocationProvider {
     }
 
     /**
-     * v4.5.2: drop fixes whose horizontal accuracy is worse than the configured
+     * v4.5.4: drop fixes whose horizontal accuracy is worse than the configured
      * maxAcceptedAccuracy threshold. Returns true when the location must be
      * discarded.
      */
@@ -169,7 +169,7 @@ public abstract class AbstractLocationProvider implements LocationProvider {
     }
 
     /**
-     * v4.5.2: emit a permission-denied error to the delegate (used when a runtime
+     * v4.5.4: emit a permission-denied error to the delegate (used when a runtime
      * permission such as ACTIVITY_RECOGNITION is missing on Android 10+).
      */
     protected void handlePermissionDenied(String message) {
@@ -179,7 +179,7 @@ public abstract class AbstractLocationProvider implements LocationProvider {
     }
 
     /**
-     * v4.5.2: emit a service-level error to the delegate (used when Google Play
+     * v4.5.4: emit a service-level error to the delegate (used when Google Play
      * Services is missing/outdated or the OS location service is disabled).
      */
     protected void handleServiceError(String message) {
@@ -195,7 +195,7 @@ public abstract class AbstractLocationProvider implements LocationProvider {
     }
 
     public Boolean hasMockLocationsEnabled() {
-        // v4.5.2: Settings.Secure.getString may return null (key absent on the
+        // v4.5.4: Settings.Secure.getString may return null (key absent on the
         // device's settings provider). The previous code crashed with NPE because
         // it called .equals("1") on the returned value. Invert the comparison so
         // null safely yields false.

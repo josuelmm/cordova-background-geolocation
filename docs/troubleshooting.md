@@ -34,7 +34,7 @@ Devuelve: `isRunning`, `locationServicesEnabled`, `lastLocationAt`, `pendingSync
 
 **Causa:** `ACTIVITY_PROVIDER` requiere `ActivityRecognitionClient` (Google Play Services). Sin GMS no funciona.
 
-**Fix:** usar `DISTANCE_FILTER_PROVIDER` (híbrido desde v4.5.2, automáticamente fallback a `LocationManager` cuando no hay GMS) o `RAW_PROVIDER`.
+**Fix:** usar `DISTANCE_FILTER_PROVIDER` (híbrido desde v4.5.4, automáticamente fallback a `LocationManager` cuando no hay GMS) o `RAW_PROVIDER`.
 
 ```js
 BackgroundGeolocation.configure({
@@ -151,9 +151,9 @@ Verificar logs: `Start on boot blocked: ForegroundServiceStartNotAllowedExceptio
 
 **Síntoma con ACTIVITY_PROVIDER (iOS):** abrís la app estando quieto y no llega ni location ni stationary.
 
-**Estado:** corregido en v4.5.2. `onStart` ahora arranca `startTracking` inmediatamente para tomar el primer fix; cuando CoreMotion confirma STILL, el primer fix se emite como `onStationaryChanged` y el GPS se apaga.
+**Estado:** corregido en v4.5.4. `onStart` ahora arranca `startTracking` inmediatamente para tomar el primer fix; cuando CoreMotion confirma STILL, el primer fix se emite como `onStationaryChanged` y el GPS se apaga.
 
-Si lo ves en una versión < 4.5.2: actualizar.
+Si lo ves en una versión < 4.5.4: actualizar.
 
 ---
 
@@ -171,7 +171,7 @@ Si lo ves en una versión < 4.5.2: actualizar.
 
 ## La app crashea con NPE en `hasMockLocationsEnabled`
 
-**Estado:** corregido en v4.5.2. `Settings.Secure.getString` podía devolver null en algunos dispositivos. Si lo ves en 4.5.1: actualizar.
+**Estado:** corregido en v4.5.4. `Settings.Secure.getString` podía devolver null en algunos dispositivos. Si lo ves en 4.5.1: actualizar.
 
 ---
 

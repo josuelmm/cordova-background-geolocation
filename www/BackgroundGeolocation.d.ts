@@ -557,7 +557,7 @@ export interface ConfigureOptions {
   stationaryPollFast?: number;
 
   /**
-   * v4.5.2 — Activity-recognition confidence threshold (0-100). Transitions below this
+   * v4.5.4 — Activity-recognition confidence threshold (0-100). Transitions below this
    * confidence are ignored, preventing jittery STILL/ACTIVE flips that cause spurious
    * GPS start/stop bursts. Only used by `ACTIVITY_PROVIDER`.
    *
@@ -567,12 +567,12 @@ export interface ConfigureOptions {
    * Platform: Android, iOS
    * Provider: ACTIVITY
    * @default 50
-   * @since 4.5.2
+   * @since 4.5.4
    */
   activityConfidenceThreshold?: number;
 
   /**
-   * v4.5.2 — Maximum accepted horizontal accuracy in meters. Fixes whose reported
+   * v4.5.4 — Maximum accepted horizontal accuracy in meters. Fixes whose reported
    * accuracy is worse than this value are dropped before reaching the JS layer
    * (and before being persisted / posted / synced).
    *
@@ -581,7 +581,7 @@ export interface ConfigureOptions {
    *
    * Platform: Android, iOS
    * Provider: all
-   * @since 4.5.2
+   * @since 4.5.4
    */
   maxAcceptedAccuracy?: number;
 

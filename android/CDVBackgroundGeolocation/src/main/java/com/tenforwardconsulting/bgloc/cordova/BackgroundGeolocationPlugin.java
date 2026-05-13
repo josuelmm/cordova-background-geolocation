@@ -96,7 +96,7 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     public static final String ACTION_REQUEST_NOTIFICATION_PERMISSION = "requestNotificationPermission";
 
     /** Plugin version; keep in sync with plugin.xml. */
-    public static final String PLUGIN_VERSION = "4.5.3";
+    public static final String PLUGIN_VERSION = "4.5.4";
 
     private BackgroundGeolocationFacade facade;
 

@@ -243,7 +243,7 @@ static MAURLocationTransform s_locationTransform = nil;
             if (dict) {
                 NSMutableArray *parts = [NSMutableArray array];
                 for (NSString *key in dict) {
-                    // v4.5.3: skip null / NSNull values. Previously they were
+                    // v4.5.4: skip null / NSNull values. Previously they were
                     // serialized as the literal "<null>" string, which servers
                     // like Traccar reject (HTTP 400 — OsmAndProtocolDecoder
                     // throws NumberFormatException on "speed=null"). Placeholders

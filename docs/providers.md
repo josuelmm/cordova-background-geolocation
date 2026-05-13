@@ -17,13 +17,13 @@ The plugin ships three providers. Choose **one** in `configure()` via `locationP
 | `ACTIVITY_PROVIDER` | ✅ FLP + ActivityRecognition | ❌ requiere GMS | ✅ CoreLocation + CMMotionActivityManager | Mejor ahorro con detección de actividad. |
 | `RAW_PROVIDER` | ✅ LocationManager | ✅ LocationManager | ✅ CoreLocation | Tracking básico/constante, mayor batería. |
 
-> **GMS** = Google Play Services. Necesario para `ActivityRecognitionClient`. `FusedLocationProviderClient` se usa **opcionalmente** cuando está disponible (DISTANCE_FILTER es híbrido desde 4.5.2).
+> **GMS** = Google Play Services. Necesario para `ActivityRecognitionClient`. `FusedLocationProviderClient` se usa **opcionalmente** cuando está disponible (DISTANCE_FILTER es híbrido desde 4.5.4).
 
 ---
 
 ## DISTANCE_FILTER_PROVIDER (default)
 
-Híbrido desde v4.5.2:
+Híbrido desde v4.5.4:
 
 - **Con Google Play Services** → `FusedLocationProviderClient` + `LocationCallback`. Mezcla GPS+Network internamente, mejor batería, aplica `setMinUpdateDistanceMeters` y `Priority.*`.
 - **Sin Google Play Services** (Huawei/HMS, AOSP, ChinaROMs) → fallback automático a `android.location.LocationManager` + `LocationListener`. Suscribe a GPS y Network simultáneamente cuando ambos están habilitados.
@@ -31,7 +31,7 @@ Híbrido desde v4.5.2:
 State machine compartida en ambos paths:
 1. **Moving** — sampleo normal con `distanceFilter`.
 2. **Acquiring** — burst alta frecuencia/alta precisión para fijar velocidad o ubicación estacionaria (5 muestras max).
-3. **Stationary** — apaga GPS, programa `AlarmManager.setInexactRepeating` para poll lazy (3 min) o aggressive (1 min cerca del borde). **Sin geofences** desde v4.5.2 (decisión de producto).
+3. **Stationary** — apaga GPS, programa `AlarmManager.setInexactRepeating` para poll lazy (3 min) o aggressive (1 min cerca del borde). **Sin geofences** desde v4.5.4 (decisión de producto).
 
 **iOS:** Core Location con `pausesLocationUpdatesAutomatically`, `activityType`, region monitoring para detectar stationary exit.
 
@@ -46,9 +46,9 @@ Opciones relevantes:
 
 ## ACTIVITY_PROVIDER
 
-**Android (4.5.2+):** `FusedLocationProviderClient` + `ActivityRecognitionClient`. **Requiere Google Play Services** + permiso `ACTIVITY_RECOGNITION` (Android 10+). En dispositivos sin GMS este provider no funciona — usar `DISTANCE_FILTER_PROVIDER` o `RAW_PROVIDER`.
+**Android (4.5.4+):** `FusedLocationProviderClient` + `ActivityRecognitionClient`. **Requiere Google Play Services** + permiso `ACTIVITY_RECOGNITION` (Android 10+). En dispositivos sin GMS este provider no funciona — usar `DISTANCE_FILTER_PROVIDER` o `RAW_PROVIDER`.
 
-**iOS (4.5.2+):** `CMMotionActivityManager` directo (CoreMotion). Sustituye la dependencia legacy de SOMotionDetector. Requiere permiso "Motion & Fitness". Confidence normalizada Low/Med/High → 20/40/80 para paridad con Android.
+**iOS (4.5.4+):** `CMMotionActivityManager` directo (CoreMotion). Sustituye la dependencia legacy de SOMotionDetector. Requiere permiso "Motion & Fitness". Confidence normalizada Low/Med/High → 20/40/80 para paridad con Android.
 
 Comportamiento:
 - Suscribe a updates de actividad. Filtra por `activityConfidenceThreshold` (default 50).
@@ -71,7 +71,7 @@ Opciones relevantes:
 
 `android.location.LocationManager` directo en Android, Core Location directo en iOS. **No tiene state machine** — cada fix que produce el OS se reenvía.
 
-Desde v4.5.2 Android suscribe a GPS+Network simultáneamente y elige según `desiredAccuracy`:
+Desde v4.5.4 Android suscribe a GPS+Network simultáneamente y elige según `desiredAccuracy`:
 - `< 1000m` → incluye GPS.
 - `≥ 10m` → incluye Network.
 - `≥ 1000m` → solo Network.

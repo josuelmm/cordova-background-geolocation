@@ -35,7 +35,7 @@ public class BootCompletedReceiver extends BroadcastReceiver {
      public void onReceive(Context context, Intent intent) {
         String action = intent != null ? intent.getAction() : null;
 
-        // v4.5.2 — hardening: ignore arbitrary broadcasts directed at this
+        // v4.5.4 — hardening: ignore arbitrary broadcasts directed at this
         // receiver. Without this, any explicit intent (e.g. a malicious app
         // targeting our package) could trigger the service auto-start path.
         // Accept only the canonical boot/package-replaced actions plus the

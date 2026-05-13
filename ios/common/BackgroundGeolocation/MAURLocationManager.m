@@ -213,7 +213,7 @@ static NSString *const Domain = @"com.marianhello";
     }
 }
 
-// v4.5.2: iOS 14+ delegate callback. The legacy
+// v4.5.4: iOS 14+ delegate callback. The legacy
 // `locationManager:didChangeAuthorizationStatus:` is deprecated in iOS 14 but
 // still delivered alongside this one, so we ignore the legacy variant when
 // running on iOS 14+ to avoid double-notifying delegates (RAW + ACTIVITY

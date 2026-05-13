@@ -46,7 +46,7 @@ enum {
 @property NSDictionary *drivingEvents;
 // v4.4: stamp battery percentage + charging state onto every location (default ON).
 @property NSNumber *includeBattery;
-// v4.5.2: provider hardening
+// v4.5.4: provider hardening
 /** 0-100. Activity-recognition transitions below this confidence are ignored. Default 50. */
 @property NSNumber *activityConfidenceThreshold;
 /** Discard fixes whose accuracy (m) is worse than this. nil = no filter. */

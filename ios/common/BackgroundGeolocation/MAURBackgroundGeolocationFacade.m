@@ -1017,7 +1017,7 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
 {
     DDLogDebug(@"%@ #onStationaryChanged", TAG);
 
-    // v4.5.2: drop stationary fixes whose accuracy is worse than the configured
+    // v4.5.4: drop stationary fixes whose accuracy is worse than the configured
     // maxAcceptedAccuracy threshold. Mirrors the Android filter in
     // AbstractLocationProvider.handleStationary.
     NSNumber *maxAcc = [self getConfig].maxAcceptedAccuracy;
@@ -1058,7 +1058,7 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
 {
     DDLogDebug(@"%@ #onLocationChanged %@", TAG, location);
 
-    // v4.5.2: drop fixes whose accuracy is worse than maxAcceptedAccuracy.
+    // v4.5.4: drop fixes whose accuracy is worse than maxAcceptedAccuracy.
     // Mirrors AbstractLocationProvider.handleLocation on Android.
     NSNumber *maxAcc = [self getConfig].maxAcceptedAccuracy;
     if (maxAcc != nil && maxAcc.doubleValue > 0 && location.accuracy != nil

@@ -6,7 +6,7 @@ title: Introduction
 
 # Introduction
 
-Cross-platform geolocation for Cordova with battery-saving distance filtering, stationary detection (polling-based since 4.5.2 — no geofences) and provider fallback (works with or without Google Play Services on Android).
+Cross-platform geolocation for Cordova with battery-saving distance filtering, stationary detection (polling-based since 4.5.4 — no geofences) and provider fallback (works with or without Google Play Services on Android).
 {: .fw-500 }
 
 This plugin can be used for geolocation when the app is running in the foreground or background. It is more battery and data efficient than html5 geolocation or cordova-geolocation plugin. It can be used side by side with other geolocation providers (eg. html5 navigator.geolocation).
@@ -29,7 +29,7 @@ The NPM package can be found at [@josuelmm/cordova-background-geolocation](https
 - [Driving events (Fase 6, v4.0)](driving-events.md).
 - [Traccar como ejemplo de integración](traccar.md) — backend opcional para geocercas, eventos, historial; nunca hardcodeado en el plugin.
 
-## Operational docs (4.5.2+)
+## Operational docs (4.5.4+)
 
 - **[Providers](providers.md)** — matriz de compatibilidad, internals, recomendación universal.
 - **[Battery optimization](battery.md)** — palancas que afectan consumo, perfiles recomendados, Doze/OEM.

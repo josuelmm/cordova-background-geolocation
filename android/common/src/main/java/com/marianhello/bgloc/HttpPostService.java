@@ -193,7 +193,7 @@ public class HttpPostService {
         Iterator<String> keys = jsonObj.keys();
         while (keys.hasNext()) {
             String key = keys.next();
-            // v4.5.3: skip null / JSONObject.NULL values. Previously these were
+            // v4.5.4: skip null / JSONObject.NULL values. Previously these were
             // serialised as the literal string "null", which servers like Traccar
             // reject (Traccar OsmAndProtocolDecoder throws NumberFormatException
             // on "speed=null"). Placeholders that resolve to no value (@speed,

@@ -14,7 +14,7 @@ import java.util.List;
 public class RawLocationProvider extends AbstractLocationProvider implements LocationListener {
     private LocationManager locationManager;
     private boolean isStarted = false;
-    // v4.5.2: providers we actively subscribed to (so we can unsubscribe cleanly).
+    // v4.5.4: providers we actively subscribed to (so we can unsubscribe cleanly).
     private final List<String> activeProviders = new ArrayList<>(2);
 
     public RawLocationProvider(Context context) {
@@ -42,7 +42,7 @@ public class RawLocationProvider extends AbstractLocationProvider implements Loc
             logger.warn("RawLocationProvider started without config");
             return;
         }
-        // v4.5.2: honor desiredAccuracy and subscribe to all suitable providers
+        // v4.5.4: honor desiredAccuracy and subscribe to all suitable providers
         // simultaneously (GPS + Network when available). Previously RAW only
         // used GPS-or-Network and ignored desiredAccuracy.
         List<String> providers = pickProviders();
@@ -67,7 +67,7 @@ public class RawLocationProvider extends AbstractLocationProvider implements Loc
     }
 
     /**
-     * v4.5.2: choose providers based on desiredAccuracy.
+     * v4.5.4: choose providers based on desiredAccuracy.
      * <ul>
      *   <li>&lt; 1000 m → include GPS when enabled (HIGH / BALANCED)</li>
      *   <li>≥ 10 m → include Network when enabled (covers indoor and quick fixes)</li>
@@ -111,7 +111,7 @@ public class RawLocationProvider extends AbstractLocationProvider implements Loc
             return;
         }
         try {
-            // v4.5.2: removeUpdates(this) detaches us from every provider we
+            // v4.5.4: removeUpdates(this) detaches us from every provider we
             // subscribed to via the same LocationListener.
             locationManager.removeUpdates(this);
         } catch (SecurityException e) {
@@ -158,7 +158,7 @@ public class RawLocationProvider extends AbstractLocationProvider implements Loc
     @Override
     public void onProviderDisabled(String provider) {
         logger.warn("Provider {} was disabled", provider);
-        // v4.5.2: emit SERVICE error when no fallback provider is available so
+        // v4.5.4: emit SERVICE error when no fallback provider is available so
         // the JS layer can re-prompt the user. Matches DISTANCE_FILTER provider
         // behavior.
         if (locationManager != null && pickProvider() == null) {

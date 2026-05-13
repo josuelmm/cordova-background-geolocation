@@ -71,7 +71,7 @@ public final class ConfigJsonMapper {
         j.put("stationaryTimeout", c.getStationaryTimeout());
         j.put("stationaryPollInterval", c.getStationaryPollInterval());
         j.put("stationaryPollFast", c.getStationaryPollFast());
-        // v4.5.2: provider hardening knobs
+        // v4.5.4: provider hardening knobs
         j.put("activityConfidenceThreshold", c.getActivityConfidenceThreshold());
         j.put("maxAcceptedAccuracy", c.getMaxAcceptedAccuracy());
 
@@ -152,7 +152,7 @@ public final class ConfigJsonMapper {
         if (j.has("stationaryTimeout") && !j.isNull("stationaryTimeout")) c.setStationaryTimeout(j.getInt("stationaryTimeout"));
         if (j.has("stationaryPollInterval") && !j.isNull("stationaryPollInterval")) c.setStationaryPollInterval(j.getInt("stationaryPollInterval"));
         if (j.has("stationaryPollFast") && !j.isNull("stationaryPollFast")) c.setStationaryPollFast(j.getInt("stationaryPollFast"));
-        // v4.5.2
+        // v4.5.4
         if (j.has("activityConfidenceThreshold") && !j.isNull("activityConfidenceThreshold")) c.setActivityConfidenceThreshold(j.getInt("activityConfidenceThreshold"));
         if (j.has("maxAcceptedAccuracy") && !j.isNull("maxAcceptedAccuracy")) c.setMaxAcceptedAccuracy((float) j.getDouble("maxAcceptedAccuracy"));
 

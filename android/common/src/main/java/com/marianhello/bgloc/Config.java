@@ -94,7 +94,7 @@ public class Config implements Parcelable
     private Integer stationaryPollInterval;
     /** Aggressive poll interval while stationary (ms). Default 60_000. */
     private Integer stationaryPollFast;
-    // v4.5.2 — provider hardening
+    // v4.5.4 — provider hardening
     /** 0-100. Activity-recognition transitions below this confidence are ignored. Default 50. */
     private Integer activityConfidenceThreshold;
     /** Discard fixes whose `accuracy` (m) is worse than this. `null` (default) disables the filter. */
@@ -281,7 +281,7 @@ public class Config implements Parcelable
         setStationaryTimeout((Integer) in.readValue(null));
         setStationaryPollInterval((Integer) in.readValue(null));
         setStationaryPollFast((Integer) in.readValue(null));
-        // v4.5.2 provider hardening
+        // v4.5.4 provider hardening
         setActivityConfidenceThreshold((Integer) in.readValue(null));
         setMaxAcceptedAccuracy((Float) in.readValue(null));
         // v4.5.1 — pass the plugin's classloader so getSerializable() can deserialize
@@ -338,8 +338,8 @@ public class Config implements Parcelable
         config.stationaryTimeout = 5 * 60 * 1000;
         config.stationaryPollInterval = 3 * 60 * 1000;
         config.stationaryPollFast = 60 * 1000;
-        config.activityConfidenceThreshold = 50; // v4.5.2: ignore <50% confidence transitions
-        config.maxAcceptedAccuracy = null;       // v4.5.2: off by default (no JS regression)
+        config.activityConfidenceThreshold = 50; // v4.5.4: ignore <50% confidence transitions
+        config.maxAcceptedAccuracy = null;       // v4.5.4: off by default (no JS regression)
 
         return config;
     }
@@ -414,7 +414,7 @@ public class Config implements Parcelable
         out.writeValue(getStationaryTimeout());
         out.writeValue(getStationaryPollInterval());
         out.writeValue(getStationaryPollFast());
-        // v4.5.2
+        // v4.5.4
         out.writeValue(getActivityConfidenceThreshold());
         out.writeValue(getMaxAcceptedAccuracy());
         Bundle bundle = new Bundle();
@@ -1139,7 +1139,7 @@ public class Config implements Parcelable
         if (config2.stationaryTimeout != null) merger.setStationaryTimeout(config2.stationaryTimeout);
         if (config2.stationaryPollInterval != null) merger.setStationaryPollInterval(config2.stationaryPollInterval);
         if (config2.stationaryPollFast != null) merger.setStationaryPollFast(config2.stationaryPollFast);
-        // v4.5.2
+        // v4.5.4
         if (config2.activityConfidenceThreshold != null) merger.setActivityConfidenceThreshold(config2.activityConfidenceThreshold);
         if (config2.maxAcceptedAccuracy != null) merger.setMaxAcceptedAccuracy(config2.maxAcceptedAccuracy);
 

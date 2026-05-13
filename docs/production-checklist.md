@@ -53,7 +53,7 @@ Antes de publicar una app que use este plugin, verificar cada punto.
 
 ## Plugin / SDK
 
-- [ ] `@josuelmm/cordova-background-geolocation` version `4.5.2` o superior (post-hardening).
+- [ ] `@josuelmm/cordova-background-geolocation` version `4.5.4` o superior (post-hardening).
 - [ ] `npm ci` (no `npm install`) en CI para builds reproducibles.
 - [ ] `npm pack --dry-run` sin warnings/errors. Verifica tamaño del paquete (debe excluir tests, .git, node_modules).
 - [ ] `npm run build:angular` (si usás el wrapper Angular).

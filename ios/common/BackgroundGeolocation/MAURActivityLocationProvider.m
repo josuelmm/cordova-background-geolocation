@@ -5,7 +5,7 @@
 //  Created by Marian Hello on 14/09/2016.
 //  Copyright © 2016 mauron85. All rights reserved.
 //
-//  v4.5.2 — refactored to use CoreMotion's CMMotionActivityManager directly.
+//  v4.5.4 — refactored to use CoreMotion's CMMotionActivityManager directly.
 //  The SOMotionDetector dependency (sources + plugin.xml entries) was removed
 //  in this version.
 //
@@ -41,7 +41,7 @@ typedef NS_ENUM(NSUInteger, MAURMotionType) {
     CMMotionActivityManager *activityManager;
     NSOperationQueue *activityQueue;
 
-    // v4.5.2: cache of active config so motion callbacks can read
+    // v4.5.4: cache of active config so motion callbacks can read
     // activityConfidenceThreshold without re-fetching.
     MAURConfig *currentConfig;
 }
@@ -65,7 +65,7 @@ typedef NS_ENUM(NSUInteger, MAURMotionType) {
     locationManager = [MAURLocationManager sharedInstance];
     locationManager.delegate = self;
 
-    // v4.5.2 — CoreMotion direct. Without CMMotionActivityManager support the
+    // v4.5.4 — CoreMotion direct. Without CMMotionActivityManager support the
     // provider cannot drive STILL/ACTIVE transitions; emit a clear error so the
     // host app knows to fall back to DISTANCE_FILTER or RAW.
     motionAvailable = [CMMotionActivityManager isActivityAvailable];
@@ -145,7 +145,7 @@ typedef NS_ENUM(NSUInteger, MAURMotionType) {
         [strongSelf handleActivityUpdate:activity];
     }];
 
-    // v4.5.2 — start tracking immediately. Without this, if the user opens the
+    // v4.5.4 — start tracking immediately. Without this, if the user opens the
     // app while already still, CoreMotion fires STILL first and `handleActivityUpdate`
     // never calls startTracking (its rule is "ACTIVE → start"), so no fix is ever
     // produced and the initial stationary is never emitted. Mirrors the legacy
@@ -292,7 +292,7 @@ typedef NS_ENUM(NSUInteger, MAURMotionType) {
 
 - (void) onLocationsChanged:(NSArray*)locations
 {
-    // v4.5.2: while NotMoving we only emit the stationary fix; the previous
+    // v4.5.4: while NotMoving we only emit the stationary fix; the previous
     // code fell through and also delivered each location as onLocationChanged,
     // which produced phantom "moving" rows during a STILL window.
     if (lastMotionType == MAURMotionTypeNotMoving) {
@@ -326,7 +326,7 @@ typedef NS_ENUM(NSUInteger, MAURMotionType) {
     DDLogInfo(@"Destroying %@ ", TAG);
     [self onStop:nil];
 
-    // v4.5.2: MAURLocationManager is a singleton shared with the other providers
+    // v4.5.4: MAURLocationManager is a singleton shared with the other providers
     // (RAW, DISTANCE). Release the delegate slot so a subsequent provider swap
     // does not leave this destroyed instance as the active delegate.
     if (locationManager != nil && locationManager.delegate == self) {
