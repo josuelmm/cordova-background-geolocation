@@ -2,6 +2,13 @@
 
 **for cordova-plugin-background-geolocation**
 
+## [4.5.3] - 2026-05-13
+
+### Fixed (blocker — sync HTTP 400 with Traccar-style servers)
+- Form-urlencoded body no longer sends `speed=null`, `events=null`, etc. when placeholders resolve to no value. Traccar's `OsmAndProtocolDecoder.parseDouble("null")` was throwing `NumberFormatException` → HTTP 400. Fix omits `JSONObject.NULL` / `NSNull` / literal `"null"` from the request body. Applies to real-time POST (foreground + background), `forceSync()`, automatic sync, both `httpMode='single'` and `httpMode='batch'`.
+
+### Plugin version: `4.5.3`.
+
 ## [4.5.2] - 2026-05-10
 
 ### Added (Provider Hardening)

@@ -1,6 +1,6 @@
 # Roadmap
 
-Estado actual: **v4.5.2** (Fases 1-8 completadas + provider hardening: confidence threshold, accuracy filter, GMS hybrid, iOS CoreMotion directo).
+Estado actual: **v4.5.3** (Fases 1-8 completadas + provider hardening + fix BLOQUEANTE sync HTTP 400 con Traccar).
 
 > **Principio de diseño.** Este es un plugin **global y backend-agnóstico**. No incorpora lógica de Traccar, GPSWox, OsmAnd ni de ninguna API propietaria. La compatibilidad con cualquier backend se logra mediante **transporte HTTP personalizable** (URL templating + body templating + métodos HTTP genéricos). Traccar y similares solo se documentan como **ejemplos de integración**, nunca como modo interno.
 

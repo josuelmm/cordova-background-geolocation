@@ -486,7 +486,7 @@ More on sync (headers, retries, postTemplate): [HTTP posting](https://github.com
 | `deleteLocation(id, success, fail)` | 1.0 | Delete one location by id. |
 | `deleteAllLocations(success, fail)` | 1.0 | Delete all stored locations. |
 | `getCurrentLocation(success, fail, options)` | 1.0 | One-shot location (e.g. timeout, maximumAge). |
-| `getPluginVersion(success, fail)` | 1.0 | Plugin version string (e.g. `"4.5.1"`). |
+| `getPluginVersion(success, fail)` | 1.0 | Plugin version string (e.g. `"4.5.3"`). |
 | `checkStatus(success, fail)` | 1.0 | Service status (isRunning, authorization, etc.). |
 | `showAppSettings()` / `openSettings()` | 1.0 | Open app settings. |
 | `showLocationSettings()` | 1.0 | Open system location settings. |
