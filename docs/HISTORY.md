@@ -951,4 +951,23 @@ Since alpha.49:
 
 #### Added
 
-- Android open activity when notification cli
+- Android open activity when notification clicked [69989e79a8a67485fc88463eec8d69bb713c2dbe](https://github.com/erikkemperman/cordova-plugin-background-geolocation/commit/69989e79a8a67485fc88463eec8d69bb713c2dbe)
+
+#### Fixed
+
+- Android duplicate desiredAccuracy extra
+- Android [compilation error](https://github.com/coletivoEITA/cordova-plugin-background-geolocation/commit/813f1695144823d2a61f9733ced5b9fdedf15ff3)
+
+### [0.4.1] - 2015-09-21
+
+- maintenance version
+
+### [0.4.0] - 2015-03-08
+
+#### Added
+
+- Android using callbacks same as iOS
+
+#### Removed
+
+- Android storing position into sqlite
