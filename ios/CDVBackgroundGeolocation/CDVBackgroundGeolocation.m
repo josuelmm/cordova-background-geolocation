@@ -535,7 +535,7 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 - (void) getPluginVersion:(CDVInvokedUrlCommand*)command
 {
     NSLog(@"%@ #%@", TAG, @"getPluginVersion");
-    NSString *version = @"4.5.4"; // keep in sync with plugin.xml and Android PLUGIN_VERSION
+    NSString *version = @"4.5.5"; // keep in sync with plugin.xml and Android PLUGIN_VERSION
     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:version];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }

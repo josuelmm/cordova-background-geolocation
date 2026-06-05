@@ -205,6 +205,13 @@ enum {
     if ([key isEqualToString:@"@time"]) {
         return [NSNumber numberWithDouble:([time timeIntervalSince1970] * 1000)];
     }
+    // v4.5.4 — Unix epoch in SECONDS (not ms). Useful for Traccar OsmAnd
+    // protocol and backends that treat 13-digit millis as garbage and silently
+    // fall back to server time, dropping the real GPS fix time.
+    if ([key isEqualToString:@"@time_seconds"]) {
+        if (time == nil) return [NSNull null];
+        return [NSNumber numberWithLongLong:(long long)[time timeIntervalSince1970]];
+    }
     if ([key isEqualToString:@"@accuracy"]) {
         return accuracy;
     }

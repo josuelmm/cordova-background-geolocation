@@ -1,5 +1,23 @@
 # Changelog
 
+## [4.5.5](https://github.com/josuelmm/cordova-background-geolocation/tree/4.5.5) (2026-06-05)
+
+### Added — `@time_seconds` placeholder
+- Nuevo placeholder `@time_seconds` que resuelve al UTC Unix epoch en **segundos** (10 dígitos), no en milisegundos.
+- **Motivación**: Traccar (protocolo OsmAnd) y varios decoders parsean `timestamp` como segundos. Cuando reciben 13 dígitos (milisegundos) lo intentan parsear como año-58390, lo descartan silenciosamente y **caen al server time**. Sin esto, locations sincronizadas offline llegaban con timestamp del momento del sync en lugar del momento del fix GPS — el path en el mapa parecía "comprimido" porque todos los records compartían hora.
+- **Uso para Traccar**:
+  ```js
+  postTemplate: {
+    lat: '@latitude',
+    lon: '@longitude',
+    timestamp: '@time_seconds',   // ← en lugar de @time
+    speed: '@speed',
+    accuracy: '@accuracy'
+  }
+  ```
+- Backends que quieren ISO 8601 pueden usar `@timestamp_iso` (ya existía).
+- Backends que esperan ms (genéricos JSON, Firebase) siguen con `@time`.
+
 ## [4.5.4](https://github.com/josuelmm/cordova-background-geolocation/tree/4.5.4) (2026-05-13)
 
 ### Fixed (BLOQUEANTE — sync HTTP 400 con servidores tipo Traccar)

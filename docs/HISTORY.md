@@ -2,6 +2,14 @@
 
 **for cordova-plugin-background-geolocation**
 
+## [4.5.5] - 2026-06-05
+
+### Added — `@time_seconds` placeholder
+- New `@time_seconds` placeholder resolves to UTC Unix epoch in **seconds** (10 digits), not milliseconds. Use this for Traccar OsmAnd protocol and any backend whose decoder treats 13-digit values as garbage and silently falls back to server time (dropping the real GPS fix time).
+- Without it, locations synced from the offline queue arrived at the server with the sync moment as timestamp instead of the GPS capture moment.
+
+### Plugin version: `4.5.5`.
+
 ## [4.5.4] - 2026-05-13
 
 ### Fixed (blocker — sync HTTP 400 with Traccar-style servers)

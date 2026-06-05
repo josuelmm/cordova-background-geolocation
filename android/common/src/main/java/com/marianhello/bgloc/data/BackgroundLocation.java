@@ -1041,6 +1041,13 @@ public class BackgroundLocation implements Parcelable {
         if ("@time".equals(key)) {
             return time;
         }
+        // v4.5.4 — Unix epoch in SECONDS (not ms). Useful for Traccar OsmAnd
+        // protocol and other backends whose decoders treat 13-digit values as
+        // year-58390 garbage and silently fall back to server time, dropping the
+        // real GPS fix time.
+        if ("@time_seconds".equals(key)) {
+            return time > 0 ? (time / 1000L) : JSONObject.NULL;
+        }
         if ("@latitude".equals(key)) {
             return latitude;
         }

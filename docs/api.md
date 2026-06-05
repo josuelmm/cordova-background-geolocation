@@ -89,7 +89,7 @@ If you define `postTemplate`, the plugin only serialises the keys you list. Buil
 
 **Available placeholders** (all start with `@`):
 
-`@id`, `@time`, `@provider`, `@locationProvider`, `@latitude`, `@longitude`, `@accuracy`, `@altitudeAccuracy`, `@speed`, `@altitude`, `@bearing`, `@radius`, `@isFromMockProvider`, `@mockLocationsEnabled` (Android), `@simulated` (iOS), `@events`, `@battery`, `@isCharging`, `@recordedAt` (iOS only).
+`@id`, `@time` (UTC ms), `@time_seconds` (UTC seconds, since 4.5.5 — use this for Traccar OsmAnd and any backend that expects 10-digit seconds), `@timestamp_iso` (ISO 8601 string), `@provider`, `@locationProvider`, `@latitude`, `@longitude`, `@accuracy`, `@altitudeAccuracy`, `@speed`, `@altitude`, `@bearing`, `@radius`, `@isFromMockProvider`, `@mockLocationsEnabled` (Android), `@simulated` (iOS), `@events`, `@battery`, `@isCharging`, `@recordedAt` (iOS only).
 
 **If you want `events`, `battery`, `isCharging` in your custom payload, include them explicitly**:
 
