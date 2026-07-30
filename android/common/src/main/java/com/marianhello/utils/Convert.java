@@ -10,8 +10,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -26,7 +26,10 @@ public class Convert {
   }
 
   public static Map<String, Object> toMap(JSONObject jsonobj)  throws JSONException {
-    Map<String, Object> map = new HashMap<String, Object>();
+    // LinkedHashMap, not HashMap: Android's org.json.JSONObject preserves insertion order,
+    // so keeping it here makes the generated postTemplate/bodyTemplate payload key order
+    // deterministic and identical to the order the integrator declared.
+    Map<String, Object> map = new LinkedHashMap<String, Object>();
     Iterator<String> keys = jsonobj.keys();
     while(keys.hasNext()) {
       String key = keys.next();

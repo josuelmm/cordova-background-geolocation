@@ -7,7 +7,9 @@ function getChannel() {
   if (typeof window !== 'undefined' && window.cordova && typeof window.cordova.require === 'function') {
     try {
       return window.cordova.require('cordova/channel');
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[BackgroundGeolocation] cordova.require("cordova/channel") failed, falling back to the browser stub:', e);
+    }
   }
   return {
     deviceready: {
@@ -24,4 +26,14 @@ function getChannel() {
   };
 }
 
-module.exports = getChannel();
+// Resolve the channel lazily on every call. Evaluating getChannel() at import time
+// caches the decision forever: if window.cordova is not defined yet when this module
+// is first required, the browser stub would stay pinned even on a real device and the
+// native deviceready listener would never be registered.
+module.exports = {
+  deviceready: {
+    subscribe: function (cb) {
+      getChannel().deviceready.subscribe(cb);
+    }
+  }
+};

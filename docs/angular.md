@@ -97,6 +97,13 @@ The service exposes the same methods as the global plugin. All methods that acce
 | `getCurrentLocation(success?, fail?, options?)` | `Promise<Location>` | One-time location. Options: `timeout`, `maximumAge`, `enableHighAccuracy`. |
 | `getStationaryLocation(success?, fail?)` | `Promise<Location or null>` | Current stationary location if available. |
 | `checkStatus(success?, fail?)` | `Promise<ServiceStatus>` | `{ isRunning, locationServicesEnabled, authorization }`. |
+| `getDiagnostics(success?, fail?)` | `Promise<Diagnostics>` | **3.5+** Extended diagnostics: permissions, battery-optimisation state, last fix age, pending sync count, OEM info and (iOS) precise location / background refresh / low power flags. See [Debugging](debugging). |
+| `isIgnoringBatteryOptimizations(success?, fail?)` | `Promise<boolean>` | **3.6+** Android: is the app whitelisted from Doze / battery optimisation. Resolves `true` on iOS (no-op). See [Battery](battery). |
+| `requestIgnoreBatteryOptimizations(success?, fail?)` | `Promise<boolean>` | **3.6+** Android: prompt the user for the battery-optimisation exemption. Resolves with the resulting whitelist state. |
+| `openBatterySettings(success?, fail?)` | `Promise<void>` | **3.6+** Android: open the system battery-optimisation settings screen. |
+| `openAutoStartSettings(success?, fail?)` | `Promise<{ opened, manufacturer, screen }>` | **3.6+** Android: open the OEM auto-start / protected-apps screen (Xiaomi, Huawei, Oppo…). `opened: false` when the device has no such screen. See [Auto-start](auto-start). |
+| `getManufacturerHelp(success?, fail?)` | `Promise<{ manufacturer, steps }>` | **3.6+** Localised, per-OEM step list to keep the app alive in the background. |
+| `triggerSOS(payload?, success?, fail?)` | `Promise<void>` | **4.0+** Emit the `sos` event with the user-supplied payload plus the latest known location. See [Driving events](driving-events). |
 | `showAppSettings()` | `Promise<void>` | Open app settings (location permissions). |
 | `openSettings()` | `Promise<void>` | Alias for `showAppSettings()`. |
 | `showLocationSettings()` | `Promise<void>` | Open system location settings (Android). |
@@ -120,7 +127,7 @@ The service exposes the same methods as the global plugin. All methods that acce
 | `startTask(success?, fail?)` | `Promise<number>` | Start a long-running task (e.g. iOS); returns task key. |
 | `endTask(taskKey, success?, fail?)` | `Promise<void>` | End task by key. |
 | `headlessTask(fn)` | `void` | Register headless callback (Android). See [Headless](headless). |
-| `on(eventName, callback?)` | `{ unsubscribe(): void }` | Subscribe to an event. Call `unsubscribe()` when done. |
+| `on(eventName, callback?)` | `{ subscribe(cb): { unsubscribe() }, unsubscribe(): void }` | Subscribe to an event. With a callback, call `unsubscribe()` on the returned object; without one, use `.subscribe(cb)` and `unsubscribe()` on the result. Callbacks are re-entered into the Angular zone (`NgZone.run`), so change detection runs. |
 
 **Constants (provider, accuracy, mode, etc.):** use the `native` getter to access the same constants as the global plugin, e.g. `this.bg.native.ACTIVITY_PROVIDER`, `this.bg.native.HIGH_ACCURACY`, `this.bg.native.BACKGROUND_MODE`.
 
@@ -145,6 +152,25 @@ Same events as the global API. Subscribe with `on()` and store the subscription 
 | `background` | — | App entered background. |
 | `abort_requested` | — | Server returned 285. |
 | `http_authorization` | — | Server returned 401; reconfigure `httpHeaders` if needed. |
+| `heartbeat` | `Location \| undefined` | **3.5+** Fires every `heartbeatInterval` ms while the service runs. Payload may be `undefined` until the first fix. |
+| `syncStart` | — | **3.5+** A batch upload to `syncUrl` began. |
+| `syncProgress` | `number` | **3.5+** Upload progress, `0..100`. |
+| `syncSuccess` | `{ sent }` | **3.5+** Batch uploaded; `sent` = number of locations included. |
+| `syncError` | `{ httpStatus, message }` | **3.5+** Non-2xx response or IO/network failure during sync. |
+| `tripStart` | `Location` | **4.0+** Sustained speed ≥ `drivingEvents.minTripSpeed` (m/s) for `minTripDuration` (ms). |
+| `tripEnd` | `{ location, distance, durationMs }` | **4.0+** Trip finished. `distance` in metres, `durationMs` in ms. |
+| `moving` | `Location` | **4.0+** Speed crossed above `drivingEvents.minMovingSpeed` (m/s). |
+| `stopped` | `Location` | **4.0+** Speed stayed below threshold for `drivingEvents.stoppedDuration` (ms). |
+| `speeding` | `{ location, speedKmh, limitKmh }` | **4.0+** Speed crossed above `drivingEvents.speedLimit` (km/h). Fires once per crossing. |
+| `providerChange` | `{ provider }` | **4.0+** Native location provider changed (GPS / network / fused). |
+| `sos` | `{ location?, ...payload }` | **4.0+** `triggerSOS()` was invoked. |
+| `hardBrake` | `{ location, value }` | **4.1+** GPS-derived hard brake; `value` in m/s² (negative). |
+| `rapidAcceleration` | `{ location, value }` | **4.1+** GPS-derived rapid acceleration; `value` in m/s² (positive). |
+| `sharpTurn` | `{ location, value }` | **4.1+** Bearing-change rate in deg/s. Only above 5 m/s. |
+| `possibleCrash` | `{ location, value, source }` | **4.1+** Heuristic crash. `source: 'gps'` → `value` is the km/h velocity drop; `source: 'sensor'` → impact in g. **Always confirm with the user before alerting contacts.** |
+| `phoneUsageWhileDriving` | `Location \| undefined` | **4.2+** Sustained device interaction during a trip. Requires `drivingEvents.sensorFusion: true`. |
+
+All events from `tripStart` down require `drivingEvents.enabled: true` in `configure()`; see [Driving events](driving-events) for thresholds, units and defaults.
 
 Example:
 
@@ -179,6 +205,39 @@ import type { ConfigureOptions, Location, Activity } from '@josuelmm/cordova-bac
 ```
 
 The main package also exports **Awesome-style** aliases and enums (`BackgroundGeolocationEvents.location`, etc.); accuracy values in this plugin are `0, 100, 1000, 10000` (see [API – TypeScript](api#typescript) and README).
+
+> **Enums are runtime values only from `/angular`.** `www/BackgroundGeolocation.d.ts` is a
+> *declaration* file, so it emits no JavaScript: `BackgroundGeolocationEvents` and the other
+> `export enum`s imported from the **root** package (`@josuelmm/cordova-background-geolocation`)
+> type-check but are `undefined` at runtime. Import them from
+> `@josuelmm/cordova-background-geolocation/angular` whenever you need the **value**
+> (`BackgroundGeolocationEvents.location`); use the root import only for the **type**.
+
+---
+
+## Module resolution: `exports` is the only supported entry point
+
+The Angular API is reached exclusively through the root `package.json` `exports` map:
+
+```json
+"./angular": {
+  "types":   "./angular/dist/index.d.ts",
+  "default": "./angular/dist/fesm2022/josuelmm-cordova-background-geolocation.mjs"
+}
+```
+
+Consequences, on purpose:
+
+- The nested `angular/dist/package.json` produced by ng-packagr is **not published** (ng-packagr
+  writes an `angular/dist/.npmignore` containing `**/package.json`). Nothing consults it: because
+  the root manifest declares `exports`, Node and every exports-aware bundler resolve
+  `@josuelmm/cordova-background-geolocation/angular` through the map above and never fall back to
+  directory resolution inside `angular/dist`.
+- Deep paths such as `@josuelmm/cordova-background-geolocation/angular/dist/...` are **not**
+  importable and are not part of the public API.
+- TypeScript must use `moduleResolution` `"bundler"`, `"node16"` or `"nodenext"`. The legacy
+  `"node"` resolver ignores `exports` and cannot resolve the `/angular` subpath (it would look for
+  `angular/package.json`, which is likewise excluded from the tarball).
 
 ---
 

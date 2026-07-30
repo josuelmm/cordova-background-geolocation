@@ -37,7 +37,7 @@ public class BackgroundGeolocationFacadeTest {
         TestPluginDelegate delegate = new FacadeDelegate();
 
         final BackgroundGeolocationFacade facade = new BackgroundGeolocationFacade(
-                InstrumentationRegistry.getContext(), delegate);
+                InstrumentationRegistry.getInstrumentation().getContext(), delegate);
 
         facade.start();
         latch.await();

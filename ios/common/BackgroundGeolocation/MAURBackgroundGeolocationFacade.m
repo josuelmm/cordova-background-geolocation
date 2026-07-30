@@ -13,6 +13,8 @@
 #import <UIKit/UIKit.h>
 #import <CoreLocation/CoreLocation.h>
 #import <AudioToolbox/AudioToolbox.h>
+// v4.5.6 — D25: UNUserNotificationCenter replaces the UILocalNotification API (iOS 10+).
+#import <UserNotifications/UserNotifications.h>
 #import "MAURBackgroundGeolocationFacade.h"
 #import "MAURPostLocationTask.h"
 #import "MAURSQLiteConfigurationDAO.h"
@@ -106,6 +108,8 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     MAURSensorFusionDetector *sensorFusion;
     // v4.3 — events buffered when no simultaneous fix is available; drained onto next location.
     NSMutableArray *pendingDrivingEvents;
+    // v5.0 — F4: periodic tick for the driving state machine (see -scheduleDrivingTick).
+    NSTimer      *drivingTickTimer;
 }
 
 
@@ -135,8 +139,12 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     postLocationTask = [[MAURPostLocationTask alloc] init];
     postLocationTask.delegate = self;
 
+    // v4.5.6 — D25: kept only as the iOS 9 fallback path of -notify:.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     localNotification = [[UILocalNotification alloc] init];
     localNotification.timeZone = [NSTimeZone defaultTimeZone];
+#pragma clang diagnostic pop
 
     isStarted = NO;
     pendingDrivingEvents = [[NSMutableArray alloc] init];
@@ -180,6 +188,21 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     // ios 8 requires permissions to send local-notifications
     if ([_config isDebugging]) {
         [self runOnMainThread:^{
+            // v4.5.6 — D25: on iOS 10+ the notification permission is requested through
+            // UNUserNotificationCenter; -registerUserNotificationSettings: is deprecated and
+            // does not authorize UNNotificationRequests.
+            if (@available(iOS 10, *)) {
+                [[UNUserNotificationCenter currentNotificationCenter]
+                    requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound | UNAuthorizationOptionBadge)
+                                  completionHandler:^(BOOL granted, NSError * _Nullable error) {
+                    if (!granted) {
+                        DDLogDebug(@"%@ debug notifications not authorized: %@", TAG, error.localizedDescription);
+                    }
+                }];
+                return;
+            }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
             UIApplication *app = [UIApplication sharedApplication];
             if ([[UIApplication sharedApplication]respondsToSelector:@selector(currentUserNotificationSettings)]) {
                 UIUserNotificationType wantedTypes = UIUserNotificationTypeBadge|UIUserNotificationTypeSound|UIUserNotificationTypeAlert;
@@ -190,6 +213,7 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
                     }
                 }
             }
+#pragma clang diagnostic pop
         }];
     }
     
@@ -227,6 +251,8 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
         // accumulators to apply the new thresholds cleanly from this point on.
         if (![[currentConfig.drivingEvents description] isEqualToString:[_config.drivingEvents description]]) {
             [self drivingDetectorReset];
+            // v5.0 — F4: enabling/disabling drivingEvents at runtime must arm/disarm the tick.
+            if (isStarted) [self scheduleDrivingTick]; else [self cancelDrivingTick];
             // v4.2: re-evaluate sensor fusion as well (might have just been enabled/disabled).
             [self configureSensorFusion];
             if (isStarted) [sensorFusion start];
@@ -282,9 +308,20 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
         
         isStarted = [locationProvider onStart:&error];
         locationProvider.delegate = self;
+
+        // v5.0 — D3: with "Precise Location" off (iOS 14+) CoreLocation fuzzes every fix to a
+        // ~1-3 km circle and the plugin used to store those as real positions, drawing
+        // kilometer-long phantom tracks. Ask once for temporary full accuracy and, if the
+        // authorization is still reduced, report it through the existing error channel so the app
+        // can react instead of trusting the data. Runs after the delegate is wired so the report
+        // is not swallowed. Checked again from -onAuthorizationChanged: because on a fresh install
+        // the granted accuracy is only known once the user answered the permission prompt.
+        if (isStarted && [[MAURLocationManager sharedInstance] requestTemporaryFullAccuracyIfReduced]) {
+            [self onError:[MAURLocationManager reducedAccuracyError]];
+        }
     }];
-    
-    
+
+
     if (!isStarted) {
         if (outError != nil) {
             *outError = error;
@@ -295,6 +332,8 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
 
     // v3.5 Phase 4: schedule heartbeat once provider is up.
     [self scheduleHeartbeat];
+    // v5.0 — F4: independent of heartbeatInterval and of enableWatchdog.
+    [self scheduleDrivingTick];
     // v4.2 Phase 8: configure & start sensor fusion if requested.
     [self configureSensorFusion];
     [sensorFusion start];
@@ -315,6 +354,8 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
 
     // v3.5 Phase 4: cancel heartbeat scheduler.
     [self cancelHeartbeat];
+    // v5.0 — F4
+    [self cancelDrivingTick];
     // v4.0 Phase 6: reset driver-insights state machine.
     [self drivingDetectorReset];
     // v4.2 Phase 8: stop sensor fusion sampling.
@@ -350,10 +391,16 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
 
 - (void) cancelHeartbeat
 {
-    if (heartbeatTimer != nil) {
-        [heartbeatTimer invalidate];
-        heartbeatTimer = nil;
-    }
+    // v4.5.5 — the timer is created on the main queue (see -scheduleHeartbeat) and NSTimer is
+    // not thread safe: -invalidate must run on the thread that scheduled it. Hop to the main
+    // queue unconditionally so every read/write of `heartbeatTimer` happens there, and so the
+    // cancel/create pair stays FIFO-ordered against -scheduleHeartbeat's own main-queue block.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (heartbeatTimer != nil) {
+            [heartbeatTimer invalidate];
+            heartbeatTimer = nil;
+        }
+    });
 }
 
 - (void) onHeartbeatTick:(NSTimer *)timer
@@ -385,6 +432,97 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     drHasPrevBearing = NO;
     drPrevBearingAt = 0;
     drLastHardBrakeAt = drLastRapidAccelAt = drLastSharpTurnAt = drLastCrashAt = 0;
+}
+
+#pragma mark - v5.0 F4: periodic driving tick
+
+/**
+ * v5.0 — F4: the driving state machine only advanced inside -drivingDetectorFeed:, so when the
+ * vehicle parks CoreLocation stops delivering fixes, the `stoppedDuration` timeout is never
+ * evaluated and `stopped` / `tripEnd` never fire — the trip stays open forever. Android grew a
+ * DrivingEventsDetector.tick(nowMs) for exactly this; this is its iOS counterpart.
+ *
+ * Deliberately its own timer and not the heartbeat: `heartbeatInterval` is opt-in and defaults to
+ * off, so reusing it would leave the same hole this fixes.
+ */
+static NSTimeInterval const kDrivingTickIntervalSeconds = 60.0;
+
+- (BOOL) drivingEventsEnabled
+{
+    NSDictionary *de = _config != nil ? _config.drivingEvents : nil;
+    return [de isKindOfClass:[NSDictionary class]] && [[de objectForKey:@"enabled"] boolValue];
+}
+
+- (void) scheduleDrivingTick
+{
+    [self cancelDrivingTick];
+    if (![self drivingEventsEnabled]) return;
+    // NSTimer is not thread safe and must be scheduled on a thread with a live run loop.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        drivingTickTimer = [NSTimer scheduledTimerWithTimeInterval:kDrivingTickIntervalSeconds
+                                                            target:self
+                                                          selector:@selector(onDrivingTick:)
+                                                          userInfo:nil
+                                                           repeats:YES];
+    });
+}
+
+- (void) cancelDrivingTick
+{
+    // Same main-queue discipline as -cancelHeartbeat: -invalidate must run on the thread that
+    // scheduled the timer, and every read/write of the ivar happens there.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (drivingTickTimer != nil) {
+            [drivingTickTimer invalidate];
+            drivingTickTimer = nil;
+        }
+    });
+}
+
+- (void) onDrivingTick:(NSTimer *)timer
+{
+    if (!isStarted || ![self drivingEventsEnabled]) return;
+
+    NSTimeInterval stoppedDuration = 60.0;
+    NSDictionary *de = _config.drivingEvents;
+    if ([de isKindOfClass:[NSDictionary class]] && [de objectForKey:@"stoppedDuration"]) {
+        stoppedDuration = [[de objectForKey:@"stoppedDuration"] doubleValue] / 1000.0;
+    }
+
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (!drIsMoving || drBelowMovingSince == 0) return;
+    if ((now - drBelowMovingSince) < stoppedDuration) return;
+
+    // Last fix we saw. May be nil (stopped before any location arrived); the notifications still
+    // go out, and -bufferPendingEvent: keeps the event for the next fix if one shows up.
+    MAURLocation *loc = lastReceivedLocation;
+
+    drIsMoving = NO;
+    if (loc != nil) [self attachDrivingEvent:@"stopped" to:loc extra:nil];
+    [self bufferPendingEvent:@"stopped" extra:nil];
+    NSMutableDictionary *stoppedInfo = [NSMutableDictionary dictionary];
+    if (loc != nil) stoppedInfo[@"location"] = loc;
+    [[NSNotificationCenter defaultCenter] postNotificationName:MAURStoppedNotification
+                                                        object:self
+                                                      userInfo:stoppedInfo];
+
+    if (drTripActive) {
+        // Duration measured to the moment the vehicle stopped moving, not to now — otherwise
+        // every trip carries a tail as long as stoppedDuration. Matches Android's tick().
+        NSTimeInterval durMs = (drBelowMovingSince - drTripStartedAt) * 1000.0;
+        if (durMs < 0) durMs = 0;
+        double dist = drTripDistanceMeters;
+        drTripActive = NO;
+        NSDictionary *extra = @{@"distance": @(dist), @"durationMs": @((long long)durMs)};
+        if (loc != nil) [self attachDrivingEvent:@"tripEnd" to:loc extra:extra];
+        [self bufferPendingEvent:@"tripEnd" extra:extra];
+        NSMutableDictionary *tripInfo = [NSMutableDictionary dictionaryWithDictionary:extra];
+        if (loc != nil) tripInfo[@"location"] = loc;
+        [[NSNotificationCenter defaultCenter] postNotificationName:MAURTripEndNotification
+                                                            object:self
+                                                          userInfo:tripInfo];
+        sensorFusion.tripActive = NO;
+    }
 }
 
 #pragma mark - v4.2 Phase 8 sensor fusion
@@ -528,9 +666,27 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
     }
     if (!enabled) return;
 
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    double speed = loc.speed != nil ? [loc.speed doubleValue] : 0.0;
-    if (speed < 0) speed = 0;
+    // v5.0 — F1: the state machine runs on the *fix* clock, never on wall-clock-at-processing.
+    // CoreLocation delivers buffered fixes as a batch, so several are processed within the same
+    // instant: dt collapsed toward 0 and dv/dt exploded into phantom hardBrake / possibleCrash
+    // events. Mirrors DrivingEventsDetector.onLocation() on Android, which derives every delta
+    // from loc.getTime(). The wall clock is only a fallback for a timestamp-less fix.
+    NSTimeInterval now = (loc.time != nil) ? [loc.time timeIntervalSince1970] : 0;
+    if (now <= 0) {
+        now = [[NSDate date] timeIntervalSince1970];
+    }
+    // v5.0 — F1: per-event cooldowns live on a separate monotonic-ish clock (Android uses
+    // SystemClock.elapsedRealtime()), so a batch of old fixes cannot rewind them and slip several
+    // events through the anti-burst window, and an NTP step cannot park them in the future.
+    NSTimeInterval mono = [NSProcessInfo processInfo].systemUptime;
+    // v4.5.6 — F14: CoreLocation reports -1 for an unknown speed/course, so `!= nil` is never a
+    // useful validity check on iOS. Track validity explicitly: an invalid speed must NOT feed the
+    // acceleration / crash deltas, where -1 produced phantom hardBrake and possibleCrash events.
+    // v5.0 — F2: nor the moving/stopped machine; see the bail-out below.
+    BOOL hasSpeed = (loc.speed != nil && [loc.speed doubleValue] >= 0);
+    double speed = hasSpeed ? [loc.speed doubleValue] : 0.0;
+    // v4.5.6 — F14: same for the course (heading). -1 == no bearing available.
+    BOOL hasHeading = (loc.heading != nil && [loc.heading doubleValue] >= 0);
 
     // Provider change
     NSString *provider = loc.provider;
@@ -550,6 +706,63 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
     drPrevLat = curLat;
     drPrevLon = curLon;
     drHasPrev = YES;
+
+    // v4.1 GPS-derived sensor-like events
+    // v5.0 — F2: parsed here (moved up from below the state machine) because the bearing / sharp
+    // turn handling now runs before the speed bail-out.
+    double hardBrakeMps2 = 3.5, rapidAccelMps2 = 3.5, sharpTurnDegPerSec = 30, crashImpactKmh = 25;
+    NSTimeInterval crashWindow = 2.0;
+    if ([de isKindOfClass:[NSDictionary class]]) {
+        if ([de objectForKey:@"hardBrakeMps2"])      hardBrakeMps2      = [[de objectForKey:@"hardBrakeMps2"] doubleValue];
+        if ([de objectForKey:@"rapidAccelMps2"])     rapidAccelMps2     = [[de objectForKey:@"rapidAccelMps2"] doubleValue];
+        if ([de objectForKey:@"sharpTurnDegPerSec"]) sharpTurnDegPerSec = [[de objectForKey:@"sharpTurnDegPerSec"] doubleValue];
+        if ([de objectForKey:@"crashImpactKmh"])     crashImpactKmh     = [[de objectForKey:@"crashImpactKmh"] doubleValue];
+        if ([de objectForKey:@"crashWindowMs"])      crashWindow        = [[de objectForKey:@"crashWindowMs"] doubleValue] / 1000.0;
+    }
+    static const NSTimeInterval kCooldown = 4.0;
+    // v5.0 — F1: minimum / maximum spacing between two fixes for a derivative (dv/dt,
+    // dbearing/dt) to mean anything. Android: MIN_DELTA_MS / MAX_DELTA_MS.
+    static const NSTimeInterval kMinDelta = 0.5;
+    static const NSTimeInterval kMaxDelta = 5.0;
+
+    // Sharp turn (bearing rate)
+    // v5.0 — F2: kept above the speed bail-out, like Android, so a speed-less fix still refreshes
+    // (or invalidates) the bearing anchor; emitting the event still requires a real speed reading.
+    if (!hasHeading) {
+        drHasPrevBearing = NO;
+        drPrevBearingAt = 0;
+    } else {
+        double bearing = [loc.heading doubleValue];
+        if (drHasPrevBearing) {
+            NSTimeInterval dt = now - drPrevBearingAt;
+            if (dt > kMaxDelta) {
+                drHasPrevBearing = NO; // stale anchor; re-armed with this fix just below
+            } else if (dt >= kMinDelta && sharpTurnDegPerSec > 0 && hasSpeed && speed >= 5.0) {
+                double diff = fabs(bearing - drPrevBearing);
+                if (diff > 180) diff = 360 - diff;
+                double rate = diff / dt;
+                if (rate >= sharpTurnDegPerSec && (mono - drLastSharpTurnAt) >= kCooldown) {
+                    drLastSharpTurnAt = mono;
+                    [self attachDrivingEvent:@"sharpTurn" to:loc extra:@{@"value": @(rate)}];
+                    [[NSNotificationCenter defaultCenter] postNotificationName:MAURSharpTurnNotification
+                                                                        object:self
+                                                                      userInfo:@{@"location": loc, @"value": @(rate)}];
+                }
+            }
+        }
+        drPrevBearing = bearing;
+        drPrevBearingAt = now;
+        drHasPrevBearing = YES;
+    }
+
+    // v5.0 — F2: everything below is speed-derived. A fix without a usable speed (CoreLocation
+    // reports -1 indoors, on the first fix and after a reacquisition) used to be clamped to 0 and
+    // fed to the moving/stopped machine, which read it as "stopped" and could close an active
+    // trip. Android bails out at exactly this point: `if (!hasSpeed) return;`. Provider change,
+    // the distance accumulator and the bearing anchor above have already been updated.
+    if (!hasSpeed) {
+        return;
+    }
 
     BOOL nowMoving = speed >= minMovingSpeed;
     if (nowMoving) {
@@ -623,32 +836,23 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
         }
     }
 
-    // v4.1 GPS-derived sensor-like events
-    double hardBrakeMps2 = 3.5, rapidAccelMps2 = 3.5, sharpTurnDegPerSec = 30, crashImpactKmh = 25;
-    NSTimeInterval crashWindow = 2.0;
-    if ([de isKindOfClass:[NSDictionary class]]) {
-        if ([de objectForKey:@"hardBrakeMps2"])      hardBrakeMps2      = [[de objectForKey:@"hardBrakeMps2"] doubleValue];
-        if ([de objectForKey:@"rapidAccelMps2"])     rapidAccelMps2     = [[de objectForKey:@"rapidAccelMps2"] doubleValue];
-        if ([de objectForKey:@"sharpTurnDegPerSec"]) sharpTurnDegPerSec = [[de objectForKey:@"sharpTurnDegPerSec"] doubleValue];
-        if ([de objectForKey:@"crashImpactKmh"])     crashImpactKmh     = [[de objectForKey:@"crashImpactKmh"] doubleValue];
-        if ([de objectForKey:@"crashWindowMs"])      crashWindow        = [[de objectForKey:@"crashWindowMs"] doubleValue] / 1000.0;
-    }
-    static const NSTimeInterval kCooldown = 4.0;
-
     if (drTripActive && drPrevSpeedAt > 0) {
         NSTimeInterval dt = now - drPrevSpeedAt;
-        if (dt > 0 && dt <= 5.0) {
+        // v5.0 — F1: below kMinDelta the GPS speed quantisation noise dominates and batched or
+        // duplicated fixes produce absurd accelerations; above kMaxDelta the two fixes are
+        // unrelated. Android: MIN_DELTA_MS / MAX_DELTA_MS.
+        if (dt >= kMinDelta && dt <= kMaxDelta) {
             double dv = speed - drPrevSpeed;
             double accel = dv / dt;
-            if (hardBrakeMps2 > 0 && accel <= -hardBrakeMps2 && (now - drLastHardBrakeAt) >= kCooldown) {
-                drLastHardBrakeAt = now;
+            if (hardBrakeMps2 > 0 && accel <= -hardBrakeMps2 && (mono - drLastHardBrakeAt) >= kCooldown) {
+                drLastHardBrakeAt = mono;
                 [self attachDrivingEvent:@"hardBrake" to:loc extra:@{@"value": @(accel)}];
                 [[NSNotificationCenter defaultCenter] postNotificationName:MAURHardBrakeNotification
                                                                     object:self
                                                                   userInfo:@{@"location": loc, @"value": @(accel)}];
             }
-            if (rapidAccelMps2 > 0 && accel >= rapidAccelMps2 && (now - drLastRapidAccelAt) >= kCooldown) {
-                drLastRapidAccelAt = now;
+            if (rapidAccelMps2 > 0 && accel >= rapidAccelMps2 && (mono - drLastRapidAccelAt) >= kCooldown) {
+                drLastRapidAccelAt = mono;
                 [self attachDrivingEvent:@"rapidAcceleration" to:loc extra:@{@"value": @(accel)}];
                 [[NSNotificationCenter defaultCenter] postNotificationName:MAURRapidAccelerationNotification
                                                                     object:self
@@ -659,8 +863,8 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
                 if (dropKmh >= crashImpactKmh
                     && speed < 1.5
                     && drPrevSpeed * 3.6 >= crashImpactKmh
-                    && (now - drLastCrashAt) >= kCooldown) {
-                    drLastCrashAt = now;
+                    && (mono - drLastCrashAt) >= kCooldown) {
+                    drLastCrashAt = mono;
                     [self attachDrivingEvent:@"possibleCrash" to:loc extra:@{@"value": @(dropKmh), @"source": @"gps"}];
                     [[NSNotificationCenter defaultCenter] postNotificationName:MAURPossibleCrashNotification
                                                                         object:self
@@ -670,32 +874,13 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
         }
     }
 
-    // Sharp turn (bearing rate)
-    if (sharpTurnDegPerSec > 0 && loc.heading != nil && speed >= 5.0 && drHasPrevBearing) {
-        NSTimeInterval dt = now - drPrevBearingAt;
-        if (dt > 0 && dt <= 5.0) {
-            double bearing = [loc.heading doubleValue];
-            double diff = fabs(bearing - drPrevBearing);
-            if (diff > 180) diff = 360 - diff;
-            double rate = diff / dt;
-            if (rate >= sharpTurnDegPerSec && (now - drLastSharpTurnAt) >= kCooldown) {
-                drLastSharpTurnAt = now;
-                [self attachDrivingEvent:@"sharpTurn" to:loc extra:@{@"value": @(rate)}];
-                [[NSNotificationCenter defaultCenter] postNotificationName:MAURSharpTurnNotification
-                                                                    object:self
-                                                                  userInfo:@{@"location": loc, @"value": @(rate)}];
-            }
-        }
-        drPrevBearing = [loc.heading doubleValue];
-        drPrevBearingAt = now;
-    } else if (loc.heading != nil) {
-        drPrevBearing = [loc.heading doubleValue];
-        drPrevBearingAt = now;
-        drHasPrevBearing = YES;
+    // v4.5.6 — F14: only a valid speed may become the baseline for the next delta. An invalid
+    // (-1) reading used to reset the baseline to 0 and fake a huge acceleration on the next fix.
+    // v5.0 — F2: guaranteed by the bail-out above, kept for clarity.
+    if (hasSpeed) {
+        drPrevSpeed = speed;
+        drPrevSpeedAt = now;
     }
-
-    drPrevSpeed = speed;
-    drPrevSpeedAt = now;
 }
 
 - (double) drHaversineFromLat:(double)lat1 lon:(double)lon1 toLat:(double)lat2 lon:(double)lon2
@@ -750,7 +935,18 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
 
 - (MAURLocationAuthorizationStatus) authorizationStatus
 {
-    CLAuthorizationStatus authStatus = [CLLocationManager authorizationStatus];
+    // v4.5.6 — D21: +[CLLocationManager authorizationStatus] is deprecated since iOS 14.
+    // Read the instance property of the shared manager instead (and do it on the main thread,
+    // where CLLocationManager expects to be touched).
+    __block CLAuthorizationStatus authStatus = kCLAuthorizationStatusNotDetermined;
+    [self runOnMainThread:^{
+        if (@available(iOS 14.0, *)) {
+            authStatus = [MAURLocationManager sharedInstance].locationManager.authorizationStatus;
+        } else {
+            authStatus = [CLLocationManager authorizationStatus];
+        }
+    }];
+
     switch (authStatus) {
         case kCLAuthorizationStatusNotDetermined:
             return MAURLocationAuthorizationNotDetermined;
@@ -762,6 +958,8 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
         case kCLAuthorizationStatusAuthorizedWhenInUse:
             return MAURLocationAuthorizationForeground;
     }
+
+    return MAURLocationAuthorizationNotDetermined;
 }
 
 - (BOOL) isStarted
@@ -834,8 +1032,13 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
 
 - (NSArray<MAURLocation*>*) getValidLocationsAndDelete
 {
+    // v5.0 — D5: this used to call getLocationsForSync, which only moves rows
+    // PostPending -> SyncPending. getPendingSyncCount() dropped to 0, the caller believed the
+    // queue was drained, and 15 min later the stale-sync recovery resurrected the very same rows
+    // -> duplicates on the server. Android's getValidLocationsAndDelete really deletes; this now
+    // matches it: SELECT + mark Deleted in one transaction, rolled back if the UPDATE fails.
     MAURSQLiteLocationDAO* locationDAO = [MAURSQLiteLocationDAO sharedInstance];
-    return [locationDAO getLocationsForSync];
+    return [locationDAO getValidLocationsAndDelete];
 }
 
 - (void) startSession
@@ -913,10 +1116,31 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
                                                           dispatch_semaphore_signal(sema);
                                                       }];
     }];
-    dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+
+    // v4.5.6 — D11: never wait forever. If the INTULocationManager block is never invoked
+    // (request lost, authorization dialog left open, ...) the caller's thread used to be
+    // parked for the whole lifetime of the process. Derive the deadline from the requested
+    // timeout, add a small grace period so INTU can report its own timeout first, and cap
+    // the whole thing at 60s.
+    int effectiveTimeout = (timeout > 0) ? timeout : 30000;
+    double waitSeconds = ceil((double)effectiveTimeout / 1000.0) + 5.0;
+    if (waitSeconds > 60.0) {
+        waitSeconds = 60.0;
+    }
+    dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(waitSeconds * NSEC_PER_SEC));
+    if (dispatch_semaphore_wait(sema, deadline) != 0) {
+        DDLogWarn(@"%@ getCurrentLocation timed out after %.0fs waiting for a fix", TAG, waitSeconds);
+        if (outError != nil) {
+            *outError = [NSError errorWithDomain:BGGeolocationDomain code:TIMEOUT userInfo:nil];
+        }
+        return nil;
+    }
 
     if (location != nil) {
-        return [MAURLocation fromCLLocation:location];
+        MAURLocation *bgloc = [MAURLocation fromCLLocation:location];
+        // v4.5.6 — D6: keep locationProvider populated on one-shot fixes too.
+        bgloc.locationProvider = [self getConfig].locationProvider;
+        return bgloc;
     }
 
     if (outError != nil) {
@@ -985,11 +1209,36 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
     return count != nil ? [count integerValue] : 0;
 }
 
+// v4.5.6 — D25: UILocalNotification / -scheduleLocalNotification: are deprecated since iOS 10.
+// Only reachable with `debug: true`. Uses UNUserNotificationCenter where available and keeps
+// the legacy path as a fallback for iOS 9.
 - (void) notify:(NSString*)message
 {
+    if (message == nil) {
+        return;
+    }
+
+    if (@available(iOS 10, *)) {
+        UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
+        content.body = message;
+        UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:[[NSUUID UUID] UUIDString]
+                                                                             content:content
+                                                                             trigger:nil];
+        [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:request
+                                                              withCompletionHandler:^(NSError * _Nullable error) {
+            if (error != nil) {
+                DDLogWarn(@"%@ debug notification failed: %@", TAG, error.localizedDescription);
+            }
+        }];
+        return;
+    }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     localNotification.fireDate = [NSDate date];
     localNotification.alertBody = message;
     [[UIApplication sharedApplication] scheduleLocalNotification:localNotification];
+#pragma clang diagnostic pop
 }
 
 -(void) runOnMainThread:(dispatch_block_t)completionHandle {
@@ -1101,6 +1350,13 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
 
 - (void) onAuthorizationChanged:(MAURLocationAuthorizationStatus)authStatus
 {
+    // v5.0 — D3: on iOS 14+ this also fires when the user flips "Precise Location", and it is the
+    // first moment the accuracy granted to a fresh install is known. Only while tracking, so the
+    // temporary-full-accuracy prompt never appears out of the blue.
+    if (isStarted && [NSThread isMainThread]
+        && [[MAURLocationManager sharedInstance] requestTemporaryFullAccuracyIfReduced]) {
+        [self onError:[MAURLocationManager reducedAccuracyError]];
+    }
     [self.delegate onAuthorizationChanged:authStatus];
 }
 

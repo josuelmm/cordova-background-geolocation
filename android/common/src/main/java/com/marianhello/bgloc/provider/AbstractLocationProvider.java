@@ -114,7 +114,7 @@ public abstract class AbstractLocationProvider implements LocationProvider {
         playDebugTone(Tone.BEEP);
         if (mDelegate != null) {
             BackgroundLocation bgLocation = new BackgroundLocation(PROVIDER_ID, location);
-            bgLocation.setMockLocationsEnabled(hasMockLocationsEnabled());
+            applyMockLocationsFlag(bgLocation);
             mDelegate.onLocation(bgLocation);
         }
     }
@@ -131,7 +131,7 @@ public abstract class AbstractLocationProvider implements LocationProvider {
         if (mDelegate != null) {
             BackgroundLocation bgLocation = new BackgroundLocation(PROVIDER_ID, location);
             bgLocation.setRadius(radius);
-            bgLocation.setMockLocationsEnabled(hasMockLocationsEnabled());
+            applyMockLocationsFlag(bgLocation);
             mDelegate.onStationary(bgLocation);
         }
     }
@@ -146,7 +146,7 @@ public abstract class AbstractLocationProvider implements LocationProvider {
         playDebugTone(Tone.LONG_BEEP);
         if (mDelegate != null) {
             BackgroundLocation bgLocation = new BackgroundLocation(PROVIDER_ID, location);
-            bgLocation.setMockLocationsEnabled(hasMockLocationsEnabled());
+            applyMockLocationsFlag(bgLocation);
             mDelegate.onStationary(bgLocation);
         }
     }
@@ -194,15 +194,31 @@ public abstract class AbstractLocationProvider implements LocationProvider {
         }
     }
 
+    /**
+     * Copies the "allow mock locations" setting onto the location, when it is knowable.
+     *
+     * <p>Skipped entirely when {@link #hasMockLocationsEnabled()} returns null, so the field stays
+     * absent from the payload instead of going out as a fabricated {@code false}.
+     */
+    private void applyMockLocationsFlag(BackgroundLocation bgLocation) {
+        Boolean mockLocationsEnabled = hasMockLocationsEnabled();
+        if (mockLocationsEnabled != null) {
+            bgLocation.setMockLocationsEnabled(mockLocationsEnabled);
+        }
+    }
+
+    /**
+     * Whether the "allow mock locations" developer setting is on.
+     *
+     * @return always {@code null} — "unknown". {@code Settings.Secure.ALLOW_MOCK_LOCATION} was
+     *         removed in Android 6 (API 23) and minSdk here is 24, so the lookup could only ever
+     *         return null and this method reported a hard-coded {@code false}. Reporting a
+     *         confident "mock locations are off" to an anti-fraud backend is worse than reporting
+     *         nothing, hence null. The real per-fix signal is
+     *         {@code Location.isFromMockProvider()}, which {@code mockLocationPolicy} already uses.
+     */
     public Boolean hasMockLocationsEnabled() {
-        // v4.5.4: Settings.Secure.getString may return null (key absent on the
-        // device's settings provider). The previous code crashed with NPE because
-        // it called .equals("1") on the returned value. Invert the comparison so
-        // null safely yields false.
-        String value = Settings.Secure.getString(
-                mContext.getContentResolver(),
-                android.provider.Settings.Secure.ALLOW_MOCK_LOCATION);
-        return "1".equals(value);
+        return null;
     }
 
     /**

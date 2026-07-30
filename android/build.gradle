@@ -1,15 +1,17 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
+//
+// NOTE: this Gradle project is the *development / test* build of the plugin.
+// Production consumers (Cordova / Capacitor) do not use it: `plugin.xml` copies the
+// Java sources into the host app and pulls dependencies from `android/dependencies.gradle`.
+// Keep both in sync when adding a dependency.
 
 buildscript {
     repositories {
-        maven {
-            url 'https://maven.google.com/'
-            name 'Google'
-        }
+        google()
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.4.1'
+        classpath 'com.android.tools.build:gradle:8.13.0'
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
@@ -18,10 +20,7 @@ buildscript {
 
 allprojects {
     repositories {
-        maven {
-            url 'https://maven.google.com/'
-            name 'Google'
-        }
+        google()
         mavenCentral()
     }
 }
@@ -29,6 +28,6 @@ allprojects {
 ext {
 }
 
-task clean(type: Delete) {
-    delete rootProject.buildDir
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
 }

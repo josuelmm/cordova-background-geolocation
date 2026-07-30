@@ -19,6 +19,11 @@ static const double kJitterAccelMps2 = 0.5;
 @property (nonatomic, assign) NSTimeInterval lastCrashAt;
 @property (nonatomic, assign) NSTimeInterval lastPhoneUsageAt;
 @property (nonatomic, assign) NSTimeInterval jitterAboveSince;
+// v4.5.5 — cached foreground-active flag. -isScreenOnApprox used to dispatch_sync onto the
+// main queue at 50 Hz (once per device-motion sample), stalling the sensor queue and the main
+// thread. The flag is `atomic` so the sensor queue can read it without any dispatch.
+@property (atomic, assign) BOOL appIsActive;
+@property (nonatomic, assign) BOOL appStateObserversRegistered;
 @end
 
 @implementation MAURSensorFusionDetector
@@ -39,6 +44,8 @@ static const double kJitterAccelMps2 = 0.5;
         _lastCrashAt = 0;
         _lastPhoneUsageAt = 0;
         _jitterAboveSince = 0;
+        _appIsActive = NO;
+        _appStateObserversRegistered = NO;
     }
     return self;
 }
@@ -47,10 +54,59 @@ static const double kJitterAccelMps2 = 0.5;
     return self.motion.isDeviceMotionAvailable;
 }
 
+#pragma mark - Application state cache
+
+- (void)registerAppStateObservers {
+    if (self.appStateObserversRegistered) return;
+    self.appStateObserversRegistered = YES;
+
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    // -addObserver:selector:name:object: does not retain the observer, so no retain cycle.
+    [nc addObserver:self
+           selector:@selector(onAppDidBecomeActive:)
+               name:UIApplicationDidBecomeActiveNotification
+             object:nil];
+    [nc addObserver:self
+           selector:@selector(onAppWillResignActive:)
+               name:UIApplicationWillResignActiveNotification
+             object:nil];
+
+    // Seed the cache with the current state. Read on the main thread, but never with
+    // dispatch_sync — -start may itself be called from the main thread.
+    if ([NSThread isMainThread]) {
+        self.appIsActive = ([UIApplication sharedApplication].applicationState == UIApplicationStateActive);
+    } else {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            weakSelf.appIsActive = ([UIApplication sharedApplication].applicationState == UIApplicationStateActive);
+        });
+    }
+}
+
+- (void)unregisterAppStateObservers {
+    if (!self.appStateObserversRegistered) return;
+    self.appStateObserversRegistered = NO;
+
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    [nc removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
+    [nc removeObserver:self name:UIApplicationWillResignActiveNotification object:nil];
+}
+
+- (void)onAppDidBecomeActive:(NSNotification *)notification {
+    self.appIsActive = YES;
+}
+
+- (void)onAppWillResignActive:(NSNotification *)notification {
+    self.appIsActive = NO;
+}
+
+#pragma mark - Lifecycle
+
 - (void)start {
     @synchronized (self) {
         if (self.started || !self.enabled) return;
         if (![self.motion isDeviceMotionAvailable]) return;
+        [self registerAppStateObservers];
         __weak typeof(self) weakSelf = self;
         [self.motion startDeviceMotionUpdatesToQueue:self.queue
                                           withHandler:^(CMDeviceMotion * _Nullable motion, NSError * _Nullable error) {
@@ -63,11 +119,19 @@ static const double kJitterAccelMps2 = 0.5;
 
 - (void)stop {
     @synchronized (self) {
+        [self unregisterAppStateObservers];
         if (!self.started) return;
         [self.motion stopDeviceMotionUpdates];
         self.started = NO;
         self.jitterAboveSince = 0;
     }
+}
+
+- (void)dealloc {
+    // Safety net in case -stop was never called.
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    [nc removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
+    [nc removeObserver:self name:UIApplicationWillResignActiveNotification object:nil];
 }
 
 - (void)processMotion:(CMDeviceMotion *)motion {
@@ -123,15 +187,11 @@ static const double kJitterAccelMps2 = 0.5;
 - (BOOL)isScreenOnApprox {
     // Heuristic: app is foreground active => screen is on. Background sampling does
     // not constitute phone usage while driving (passenger may have screen off too).
-    __block UIApplicationState state = UIApplicationStateBackground;
-    if ([NSThread isMainThread]) {
-        state = [UIApplication sharedApplication].applicationState;
-    } else {
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            state = [UIApplication sharedApplication].applicationState;
-        });
-    }
-    return state == UIApplicationStateActive;
+    //
+    // v4.5.5 — read the cached flag maintained by the UIApplicationDidBecomeActive /
+    // UIApplicationWillResignActive observers instead of hopping to the main queue on
+    // every one of the 50 device-motion samples per second.
+    return self.appIsActive;
 }
 
 @end

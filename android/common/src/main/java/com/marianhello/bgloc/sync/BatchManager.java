@@ -106,9 +106,15 @@ public class BatchManager {
             writer = new LocationWriter(fs, template);
 
             writer.beginArray();
+            // Collect the id of every row we actually serialize. See the update below.
+            List<String> writtenIds = new ArrayList<String>();
             while (cursor.moveToNext()) {
                 BackgroundLocation location = BackgroundLocation.fromCursor(cursor);
                 writer.write(location);
+                Long id = location.getLocationId();
+                if (id != null) {
+                    writtenIds.add(String.valueOf(id));
+                }
             }
 
             writer.endArray();
@@ -117,12 +123,27 @@ public class BatchManager {
             fs.close();
             fs = null;
 
-            // set batchStartMillis for all synced locations
+            if (writtenIds.isEmpty()) {
+                logger.warn("Batch produced no identifiable rows, skipping");
+                return null;
+            }
+
+            // Stamp batchStartMillis on exactly the rows written to the file, addressed by _id.
+            //
+            // This used to re-run `whereClause` instead. That is a data-loss bug: the sync runs in
+            // the :sync process while PostLocationTask keeps flipping freshly failed locations to
+            // SYNC_PENDING in the main process. Any row that became SYNC_PENDING *after* the
+            // cursor was read still matched the clause, got stamped with this batch id, and was
+            // then marked DELETED by setBatchCompleted() — without ever having been sent.
+            // Addressing by _id also makes the CursorWindow paging race harmless: a row that the
+            // cursor skipped simply stays pending and is picked up by the next batch.
             ContentValues values = new ContentValues();
             values.put(LocationEntry.COLUMN_NAME_BATCH_START_MILLIS, batchStartMillis);
-            resolver.update(contentUri, values, whereClause, whereArgs);
+            int stamped = resolver.update(contentUri, values, buildIdInClause(writtenIds.size()),
+                    writtenIds.toArray(new String[0]));
 
-            logger.info("Batch file: {} created successfully", file.getName());
+            logger.info("Batch file: {} created successfully ({} locations stamped)",
+                    file.getName(), stamped);
 
             batchReturned = true;
             return file;
@@ -151,6 +172,45 @@ public class BatchManager {
         }
     }
 
+    /**
+     * Removes the first {@code count} locations of a batch (in the same time order they were
+     * written to the batch file), leaving the rest pending for the next sync.
+     *
+     * <p>Used when a form-urlencoded batch — which is sent as one request per location — fails
+     * partway through: everything before the failing item is already on the server and must not
+     * be sent again, while everything from the failing item on must be retried.
+     */
+    public void setBatchPartiallyCompleted(Long batchId, int count) {
+        if (count <= 0) {
+            return;
+        }
+        ContentResolver resolver = context.getApplicationContext().getContentResolver();
+        Uri contentUri = getLocationContentUri();
+
+        // Subselect instead of DELETE ... LIMIT: Android's SQLite is not guaranteed to be built
+        // with SQLITE_ENABLE_UPDATE_DELETE_LIMIT.
+        String whereClause = LocationEntry._ID + " IN (SELECT " + LocationEntry._ID
+                + " FROM " + LocationEntry.TABLE_NAME
+                + " WHERE " + LocationEntry.COLUMN_NAME_BATCH_START_MILLIS + " = ?"
+                + " ORDER BY " + LocationEntry.COLUMN_NAME_TIME + " ASC LIMIT " + count + ")";
+
+        int removed = resolver.delete(contentUri, whereClause, new String[]{ String.valueOf(batchId) });
+        logger.info("Batch {} partially completed: {} of {} locations accepted and removed",
+                batchId, removed, count);
+    }
+
+    /** Builds `_id IN (?,?,...)` with {@code count} placeholders. */
+    private static String buildIdInClause(int count) {
+        StringBuilder sb = new StringBuilder(LocationEntry._ID).append(" IN (");
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append('?');
+        }
+        return sb.append(')').toString();
+    }
+
     public File createBatch(Long batchStartMillis, Integer syncThreshold, LocationTemplate template) throws IOException {
         LocationTemplate tpl;
         if (template != null) {
@@ -173,9 +233,13 @@ public class BatchManager {
         String whereClause = LocationEntry.COLUMN_NAME_BATCH_START_MILLIS + " = ?";
         String[] whereArgs = { String.valueOf(batchId) };
 
-        ContentValues values = new ContentValues();
-        values.put(LocationEntry.COLUMN_NAME_STATUS, BackgroundLocation.DELETED);
-        resolver.update(contentUri, values, whereClause, whereArgs);
+        // Physically remove the rows instead of flagging them DELETED. The soft delete meant
+        // every successfully synced location stayed in the table forever: at one fix per 10s a
+        // single vehicle accumulated ~8600 dead rows a day, which nothing ever reclaimed, and
+        // every status query degraded with it. These rows reached the server, so there is
+        // nothing left to keep.
+        int removed = resolver.delete(contentUri, whereClause, whereArgs);
+        logger.debug("Batch {} completed, {} locations removed", batchId, removed);
     }
 
     private static class LocationTemplateWriter {

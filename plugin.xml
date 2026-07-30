@@ -2,7 +2,7 @@
 <plugin xmlns="http://www.phonegap.com/ns/plugins/1.0"
     xmlns:android="http://schemas.android.com/apk/res/android"
     id="cordova-background-geolocation"
-    version="4.5.5">
+    version="5.0.0">
     <name>cordova-background-geolocation</name>
     <description>Cordova Background Geolocation Plugin</description>
     <license>Apache-2.0</license>
@@ -32,8 +32,8 @@
         <preference name="CONTENT_AUTHORITY" default="$PACKAGE_NAME" />
 
         <framework src="com.google.android.gms:play-services-location:$GOOGLE_PLAY_SERVICES_VERSION" />
-        <framework src="androidx.core:core:1.1.0" />
-        <framework src="androidx.appcompat:appcompat:1.1.0" />
+        <framework src="androidx.core:core:1.13.1" />
+        <framework src="androidx.appcompat:appcompat:1.7.0" />
         <framework src="android/dependencies.gradle" custom="true" type="gradleReference"/>
         <!-- Generated with gen_sources.sh @ 2019-09-24 08:28:46 -->
         <source-file src="android/CDVBackgroundGeolocation/src/main/java/com/evgenii/jsevaluator/HandlerWrapper.java" target-dir="src/com/evgenii/jsevaluator" />
@@ -197,6 +197,14 @@
             <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
             <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
             <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+            <!-- Required by requestIgnoreBatteryOptimizations(). Without it the system Activity
+                 for ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS closes with no dialog AND no
+                 exception, so the call silently did nothing and users could never take the app out
+                 of Doze — the single most common cause of tracking dying in the background.
+                 NOTE for publishers: Google Play requires a justification for this permission
+                 (continuous background location tracking qualifies). If your listing cannot use
+                 it, remove this line and rely on openBatterySettings() instead. -->
+            <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
             <uses-feature android:name="android.hardware.location" android:required="false" />
         </config-file>
         <config-file target="res/xml/config.xml" parent="/*">
@@ -236,6 +244,9 @@
         <!-- required background modes:  App registers for location updates -->
         <preference name="ALWAYS_USAGE_DESCRIPTION" default="This app always requires location tracking" />
         <preference name="MOTION_USAGE_DESCRIPTION" default="This app requires motion detection" />
+        <!-- v5.0 — D3: purpose string shown when asking to temporarily upgrade "Precise
+             Location: Off" (iOS 14+) back to full accuracy. -->
+        <preference name="PRECISE_LOCATION_USAGE_DESCRIPTION" default="Se necesita la ubicación precisa para registrar la ruta correctamente" />
 
         <config-file target="*-Info.plist" parent="NSLocationAlwaysUsageDescription">
             <string>$ALWAYS_USAGE_DESCRIPTION</string>
@@ -248,6 +259,15 @@
         </config-file>
         <config-file target="*-Info.plist" parent="NSMotionUsageDescription">
             <string>$MOTION_USAGE_DESCRIPTION</string>
+        </config-file>
+
+        <!-- v5.0 — D3: required by requestTemporaryFullAccuracyAuthorizationWithPurposeKey:.
+             The purpose key must match the one passed from MAURLocationManager. -->
+        <config-file target="*-Info.plist" parent="NSLocationTemporaryUsageDescriptionDictionary">
+            <dict>
+                <key>PreciseLocationRequired</key>
+                <string>$PRECISE_LOCATION_USAGE_DESCRIPTION</string>
+            </dict>
         </config-file>
 
         <config-file target="*-Info.plist" parent="UIBackgroundModes">
@@ -278,6 +298,10 @@
         <framework src="CoreLocation.framework" />
         <framework src="CoreMotion.framework" />
         <framework src="SystemConfiguration.framework" />
+        <!-- Debug notifications migrated from the deprecated UILocalNotification to
+             UNUserNotificationCenter, so this must be linked explicitly instead of relying on
+             Clang module autolinking (which is off when CLANG_ENABLE_MODULES=NO). -->
+        <framework src="UserNotifications.framework" weak="true" />
         <framework src="AudioToolbox.framework" weak="true" />
         <framework src="AVFoundation.framework" weak="true" />
         <framework src="libsqlite3.dylib" weak="true" />

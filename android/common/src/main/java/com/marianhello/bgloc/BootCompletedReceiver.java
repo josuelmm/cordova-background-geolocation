@@ -76,7 +76,8 @@ public class BootCompletedReceiver extends BroadcastReceiver {
         Log.i(TAG, "Starting service after boot/replace");
         Intent locationServiceIntent = new Intent(context, LocationServiceImpl.class);
         locationServiceIntent.addFlags(Intent.FLAG_FROM_BACKGROUND);
-        locationServiceIntent.putExtra("config", config);
+        // NOTE: no putExtra("config", ...) here. onStartCommand only interprets cmd/msg, so the
+        // extra was dead code; the service reads its config from the DB on boot, which is correct.
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

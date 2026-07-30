@@ -22,7 +22,52 @@ jobs:
       - name: Set up npm authentication
         run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" >> ~/.npmrc
 
+      # AGP 8.13 / Gradle 8.14.3 require JDK 17 as the minimum toolchain.
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: zulu
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
+      - name: Install Android SDK packages
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+
       - run: npm ci
+
+      # Gate: nothing gets published unless the Angular entry point builds and the
+      # Android unit tests pass. Any failure below aborts the job before `npm publish`.
+      - name: Build Angular entry point
+        run: npm run build:angular
+
+      # v5.0 — G5: the JS layer is cheap to test, so it gates publish too.
+      - name: Run JS tests
+        run: npm run test:js
+
+      - name: Build Android plugin modules
+        run: ./gradlew --no-daemon :common:assembleDebug :CDVBackgroundGeolocation:assembleDebug
+        working-directory: android
+
+      - name: Run Android unit tests
+        run: ./gradlew --no-daemon :common:testDebugUnitTest :CDVBackgroundGeolocation:testDebugUnitTest
+        working-directory: android
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-android-unit-test-reports
+          if-no-files-found: warn
+          path: |
+            android/common/build/reports/tests/
+            android/common/build/test-results/
+            android/CDVBackgroundGeolocation/build/reports/tests/
+            android/CDVBackgroundGeolocation/build/test-results/
 
       - name: Publish to npm
         run: npm publish --access public

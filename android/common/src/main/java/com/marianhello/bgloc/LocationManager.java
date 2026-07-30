@@ -7,6 +7,7 @@ import android.location.Criteria;
 import android.location.Location;
 import android.location.LocationListener;
 import android.os.Bundle;
+import android.os.HandlerThread;
 import android.os.Looper;
 
 import com.github.jparkie.promise.Promise;
@@ -96,11 +97,22 @@ public class LocationManager {
         criteria.setAccuracy(enableHighAccuracy ? Criteria.ACCURACY_FINE : Criteria.ACCURACY_COARSE);
 
         CurrentLocationListener locationListener = new CurrentLocationListener();
-        locationManager.requestSingleUpdate(criteria, locationListener, Looper.getMainLooper());
+        // Deliver the fix on a private HandlerThread, not the main Looper. This method blocks on
+        // the latch below, and PermissionManager can invoke onPermissionGranted() on the main
+        // thread (the path taken right after the user accepts the permission dialog). In that case
+        // waiting on the main Looper for a callback that must itself be delivered on the main
+        // Looper is a self-deadlock that only unblocks when the timeout expires — i.e. an ANR.
+        HandlerThread callbackThread = new HandlerThread("bgloc-single-update");
+        callbackThread.start();
+        try {
+            locationManager.requestSingleUpdate(criteria, locationListener, callbackThread.getLooper());
 
-        if (!locationListener.mCountDownLatch.await(timeout, TimeUnit.MILLISECONDS)) {
-            locationManager.removeUpdates(locationListener);
-            throw new TimeoutException();
+            if (!locationListener.mCountDownLatch.await(timeout, TimeUnit.MILLISECONDS)) {
+                locationManager.removeUpdates(locationListener);
+                throw new TimeoutException();
+            }
+        } finally {
+            callbackThread.quitSafely();
         }
 
         if (locationListener.mLocation != null) {

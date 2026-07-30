@@ -8,7 +8,7 @@ function exec(success, fail, service, method, args) {
     return window.cordova.exec(success, fail, service, method, args || []);
   }
   if (typeof fail === 'function') {
-    fail({ message: 'Cordova is not available. Run on a device or emulator.' });
+    fail(Object.assign(new Error('Cordova is not available. Run on a device or emulator.'), { code: 0 }));
   }
 }
 

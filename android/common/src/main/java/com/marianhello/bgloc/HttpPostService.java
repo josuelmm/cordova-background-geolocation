@@ -27,12 +27,25 @@ public class HttpPostService {
     public static final int BUFFER_SIZE = 1024;
     /** Timeout to establish connection (ms). Prevents sync notification from staying stuck. */
     private static final int CONNECT_TIMEOUT_MS = 30_000;
-    /** Timeout to read response (ms). Prevents sync notification from staying stuck. */
-    private static final int READ_TIMEOUT_MS = 120_000;
+    /**
+     * Timeout to read response (ms). v5.0 — A4: was 120_000, i.e. two minutes per attempt.
+     * The upload runs on the sync thread while the service holds a wake lock, so a server that
+     * accepts the connection and then wedges used to pin that thread (and the CPU) for two
+     * minutes per attempt, and again on every retry. Matched to CONNECT_TIMEOUT_MS: no legitimate
+     * batch POST needs longer to start answering, and failing fast leaves the queue on disk for
+     * the next sync anyway.
+     */
+    private static final int READ_TIMEOUT_MS = 30_000;
 
     private String mUrl;
     private String mMethod = "POST";
     private HttpURLConnection mHttpURLConnection;
+    /**
+     * Number of leading locations accepted by the server in form-urlencoded batch mode
+     * (one request per location). {@code -1} means the body went out as a single
+     * all-or-nothing request, so partial confirmation does not apply.
+     */
+    private int mAcceptedItemCount = -1;
 
     public interface UploadingProgressListener {
         void onProgress(int progress);
@@ -72,6 +85,9 @@ public class HttpPostService {
             mHttpURLConnection = (HttpURLConnection) new URL(mUrl).openConnection();
             mHttpURLConnection.setConnectTimeout(CONNECT_TIMEOUT_MS);
             mHttpURLConnection.setReadTimeout(READ_TIMEOUT_MS);
+            // Follow 3xx. Common when a backend starts forcing HTTPS or moves domain; without it
+            // the redirect surfaced as a plain failure and every location was queued forever.
+            mHttpURLConnection.setInstanceFollowRedirects(true);
         }
         return mHttpURLConnection;
     }
@@ -87,16 +103,11 @@ public class HttpPostService {
     public int postJSON(JSONArray json, Map headers) throws IOException {
         String jsonString = "null";
         if (json != null) {
-            if (json.length() == 1) {
-                JSONObject single = json.optJSONObject(0);
-                if (single != null) {
-                    jsonString = single.toString();
-                } else {
-                    jsonString = json.toString();
-                }
-            } else {
-                jsonString = json.toString();
-            }
+            // Always serialize as an array. It used to unwrap a single-element array into a bare
+            // object, which made httpMode:'batch' indistinguishable from 'single' for one
+            // location: a server that expects `[{...}]` in batch mode got `{...}` and answered 400.
+            // Callers that genuinely want one object use postJSON(JSONObject, ...).
+            jsonString = json.toString();
         }
         return postJSONString(jsonString, headers);
     }
@@ -136,7 +147,7 @@ public class HttpPostService {
         // GET: no body; data is expected to live in the URL (URL templating).
         if (isBodyless()) {
             conn.setDoOutput(false);
-            return conn.getResponseCode();
+            return consumeAndDisconnect(conn);
         }
 
         // Prepare body according to Content-Type so header and body always match.
@@ -153,7 +164,8 @@ public class HttpPostService {
         // (ñ, é, emoji, ...) match the Content-Length the server expects.
         byte[] outputBytes = finalBody.getBytes(StandardCharsets.UTF_8);
         conn.setDoOutput(true);
-        conn.setFixedLengthStreamingMode(outputBytes.length);
+        // (long) overload: the int one is deprecated since API 19 and overflows past 2 GB.
+        conn.setFixedLengthStreamingMode((long) outputBytes.length);
 
         java.io.OutputStream os = null;
         try {
@@ -165,9 +177,48 @@ public class HttpPostService {
                 os.close();
             }
         }
-        return conn.getResponseCode();
+        return consumeAndDisconnect(conn);
     }
     
+    /**
+     * Reads the status code, drains the response body and releases the connection.
+     *
+     * <p>Nothing used to consume the response or call {@code disconnect()}. At one POST per fix,
+     * 24/7, per vehicle, every reply left an undrained socket that never returned to the keep-alive
+     * pool, so file descriptors and buffers accumulated until the process degraded. Draining is
+     * also what lets HttpURLConnection reuse the connection at all.
+     */
+    private static int consumeAndDisconnect(HttpURLConnection conn) throws IOException {
+        try {
+            int code = conn.getResponseCode();
+            drainQuietly(code >= 400 ? conn.getErrorStream() : getInputStreamQuietly(conn));
+            return code;
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    private static java.io.InputStream getInputStreamQuietly(HttpURLConnection conn) {
+        try {
+            return conn.getInputStream();
+        } catch (Throwable t) {
+            // setDoInput(false), or a mock in tests.
+            return null;
+        }
+    }
+
+    private static void drainQuietly(java.io.InputStream in) {
+        if (in == null) return;
+        try {
+            byte[] buf = new byte[BUFFER_SIZE];
+            while (in.read(buf) != -1) { /* discard */ }
+        } catch (Throwable ignored) {
+            // Draining is best-effort; never let it mask the real status code.
+        } finally {
+            try { in.close(); } catch (Throwable ignored) { }
+        }
+    }
+
     private static String getContentTypeFromHeaders(Map headers) {
         if (headers == null) return null;
         for (Object keyObj : headers.keySet()) {
@@ -208,12 +259,10 @@ public class HttpPostService {
                 continue;
             }
             String value = raw.toString();
-            // Extra safety: some pre-parsed objects may stringify to "null"
-            // (e.g. NSNull, Boolean nulls from non-strict parsers). Treat the
-            // literal "null" string the same as a missing value.
-            if ("null".equals(value)) {
-                continue;
-            }
+            // NOTE: no "null".equals(value) check here. jsonObj.isNull(key) above already covers
+            // real nulls and JSONObject.NULL, so this only ever discarded a *genuine* String whose
+            // content happened to be "null" — a plausible driver name, plate or free-text field
+            // that then vanished from the POST with no trace.
             if (result.length() > 0) {
                 result.append("&");
             }
@@ -253,7 +302,12 @@ public class HttpPostService {
             progress += bytesRead;
             if (listener != null && streamSize > 0) {
                 int percentage = (int) ((progress * 100L) / streamSize);
-                listener.onProgress(percentage);
+                // Only report 100 once, from the write path below, when the bytes have actually
+                // reached the connection. Reporting it here too made the sync notification show
+                // "completed" as soon as the local batch file had been read.
+                if (percentage < 100) {
+                    listener.onProgress(percentage);
+                }
             }
         }
         stream.close();
@@ -274,15 +328,27 @@ public class HttpPostService {
                     }
                     for (int i = 0; i < len; i++) {
                         JSONObject item = arr.getJSONObject(i);
-                        HttpPostService perRequest = new HttpPostService(mUrl);
-                        int code = perRequest.postJSON(item, headers);
+                        // Preserve the configured method: the 1-arg constructor silently forced
+                        // POST, so a backend configured with syncHttpMethod PUT/PATCH answered
+                        // 405 and the batch was retried forever.
+                        HttpPostService perRequest = new HttpPostService(mUrl, mMethod);
+                        int code;
+                        try {
+                            code = perRequest.postJSON(item, headers);
+                        } catch (IOException e) {
+                            // Network died mid-batch: items 0..i-1 are already on the server.
+                            mAcceptedItemCount = i;
+                            throw e;
+                        }
                         if (listener != null && len > 0) {
                             listener.onProgress((i + 1) * 100 / len);
                         }
                         if (code < 200 || code >= 300) {
+                            mAcceptedItemCount = i;
                             return code;
                         }
                     }
+                    mAcceptedItemCount = len;
                     if (listener != null) {
                         listener.onProgress(100);
                     }
@@ -318,15 +384,13 @@ public class HttpPostService {
                 }
             }
             if (listener != null) listener.onProgress(100);
-            return conn.getResponseCode();
+            return consumeAndDisconnect(conn);
         }
-        conn.setDoInput(false);
+        // Do NOT setDoInput(false) here: it prevented reading the response/error body, so a
+        // rejected batch left only a bare status code in the log and was impossible to diagnose.
         conn.setDoOutput(true);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            conn.setFixedLengthStreamingMode(outputBytes.length);
-        } else {
-            conn.setChunkedStreamingMode(0);
-        }
+        // minSdk is 24, so the API 19+ (long) overload is always available.
+        conn.setFixedLengthStreamingMode((long) outputBytes.length);
         conn.setRequestProperty("Content-Type", contentType);
         Iterator<Map.Entry<String, String>> it = headers.entrySet().iterator();
         while (it.hasNext()) {
@@ -350,7 +414,7 @@ public class HttpPostService {
             }
         }
 
-        return conn.getResponseCode();
+        return consumeAndDisconnect(conn);
     }
 
     public static int postJSON(String url, JSONObject json, Map headers) throws IOException {
@@ -378,5 +442,29 @@ public class HttpPostService {
     public static int postJSONFile(String url, File file, Map headers, UploadingProgressListener listener, String method) throws IOException {
         HttpPostService service = new HttpPostService(url, method);
         return service.postJSONFile(file, headers, listener);
+    }
+
+    /**
+     * Same as {@link #postJSONFile(String, File, Map, UploadingProgressListener, String)} but also
+     * reports how many leading locations the server accepted.
+     *
+     * <p>In form-urlencoded batch mode the body is sent as one request per location. When request
+     * <em>k</em> fails, requests 0..k-1 were already accepted by the server. Returning only the
+     * failing status code made the caller treat the whole batch as unsent and resend all of it,
+     * duplicating every already-accepted location — on a flaky link that happened on most batches.
+     *
+     * @param acceptedOut single-element array that receives the number of accepted locations, or
+     *                    {@code -1} when the body was sent as a single all-or-nothing request.
+     */
+    public static int postJSONFile(String url, File file, Map headers, UploadingProgressListener listener,
+                                   String method, int[] acceptedOut) throws IOException {
+        HttpPostService service = new HttpPostService(url, method);
+        try {
+            return service.postJSONFile(file, headers, listener);
+        } finally {
+            if (acceptedOut != null && acceptedOut.length > 0) {
+                acceptedOut[0] = service.mAcceptedItemCount;
+            }
+        }
     }
 }

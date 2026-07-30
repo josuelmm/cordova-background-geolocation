@@ -10,8 +10,21 @@ public class LocationServiceInfoImpl implements LocationServiceInfo {
         mContext = context;
     }
 
+    /**
+     * Whether LocationServiceImpl is currently started.
+     *
+     * <p>Trusts the service's own flag first. {@code ActivityManager.getRunningServices()} is
+     * deprecated since API 26 and several OEM ROMs return incomplete lists, which mattered a lot
+     * here: every command in {@code LocationServiceProxy} is gated on this method, so a false
+     * negative silently swallowed {@code stop()} (leaving the service running forever) and a false
+     * positive sent commands to a dead service. The static flag is authoritative within our own
+     * process; getRunningServices() stays only as a cross-process fallback.
+     */
     @Override
     public boolean isStarted() {
+        if (LocationServiceImpl.isRunning()) {
+            return true;
+        }
         ActivityManager.RunningServiceInfo info = getRunningServiceInfo();
         if (info != null) {
             return info.started;

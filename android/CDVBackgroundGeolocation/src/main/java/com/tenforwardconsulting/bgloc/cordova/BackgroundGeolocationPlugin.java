@@ -96,7 +96,7 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     public static final String ACTION_REQUEST_NOTIFICATION_PERMISSION = "requestNotificationPermission";
 
     /** Plugin version; keep in sync with plugin.xml. */
-    public static final String PLUGIN_VERSION = "4.5.5";
+    public static final String PLUGIN_VERSION = "5.0.0";
 
     private BackgroundGeolocationFacade facade;
 
@@ -154,11 +154,20 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
         }
     }
 
+    /** Application Context captured at init; outlives the Activity. See pluginInitialize(). */
+    private Context mApplicationContext;
+
     @Override
     protected void pluginInitialize() {
         super.pluginInitialize();
 
         logger = LoggerManager.getLogger(BackgroundGeolocationPlugin.class);
+        // Cache the application Context now, while the Activity is guaranteed alive. Everything
+        // else went through getContext(), which NPEs if an action
+        // arrives after the Activity was destroyed (rotation, finish(), process recycled from
+        // background). The application Context outlives the Activity and is what these call sites
+        // actually wanted.
+        mApplicationContext = cordova.getActivity().getApplicationContext();
         facade = new BackgroundGeolocationFacade(this.getContext(), this);
         facade.resume();
     }
@@ -194,9 +203,15 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
             try {
                 int mode = data.getInt(0);
                 facade.switchMode(mode);
+                // Without this the JS promise never settled: `await switchMode(...)` hung
+                // forever and the CallbackContext stayed retained in the plugin manager.
+                callbackContext.success();
             } catch (JSONException e) {
                 logger.error("Switch mode error: {}", e.getMessage());
-                sendError(new PluginException(e.getMessage(), PluginException.JSON_ERROR));
+                // Reject *this* call instead of firing the global `error` event, which the app
+                // routes to its service-restart handler.
+                callbackContext.sendPluginResult(ErrorPluginResult.from(
+                        "Switch mode failed", e, PluginException.JSON_ERROR));
             }
 
             return true;
@@ -230,10 +245,13 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
             return true;
         } else if (ACTION_SHOW_LOCATION_SETTINGS.equals(action)) {
             BackgroundGeolocationFacade.showLocationSettings(context);
+            // Declared Promise<void> in the .d.ts; without this it never resolved.
+            callbackContext.success();
 
             return true;
         } else if (ACTION_SHOW_APP_SETTINGS.equals(action)) {
             BackgroundGeolocationFacade.showAppSettings(context);
+            callbackContext.success();
 
             return true;
         } else if (ACTION_GET_STATIONARY.equals(action)) {
@@ -383,6 +401,7 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
             try {
                 PluginRegistry.getInstance().registerHeadlessTask(data.getString(0));
                 facade.registerHeadlessTask(JsEvaluatorTaskRunner.class.getName());
+                callbackContext.success();
             } catch (JSONException e) {
                 callbackContext.sendPluginResult(ErrorPluginResult.from("Registering headless task failed", e, PluginException.JSON_ERROR));
             }
@@ -478,13 +497,13 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
             });
             return true;
         } else if (ACTION_IS_IGNORING_BATTERY_OPT.equals(action)) {
-            Context ctx = cordova.getActivity().getApplicationContext();
+            Context ctx = getContext();
             callbackContext.success(BatteryOemHelper.isIgnoringBatteryOptimizations(ctx) ? 1 : 0);
             return true;
         } else if (ACTION_REQUEST_IGNORE_BATTERY_OPT.equals(action)) {
             BatteryOemHelper.requestIgnoreBatteryOptimizations(cordova.getActivity());
             // Resolve with the (possibly unchanged) current state; the user accepts the dialog asynchronously.
-            Context ctx = cordova.getActivity().getApplicationContext();
+            Context ctx = getContext();
             callbackContext.success(BatteryOemHelper.isIgnoringBatteryOptimizations(ctx) ? 1 : 0);
             return true;
         } else if (ACTION_OPEN_BATTERY_SETTINGS.equals(action)) {
@@ -546,7 +565,7 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
             } catch (JSONException e) { cb.success(); }
             return true;
         }
-        Context ctx = cordova.getActivity().getApplicationContext();
+        Context ctx = getContext();
         if (hasPermission(ctx, permission)) {
             try { JSONObject r = new JSONObject(); r.put("granted", true); cb.success(r); }
             catch (JSONException e) { cb.success(); }
@@ -575,7 +594,7 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     /** v3.5 Phase 4: extended diagnostics. */
     private JSONObject buildDiagnostics() throws JSONException {
         JSONObject d = new JSONObject();
-        Context ctx = cordova.getActivity().getApplicationContext();
+        Context ctx = getContext();
 
         // Common
         d.put("isRunning", facade.isRunning());
@@ -719,11 +738,16 @@ public class BackgroundGeolocationPlugin extends CordovaPlugin implements Plugin
     }
 
     public Context getContext() {
-        return getActivity().getApplicationContext();
+        if (mApplicationContext != null) {
+            return mApplicationContext;
+        }
+        Activity activity = getActivity();
+        return activity != null ? activity.getApplicationContext() : null;
     }
 
     protected Application getApplication() {
-        return getActivity().getApplication();
+        Activity activity = getActivity();
+        return activity != null ? activity.getApplication() : null;
     }
 
     private void sendEvent(String name) {

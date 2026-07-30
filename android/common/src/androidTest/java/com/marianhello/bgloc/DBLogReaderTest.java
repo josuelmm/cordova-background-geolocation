@@ -42,7 +42,7 @@ public class DBLogReaderTest {
 
         if (!(packageName == null || packageName.length() == 0)) {
             File dbfile = new File(CommonPathUtil.getDatabaseDirectoryPath(packageName), DBLogReader.DB_FILENAME);
-            Context ctx = InstrumentationRegistry.getTargetContext();
+            Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
             ctx.deleteDatabase(dbfile.getPath());
         }
     }

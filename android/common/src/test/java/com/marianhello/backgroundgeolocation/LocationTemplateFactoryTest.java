@@ -33,18 +33,11 @@ public class LocationTemplateFactoryTest {
     }
 
     @Test
-    public void testTemplateFromJsonObject() {
+    public void testTemplateFromJsonObject() throws Exception {
         String jsonString = "{\"foo\":\"bar\",\"pretzels\":123}";
 
-        try {
-            LocationTemplate tpl = LocationTemplateFactory.fromJSONString(jsonString);
-            JSONObject expected = new JSONObject();
-            expected.put("foo", "bar");
-            expected.put("pretzels", 123);
-            Assert.assertEquals(expected.toString(), tpl.toString());
-        } catch (JSONException e) {
-            org.junit.Assert.fail(e.getMessage());
-        }
+        LocationTemplate tpl = LocationTemplateFactory.fromJSONString(jsonString);
+        TestHelper.assertJsonEquals(jsonString, tpl.toString());
     }
 
 }

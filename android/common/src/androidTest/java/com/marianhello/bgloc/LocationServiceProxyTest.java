@@ -40,13 +40,13 @@ public class LocationServiceProxyTest {
     @Before
     public void setUp() {
         LocationServiceImpl.setLocationProviderFactory(new TestLocationProviderFactory());
-        proxy = new LocationServiceProxy(InstrumentationRegistry.getTargetContext());
+        proxy = new LocationServiceProxy(InstrumentationRegistry.getInstrumentation().getTargetContext());
     }
 
     @After
     public void tearDown() {
         LocationServiceImpl.setLocationProviderFactory(null);
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         ctx.stopService(new Intent(ctx, LocationServiceImpl.class));
     }
 
@@ -65,7 +65,7 @@ public class LocationServiceProxyTest {
             }
         };
 
-        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(InstrumentationRegistry.getTargetContext());
+        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(InstrumentationRegistry.getInstrumentation().getTargetContext());
         lbm.registerReceiver(serviceBroadcastReceiver, new IntentFilter(LocationServiceImpl.ACTION_BROADCAST));
 
         proxy.start();
@@ -88,7 +88,7 @@ public class LocationServiceProxyTest {
             }
         };
 
-        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(InstrumentationRegistry.getTargetContext());
+        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(InstrumentationRegistry.getInstrumentation().getTargetContext());
         lbm.registerReceiver(serviceBroadcastReceiver, new IntentFilter(LocationServiceImpl.ACTION_BROADCAST));
 
         proxy.start();
@@ -99,7 +99,7 @@ public class LocationServiceProxyTest {
 
     @Test(timeout = 5000)
     public void testConfigure() throws TimeoutException, InterruptedException {
-        Context context = InstrumentationRegistry.getTargetContext();
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         // Create the service Intent.
         Intent serviceIntent = new Intent(context, LocationServiceImpl.class);
         // Bind the service and grab a reference to the binder.

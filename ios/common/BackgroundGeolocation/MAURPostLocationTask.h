@@ -28,7 +28,9 @@
 
 @interface MAURPostLocationTask : NSObject
 
-@property (nonatomic, weak) MAURConfig * _Nullable config;
+// v4.5.5 — strong, not weak: the asynchronous blocks in -add: read `config` long after the
+// caller returned. A weak ref could be nilled mid-flight, silently disabling the POST/sync.
+@property (nonatomic, strong) MAURConfig * _Nullable config;
 @property (nonatomic, weak) id<MAURPostLocationTaskDelegate> _Nullable delegate;
 /** v4.5.1 — pending driving events buffer owned by the facade; the task drains it onto the
  *  post-transform location so events fired without a simultaneous fix (provider change,

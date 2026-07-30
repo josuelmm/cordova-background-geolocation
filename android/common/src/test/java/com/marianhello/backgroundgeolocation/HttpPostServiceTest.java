@@ -41,23 +41,12 @@ public class HttpPostServiceTest {
     @Mock
     HttpURLConnection mockHttpURLConnection;
 
-    private static final int DEFAULT_SDK_INT = Build.VERSION.SDK_INT;
-
     @Rule
     public final ExpectedException exception = ExpectedException.none();
 
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-    }
-
-    @After
-    public void cleanUp() {
-        try {
-            TestHelper.setFinalStatic(Build.VERSION.class.getField("SDK_INT"), DEFAULT_SDK_INT);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
     }
 
     @Test
@@ -157,8 +146,8 @@ public class HttpPostServiceTest {
 
     @Test
     public void testPostStream() throws Exception {
-        TestHelper.setFinalStatic(Build.VERSION.class.getField("SDK_INT"), Build.VERSION_CODES.KITKAT);
-
+        // No SDK_INT manipulation needed: minSdk is 24, so HttpPostService always uses the
+        // (long) setFixedLengthStreamingMode overload this test verifies.
         final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         when(mockHttpURLConnection.getOutputStream()).thenReturn(outputStream);
         when(mockHttpURLConnection.getResponseCode()).thenReturn(200);
@@ -179,8 +168,8 @@ public class HttpPostServiceTest {
 
     @Test
     public void testJSONPostFile() throws Exception {
-        TestHelper.setFinalStatic(Build.VERSION.class.getField("SDK_INT"), Build.VERSION_CODES.KITKAT);
-
+        // No SDK_INT manipulation needed: minSdk is 24, so HttpPostService always uses the
+        // (long) setFixedLengthStreamingMode overload this test verifies.
         final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         when(mockHttpURLConnection.getOutputStream()).thenReturn(outputStream);
         when(mockHttpURLConnection.getResponseCode()).thenReturn(200);

@@ -83,7 +83,12 @@ public class LocationContentProvider extends ContentProvider {
         Context context = getContext();
         ResourceResolver resourceResolver = ResourceResolver.newInstance(getContext());
         initialize(resourceResolver.getAuthority());
-        mDatabaseHelper = new SQLiteOpenHelper(context);
+        // getHelper(), not the public constructor: the constructor's own javadoc says it exists
+        // only for testing. Using it opened a *second* SQLiteDatabase over the same file, with
+        // its own Java-side lock, while every DAO used the singleton — so a sync writing from the
+        // ":sync" process concurrently with an incoming fix produced "database is locked" and the
+        // fix's insert was lost.
+        mDatabaseHelper = SQLiteOpenHelper.getHelper(context);
         return true;
     }
 
@@ -163,7 +168,10 @@ public class LocationContentProvider extends ContentProvider {
              */
             case ONE_ITEM:
                 queryBuilder.setTables(LocationEntry.TABLE_NAME);
-                queryBuilder.appendWhere(LocationEntry._ID + " = " + uri.getLastPathSegment());
+                // ContentUris.parseId, not raw getLastPathSegment(): the UriMatcher already
+                // constrains this segment to digits, but parsing makes it provably numeric
+                // instead of concatenating a path segment straight into SQL.
+                queryBuilder.appendWhere(LocationEntry._ID + " = " + ContentUris.parseId(uri));
                 break;
 
             default:
@@ -224,7 +232,8 @@ public class LocationContentProvider extends ContentProvider {
                         selection, selectionArgs); // The WHERE clause
                 break;
             case ONE_ITEM:
-                String where = LocationEntry._ID + " = " + uri.getLastPathSegment();
+                // See the note in query(): parse the id rather than concatenating the segment.
+                String where = LocationEntry._ID + " = " + ContentUris.parseId(uri);
                 if (!TextUtils.isEmpty(selection)) {
                     where += " AND " + selection;
                 }
@@ -258,7 +267,8 @@ public class LocationContentProvider extends ContentProvider {
                         selection, selectionArgs); // The WHERE clause
                 break;
             case ONE_ITEM:
-                String where = LocationEntry._ID + " = " + uri.getLastPathSegment();
+                // See the note in query(): parse the id rather than concatenating the segment.
+                String where = LocationEntry._ID + " = " + ContentUris.parseId(uri);
                 if (!TextUtils.isEmpty(selection)) {
                     where += " AND " + selection;
                 }

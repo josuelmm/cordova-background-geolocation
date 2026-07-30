@@ -6,6 +6,192 @@ on:
   pull_request:
 
 jobs:
+  # Builds and TESTS the plugin's own Gradle project (:common + :CDVBackgroundGeolocation).
+  # The `build` job below only compiles an ephemeral Capacitor app, so before this job
+  # existed no unit test of the plugin was ever executed in CI.
+  android-plugin:
+    name: Android plugin build + unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # AGP 8.13 / Gradle 8.14.3 require JDK 17 as the minimum toolchain.
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: zulu
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
+      # compileSdk 36 / buildTools 36.0.0 come from android/common/VERSIONS.gradle.
+      # Installed explicitly because AGP does not auto-download platforms in CI.
+      - name: Install Android SDK packages
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build plugin modules
+        run: ./gradlew --no-daemon :common:assembleDebug :CDVBackgroundGeolocation:assembleDebug
+        working-directory: android
+
+      - name: Run plugin unit tests
+        run: ./gradlew --no-daemon :common:testDebugUnitTest :CDVBackgroundGeolocation:testDebugUnitTest
+        working-directory: android
+
+      # Uploaded on failure too — otherwise a red build gives no way to see which test broke.
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-unit-test-reports
+          if-no-files-found: warn
+          path: |
+            android/common/build/reports/tests/
+            android/common/build/test-results/
+            android/CDVBackgroundGeolocation/build/reports/tests/
+            android/CDVBackgroundGeolocation/build/test-results/
+
+  # v5.0 — G1: the 72 instrumented tests in android/common/src/androidTest (DAO, SQLite,
+  # BatchManager, LocationService, LocationServiceProxy) had never run in CI — and could not:
+  # they did not even compile (80 errors from InstrumentationRegistry.getTargetContext(), removed
+  # in androidx.test 1.4+). They compile now and this job executes them on an emulator.
+  # reactivecircus/android-emulator-runner boots an AVD with hardware acceleration on the
+  # ubuntu runner; API 30 is the oldest image that still gets a Google-hosted system image and is
+  # well above the plugin's minSdk 24.
+  android-instrumented:
+    name: Android instrumented tests (emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: zulu
+          cache: gradle
+
+      # KVM must be writable by the runner user or the emulator falls back to software
+      # rendering and times out.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
+      - name: Install Android SDK packages
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Run instrumented tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: cd android && ./gradlew --no-daemon :common:connectedDebugAndroidTest :CDVBackgroundGeolocation:connectedDebugAndroidTest
+
+      - name: Upload instrumented test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-instrumented-test-reports
+          if-no-files-found: warn
+          path: |
+            android/common/build/reports/androidTests/
+            android/common/build/outputs/androidTest-results/
+            android/CDVBackgroundGeolocation/build/reports/androidTests/
+            android/CDVBackgroundGeolocation/build/outputs/androidTest-results/
+
+  # v5.0 — G1: the JS layer had no CI at all. www/__tests__ are plain-node suites (no jest
+  # configured), run through the new `test:js` npm script.
+  js-tests:
+    name: JS unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: npm ci
+
+      - name: Run JS tests
+        run: npm run test:js
+
+  # iOS unit tests (ios/common/BackgroundGeolocation.xcodeproj, target BackgroundGeolocationTests).
+  # v5.0 — G4: the shared scheme is now committed at
+  # ios/common/BackgroundGeolocation.xcodeproj/xcshareddata/xcschemes/BackgroundGeolocationTests.xcscheme
+  # so `xcodebuild test` has something to run on a fresh checkout (before, Xcode's auto-generated
+  # scheme lived in xcuserdata/ and never reached CI).
+  #
+  # The job-level continue-on-error stays for now: the test target is a legacy OCUnit-style bundle
+  # that has never been exercised on a modern Xcode/SDK, and nobody has been able to run it here
+  # (no macOS in the environment where this was written). REMOVE `continue-on-error` as soon as the
+  # job has been green once — until then a red iOS job would block every PR for a reason nobody has
+  # verified. The individual steps are NOT continue-on-error any more, so a failure is visible.
+  ios-tests:
+    name: iOS build + unit tests (advisory until first green run)
+    runs-on: macos-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Show available schemes and targets
+        run: xcodebuild -list -project ios/common/BackgroundGeolocation.xcodeproj || true
+
+      - name: Build test target
+        run: |
+          xcodebuild build \
+            -project ios/common/BackgroundGeolocation.xcodeproj \
+            -target BackgroundGeolocationTests \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath ios-derived-data \
+            CODE_SIGNING_ALLOWED=NO
+
+      # Uses the committed shared scheme; -destination picks the simulator runtime.
+      - name: Run test target
+        run: |
+          xcodebuild test \
+            -project ios/common/BackgroundGeolocation.xcodeproj \
+            -scheme BackgroundGeolocationTests \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath ios-derived-data \
+            CODE_SIGNING_ALLOWED=NO
+
+      # Explicit -derivedDataPath keeps the .xcresult bundles inside the workspace, where
+      # upload-artifact can find them (it does not expand `~`).
+      - name: Upload xcodebuild test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          if-no-files-found: ignore
+          path: |
+            ios-derived-data/Logs/Test/
+
+  # Smoke test: packs the plugin and builds a throwaway Capacitor app against the tarball.
   build:
     runs-on: ubuntu-latest
 

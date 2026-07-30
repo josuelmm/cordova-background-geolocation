@@ -117,17 +117,24 @@ public class ContentProviderLocationDAO implements LocationDAO {
     }
 
     public int getLocationsCount() {
-        Cursor cursor = mResolver.query(
-                mContentUri,
-                null,
-                null,
-                null,
-                ""
-        );
-
-        int count = cursor.getCount();
-        cursor.close();
-        return count;
+        Cursor cursor = null;
+        try {
+            cursor = mResolver.query(
+                    mContentUri,
+                    new String[]{ "count(*)" },
+                    null,
+                    null,
+                    null
+            );
+            if (cursor == null || !cursor.moveToFirst()) {
+                return 0;
+            }
+            return cursor.getInt(0);
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
     }
 
     @Override
@@ -138,6 +145,10 @@ public class ContentProviderLocationDAO implements LocationDAO {
         subsql.where(LocationEntry.COLUMN_NAME_STATUS, SqlExpression.SqlOperatorEqualTo, BackgroundLocation.POST_PENDING);
         subsql.orderBy(LocationEntry.COLUMN_NAME_TIME);
 
+        // NOTE: this builds a raw SQL sub-select and passes it as the provider's `selection`.
+        // It is not injectable today — every value fed into SqlSelectStatement here is a numeric
+        // constant or a long — but it depends on removeLastChar() stripping the trailing ';'
+        // correctly, so keep it that way: never interpolate a String argument into this builder.
         String substmt = subsql.statement();
         substmt = com.marianhello.utils.TextUtils.removeLastChar(substmt, ";");
 
@@ -176,6 +187,10 @@ public class ContentProviderLocationDAO implements LocationDAO {
         subsql.where(LocationEntry._ID, SqlExpression.SqlOperatorNotEqualTo, fromId);
         subsql.orderBy(LocationEntry.COLUMN_NAME_TIME);
 
+        // NOTE: this builds a raw SQL sub-select and passes it as the provider's `selection`.
+        // It is not injectable today — every value fed into SqlSelectStatement here is a numeric
+        // constant or a long — but it depends on removeLastChar() stripping the trailing ';'
+        // correctly, so keep it that way: never interpolate a String argument into this builder.
         String substmt = subsql.statement();
         substmt = com.marianhello.utils.TextUtils.removeLastChar(substmt, ";");
 
@@ -210,16 +225,27 @@ public class ContentProviderLocationDAO implements LocationDAO {
         String whereClause = SQLiteLocationContract.LocationEntry.COLUMN_NAME_STATUS + " = ?";
         String[] whereArgs = { String.valueOf(BackgroundLocation.POST_PENDING) };
 
-        Cursor cursor = mResolver.query(
-                mContentUri,
-                null,
-                whereClause,
-                whereArgs,
-                null);
-
-        int count = cursor.getCount();
-        cursor.close();
-        return count;
+        // projection = count(*) instead of null: asking for every column of every matching row
+        // just to call getCount() serialized the whole queue across Binder (multiple 2 MB
+        // CursorWindows), and PostLocationTask does this on *every* fix. Also null-checked and
+        // closed in a finally: ContentResolver.query returns null if the provider's process died.
+        Cursor cursor = null;
+        try {
+            cursor = mResolver.query(
+                    mContentUri,
+                    new String[]{ "count(*)" },
+                    whereClause,
+                    whereArgs,
+                    null);
+            if (cursor == null || !cursor.moveToFirst()) {
+                return 0;
+            }
+            return cursor.getInt(0);
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
     }
 
     @Override
@@ -234,16 +260,27 @@ public class ContentProviderLocationDAO implements LocationDAO {
                 String.valueOf(millisSinceLastBatch)
         };
 
-        Cursor cursor = mResolver.query(
-                mContentUri,
-                null,
-                whereClause,
-                whereArgs,
-                null);
-
-        int count = cursor.getCount();
-        cursor.close();
-        return count;
+        // projection = count(*) instead of null: asking for every column of every matching row
+        // just to call getCount() serialized the whole queue across Binder (multiple 2 MB
+        // CursorWindows), and PostLocationTask does this on *every* fix. Also null-checked and
+        // closed in a finally: ContentResolver.query returns null if the provider's process died.
+        Cursor cursor = null;
+        try {
+            cursor = mResolver.query(
+                    mContentUri,
+                    new String[]{ "count(*)" },
+                    whereClause,
+                    whereArgs,
+                    null);
+            if (cursor == null || !cursor.moveToFirst()) {
+                return 0;
+            }
+            return cursor.getInt(0);
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
     }
 
     public Uri getOldestLocationUri() {
@@ -282,7 +319,13 @@ public class ContentProviderLocationDAO implements LocationDAO {
     @Override
     public long persistLocation(BackgroundLocation location) {
         Uri locationUri = mResolver.insert(mContentUri, location.toContentValues());
-        return Integer.valueOf(locationUri.getLastPathSegment());
+        if (locationUri == null) {
+            logger.error("ContentResolver.insert returned null, location not persisted");
+            return -1;
+        }
+        // Long, not Integer: _ID is INTEGER PRIMARY KEY (64-bit) and Integer.valueOf would throw
+        // NumberFormatException once the rowid passed 2^31.
+        return Long.parseLong(locationUri.getLastPathSegment());
     }
 
     @Override
@@ -318,8 +361,26 @@ public class ContentProviderLocationDAO implements LocationDAO {
             );
         }
 
+        // Resolve the recycled row's id BEFORE the batch runs, and return it.
+        // This used to `return 0`, which was harmless only because nothing called this overload.
+        // Now that PostLocationTask honours maxLocations, returning 0 would make the caller do
+        // setLocationId(0) and then deleteLocationById(0) after a successful POST — deleting the
+        // wrong row (or none) while the location actually sent stayed behind and was resent.
+        Uri oldestUri = getOldestLocationUri();
+        if (oldestUri == null) {
+            logger.warn("No recyclable row found, falling back to insert");
+            return persistLocation(location);
+        }
+        long recycledId;
+        try {
+            recycledId = Long.parseLong(oldestUri.getLastPathSegment());
+        } catch (NumberFormatException e) {
+            logger.error("Unparseable location uri {}: {}", oldestUri, e.getMessage());
+            return -1;
+        }
+
         operations.add(
-                ContentProviderOperation.newUpdate(getOldestLocationUri())
+                ContentProviderOperation.newUpdate(oldestUri)
                     .withValues(location.toContentValues())
                     .build()
         );
@@ -331,7 +392,7 @@ public class ContentProviderLocationDAO implements LocationDAO {
             return -1;
         }
 
-        return 0;
+        return recycledId;
     }
 
     @Override
@@ -372,6 +433,10 @@ public class ContentProviderLocationDAO implements LocationDAO {
     @Override
     public BackgroundLocation deleteFirstUnpostedLocation() {
         BackgroundLocation location = getFirstUnpostedLocation();
+        // Returns null on an empty queue; dereferencing it here used to throw NPE.
+        if (location == null) {
+            return null;
+        }
         deleteLocationById(location.getLocationId());
 
         return location;

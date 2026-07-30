@@ -60,12 +60,22 @@
         [self endTaskWithKey:taskKey];
     }];
     
+    // v4.5.6 — D29: -endTaskWithKey: reads/mutates both dictionaries under @synchronized, but
+    // these writes were unprotected. NSMutableDictionary is not thread safe and -beginTask can be
+    // called from any thread (JS bridge, location callbacks), so concurrent writes could corrupt
+    // the dictionaries or lose a task identifier (leaking a UIBackgroundTask).
     //add this task identifier to the active task dictionary
-    [self.dictTaskIdentifiers setObject:[NSNumber numberWithUnsignedLong:taskId] forKey:[NSNumber numberWithUnsignedLong:taskKey]];
-    
+    @synchronized(self.dictTaskIdentifiers) {
+        [self.dictTaskIdentifiers setObject:[NSNumber numberWithUnsignedLong:taskId] forKey:[NSNumber numberWithUnsignedLong:taskKey]];
+    }
+
     //store the completion block (if any)
-    if (_completion) [self.dictTaskCompletionBlocks setObject:_completion forKey:[NSNumber numberWithUnsignedLong:taskKey]];
-    
+    if (_completion) {
+        @synchronized(self.dictTaskCompletionBlocks) {
+            [self.dictTaskCompletionBlocks setObject:_completion forKey:[NSNumber numberWithUnsignedLong:taskKey]];
+        }
+    }
+
     //return the dictionary key
     return taskKey;
 }

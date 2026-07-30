@@ -1,6 +1,5 @@
 package com.marianhello.backgroundgeolocation;
 
-import android.os.Build;
 import androidx.test.filters.SmallTest;
 
 import com.marianhello.bgloc.data.BackgroundLocation;
@@ -8,33 +7,21 @@ import com.marianhello.bgloc.data.BackgroundLocation;
 import junit.framework.Assert;
 
 import org.junit.Test;
-
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
 
 /**
  * Created by finch on 10/08/16.
+ *
+ * NOTE: these tests used to force Build.VERSION.SDK_INT via the `Field.modifiers` reflection
+ * hack, removed in JDK 12. The resulting exception was swallowed, so SDK_INT stayed at 0 and
+ * isBetterLocation() took the pre-API-17 getTime() branch instead of the
+ * getElapsedRealtimeNanos() branch these tests actually exercise. Running under Robolectric
+ * gives a real (modern) SDK_INT, which is also the only thing minSdk 24 can produce.
  */
 @SmallTest
+@RunWith(RobolectricTestRunner.class)
 public class BackgroundLocationTest {
-
-    static void setSDKVersion(Object newValue) {
-
-        Field modifiersField = null;
-        try {
-            Field field = Build.VERSION.class.getField("SDK_INT");
-
-            field.setAccessible(true);
-
-            modifiersField = Field.class.getDeclaredField("modifiers");
-            modifiersField.setAccessible(true);
-            modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
-
-            field.set(null, newValue);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
 
     @Test public void testHasMockShouldBeFalse() {
         BackgroundLocation l = new BackgroundLocation();
@@ -86,7 +73,6 @@ public class BackgroundLocationTest {
 
     @Test
     public void olderLocationShouldBeWorse() {
-        setSDKVersion(17);
 
         BackgroundLocation netLocation = new BackgroundLocation();
         netLocation.setProvider("network");
@@ -107,7 +93,6 @@ public class BackgroundLocationTest {
 
     @Test
     public void newerLocationShouldBeBetter() {
-        setSDKVersion(17);
 
         BackgroundLocation netLocation = new BackgroundLocation();
         netLocation.setProvider("network");

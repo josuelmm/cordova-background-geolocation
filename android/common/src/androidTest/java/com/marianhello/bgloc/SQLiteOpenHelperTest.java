@@ -35,7 +35,7 @@ import java.util.List;
 public class SQLiteOpenHelperTest {
     @Before
     public void deleteDatabase() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteOpenHelper.getHelper(ctx).close();
         ctx.deleteDatabase(SQLiteOpenHelper.SQLITE_DATABASE_NAME);
     }
@@ -43,7 +43,7 @@ public class SQLiteOpenHelperTest {
     @Test
     public void upgradeDatabaseFromVersion10() {
         Cursor cursor = null;
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db10 = new SQLiteOpenHelper10(ctx).getWritableDatabase();
 
         Location location = new Location("fake");

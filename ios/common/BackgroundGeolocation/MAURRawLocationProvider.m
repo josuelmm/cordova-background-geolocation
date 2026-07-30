@@ -44,6 +44,11 @@ static NSString * const Domain = @"com.marianhello";
     _config = config;
 
     locationManager.pausesLocationUpdatesAutomatically = [config pauseLocationUpdates];
+    // v4.5.6 — D20: showsBackgroundLocationIndicator used to be applied only by the
+    // DISTANCE_FILTER provider, so the setting was silently ignored under RAW.
+    if ([config hasShowsBackgroundLocationIndicator]) {
+        [locationManager setShowsBackgroundLocationIndicator:[config showsBackgroundLocationIndicator]];
+    }
     locationManager.activityType = [config decodeActivityType];
     locationManager.distanceFilter = config.distanceFilter.integerValue; // meters
     locationManager.desiredAccuracy = [config decodeDesiredAccuracy];
@@ -96,6 +101,9 @@ static NSString * const Domain = @"com.marianhello";
 {
     for (CLLocation *location in locations) {
         MAURLocation *bgloc = [MAURLocation fromCLLocation:location];
+        // v4.5.6 — D6: stamp the numeric provider id (RAW_PROVIDER == 2). The default post
+        // template maps @locationProvider, which used to resolve to null on iOS.
+        bgloc.locationProvider = [NSNumber numberWithInt:RAW_PROVIDER];
         [self.delegate onLocationChanged:bgloc];
     }
 }
@@ -105,12 +113,15 @@ static NSString * const Domain = @"com.marianhello";
     [self.delegate onError:error];
 }
 
-- (void) onPause:(CLLocationManager*)manager
+// v4.5.5 — renamed from onPause:/onResume: to match the MAURLocationManagerDelegate protocol.
+// MAURLocationManager guards these calls with respondsToSelector:@selector(onLocationPause:),
+// so under the old names pause/resume events were never delivered.
+- (void) onLocationPause:(CLLocationManager*)manager
 {
     [self.delegate onLocationPause];
 }
 
-- (void) onResume:(CLLocationManager*)manager
+- (void) onLocationResume:(CLLocationManager*)manager
 {
     [self.delegate onLocationResume];
 }

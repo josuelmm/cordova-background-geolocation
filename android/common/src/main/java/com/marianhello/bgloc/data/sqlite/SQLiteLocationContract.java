@@ -80,6 +80,19 @@ public final class SQLiteLocationContract {
                 "CREATE INDEX batch_id_idx ON " + LocationEntry.TABLE_NAME + " (" + LocationEntry.COLUMN_NAME_BATCH_START_MILLIS + ")";
 
         /**
+         * Composite index on the two columns every hot query filters by.
+         *
+         * <p>Both the per-fix pending count and the batch selection filter on
+         * {@code valid} (status) plus {@code batch_start}, and neither was indexed: every one of
+         * those queries was a full table scan, which degrades as the offline queue grows.
+         * {@code IF NOT EXISTS} so it is safe to run on both create and upgrade paths.
+         */
+        public static final String SQL_CREATE_LOCATION_TABLE_STATUS_IDX =
+                "CREATE INDEX IF NOT EXISTS status_batch_idx ON " + LocationEntry.TABLE_NAME
+                        + " (" + LocationEntry.COLUMN_NAME_STATUS + ", "
+                        + LocationEntry.COLUMN_NAME_BATCH_START_MILLIS + ")";
+
+        /**
          * The directory base-path
          */
         public static final String DIR_BASEPATH = "locations";

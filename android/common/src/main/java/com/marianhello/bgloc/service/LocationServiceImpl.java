@@ -157,8 +157,10 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     private TaskRunner mHeadlessTaskRunner;
 
     private long mServiceId = -1;
-    private static boolean sIsRunning = false;
-    private boolean mIsInForeground = false;
+    // volatile: written on the main thread, read from Cordova's thread pool via
+    // LocationServiceProxy.isRunning(), so without a memory barrier callers could see a stale value.
+    private static volatile boolean sIsRunning = false;
+    private volatile boolean mIsInForeground = false;
 
     private PowerManager.WakeLock mWakeLock;
     private static final String WAKE_LOCK_TAG = "com.marianhello.bgloc:LocationServiceWakeLock";
@@ -188,11 +190,43 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     private static final int  PENDING_DRIVING_EVENTS_MAX = 20;
     private static final long PENDING_DRIVING_EVENTS_TTL_MS = 60_000L;
     private static final long WATCHDOG_INTERVAL_MS = 60_000L;
+    /**
+     * Floor for uploading the offline queue, in seconds (15 min). The OS batches this with other
+     * work, so it is a lower bound, not a guarantee — enough to drain a queue that never reaches
+     * syncThreshold.
+     */
+    private static final long PERIODIC_SYNC_INTERVAL_SECONDS = 15 * 60L;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mWatchdogRunnable = new Runnable() {
         @Override
         public void run() {
-            if (!sIsRunning || mProvider == null || mConfig == null) return;
+            // Reschedule in a finally: any early return used to break the postDelayed chain, so
+            // the watchdog died permanently the first time it ran while the provider was null or
+            // enableWatchdog was momentarily off, and never came back without a service restart.
+            try {
+                runWatchdogCheck();
+            } finally {
+                if (sIsRunning) {
+                    mMainHandler.postDelayed(this, WATCHDOG_INTERVAL_MS);
+                }
+            }
+        }
+
+        private void runWatchdogCheck() {
+            if (mProvider == null || mConfig == null) return;
+            Config.DrivingEventsOptions de = mConfig.getDrivingEvents();
+            boolean drivingEnabled = de != null && de.enabled;
+            // v5.0 — F4: advance the detector's time-based transitions before deciding anything.
+            // A parked vehicle stops producing fixes, so onLocation() never ran and the
+            // stoppedDuration timeout was never evaluated: the trip stayed open forever.
+            // v5.0 — F4 (fix of the fix): this runnable used to be posted only when
+            // enableWatchdog was true, which is NOT the default — so with drivingEvents on and
+            // the watchdog off (the common setup) the tick never happened and the trip still
+            // never closed. It is now posted whenever the service runs; the watchdog part below
+            // keeps its own enableWatchdog guard.
+            if (drivingEnabled && mDrivingDetector != null) {
+                mDrivingDetector.tick(System.currentTimeMillis());
+            }
             if (!Boolean.TRUE.equals(mConfig.getEnableWatchdog())) return;
             long now = System.currentTimeMillis();
             if (mLastLocationTime > 0 && (now - mLastLocationTime) > WATCHDOG_INTERVAL_MS) {
@@ -200,8 +234,6 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                 // intentional stationary → don't restart (saves battery). When drivingEvents is
                 // disabled (the plugin has no notion of "trip"), keep the legacy behaviour of
                 // restarting on every stale window.
-                Config.DrivingEventsOptions de = mConfig.getDrivingEvents();
-                boolean drivingEnabled = de != null && de.enabled;
                 boolean shouldRestart = !drivingEnabled || mDrivingTripActive;
                 if (shouldRestart) {
                     logger.info("Location watchdog: no update in {}s, restarting provider", WATCHDOG_INTERVAL_MS / 1000);
@@ -215,7 +247,6 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                     logger.debug("Location watchdog: stationary (no active trip); skipping restart");
                 }
             }
-            mMainHandler.postDelayed(this, WATCHDOG_INTERVAL_MS);
         }
     };
 
@@ -313,6 +344,12 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         String authority = mResolver.getAuthority();
         ContentResolver.setIsSyncable(mSyncAccount, authority, 1);
         ContentResolver.setSyncAutomatically(mSyncAccount, authority, true);
+        // Periodic sync as a floor. The only other triggers are crossing syncThreshold and an
+        // explicit forceSync(), so a driver who ended a shift with syncThreshold-1 locations
+        // pending never uploaded them — they sat in SQLite until the vehicle moved again, and
+        // were lost outright if the app was reinstalled or its data cleared.
+        ContentResolver.addPeriodicSync(mSyncAccount, authority, new Bundle(),
+                PERIODIC_SYNC_INTERVAL_SECONDS);
 
         mLocationDAO = DAOFactory.createLocationDAO(this);
         mSessionDAO = new SQLiteSessionLocationDAO(this);
@@ -348,25 +385,33 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     public void onDestroy() {
         logger.info("Destroying LocationServiceImpl");
 
+        // Wake lock, heartbeat scheduler and sensor listeners. onTaskRemoved() with the default
+        // stopOnTerminate=true reaches onDestroy() without going through stop(), so this has to
+        // happen here too.
+        releaseResources();
+
         // workaround for issue #276
         if (mProvider != null) {
             mProvider.onDestroy();
         }
 
         if (mHandlerThread != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
-                mHandlerThread.quitSafely();
-            } else {
-                mHandlerThread.quit(); //sorry
-            }
+            mHandlerThread.quitSafely();
         }
 
         if (mPostLocationTask != null) {
-            mPostLocationTask.shutdown();
+            // onDestroy() runs on the main thread and the system allows it roughly 20s before
+            // declaring an ANR. The default shutdown() waits up to 60s for in-flight POSTs
+            // (whose own read timeout is even longer), so closing the app during a slow upload
+            // reliably produced "application not responding".
+            mPostLocationTask.shutdown(2);
         }
 
-
-        unregisterReceiver(connectivityChangeReceiver);
+        try {
+            unregisterReceiver(connectivityChangeReceiver);
+        } catch (IllegalArgumentException e) {
+            logger.debug("Connectivity receiver was not registered: {}", e.getMessage());
+        }
 
         sIsRunning = false;
         super.onDestroy();
@@ -503,11 +548,12 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             logger.debug("Wake lock acquired (mode=always)");
         }
 
-        if (Boolean.TRUE.equals(mConfig.getEnableWatchdog())) {
-            mLastLocationTime = System.currentTimeMillis();
-            mMainHandler.removeCallbacks(mWatchdogRunnable);
-            mMainHandler.postDelayed(mWatchdogRunnable, WATCHDOG_INTERVAL_MS);
-        }
+        // v5.0 — F4: posted unconditionally. It carries two jobs now: the drivingEvents tick
+        // (needed regardless of enableWatchdog) and the stale-location watchdog (which still
+        // checks enableWatchdog itself). One Handler callback per minute is negligible.
+        mLastLocationTime = System.currentTimeMillis();
+        mMainHandler.removeCallbacks(mWatchdogRunnable);
+        mMainHandler.postDelayed(mWatchdogRunnable, WATCHDOG_INTERVAL_MS);
 
         mSessionStartTime = System.currentTimeMillis();
         mSessionDistanceMeters = 0.0;
@@ -544,6 +590,11 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         if (opts == null || !opts.enabled) {
             if (mDrivingDetector != null) mDrivingDetector.reset();
             mDrivingDetector = null;
+            mDrivingTripActive = false;
+            // Turning driving events off at runtime must also tear the sensors down; otherwise
+            // the accelerometer and gyroscope stay registered and keep emitting
+            // possibleCrash / phoneUsageWhileDriving for a feature the user just disabled.
+            configureSensorFusion();
             return;
         }
         com.marianhello.bgloc.driving.DrivingEventsDetector.Config c =
@@ -554,6 +605,21 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         c.stoppedDurationMs = opts.stoppedDurationMs;
         c.minTripSpeedMps   = opts.minTripSpeedMps;
         c.minTripDurationMs = opts.minTripDurationMs;
+        c.hardBrakeMps2         = opts.hardBrakeMps2;
+        c.rapidAccelMps2        = opts.rapidAccelMps2;
+        c.sharpTurnDegPerSec    = opts.sharpTurnDegPerSec;
+        c.crashImpactKmh        = opts.crashImpactKmh;
+        c.crashWindowMs         = opts.crashWindowMs;
+
+        // Reuse the existing detector when there is one: recreating it threw away tripActive,
+        // tripDistanceMeters and tripStartedAt, so any configure() mid-trip (e.g. changing
+        // speedLimit) silently lost that trip's distance and duration, never emitted its tripEnd,
+        // and left mDrivingTripActive stuck at true — which in turn kept the watchdog restarting
+        // the provider every 60s and the sensors sampling.
+        if (mDrivingDetector != null) {
+            mDrivingDetector.setConfig(c);
+            return;
+        }
 
         mDrivingDetector = new com.marianhello.bgloc.driving.DrivingEventsDetector(
                 new com.marianhello.bgloc.driving.DrivingEventsDetector.Listener() {
@@ -830,6 +896,32 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             return;
         }
 
+        releaseResources();
+
+        if (mProvider != null) {
+            mProvider.onStop();
+        }
+
+        mIsInForeground = false;
+        stopForeground(true);
+        stopSelf();
+
+        broadcastMessage(MSG_ON_SERVICE_STOPPED);
+        sIsRunning = false;
+    }
+
+    /**
+     * Releases every long-lived resource the service holds. Idempotent, so it is safe to call
+     * from both {@link #stop()} and {@link #onDestroy()}.
+     *
+     * <p>This used to live inline in {@code stop()} only. With the default
+     * {@code stopOnTerminate=true}, swiping the app away goes onTaskRemoved → stopSelf() →
+     * onDestroy() <em>without</em> passing through stop(), which leaked the PARTIAL_WAKE_LOCK
+     * (with {@code wakeLockMode:'always'}), left the heartbeat ScheduledExecutorService alive
+     * holding a reference to the Service, and kept the accelerometer + gyroscope registered at
+     * ~20 Hz — draining the battery of a process the user believed was gone.
+     */
+    private synchronized void releaseResources() {
         mMainHandler.removeCallbacks(mWatchdogRunnable);
         mMainHandler.removeCallbacks(mNotificationUpdateRunnable);
 
@@ -842,14 +934,6 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             }
         }
 
-        if (mProvider != null) {
-            mProvider.onStop();
-        }
-
-        mIsInForeground = false;
-        stopForeground(true);
-        stopSelf();
-
         // v3.5 Phase 4: stop heartbeat scheduler.
         cancelHeartbeat();
         // v4.0 Phase 6: reset driver-insights state machine.
@@ -860,9 +944,6 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             mSensorFusion.setTripActive(false);
             mSensorFusion.stop();
         }
-
-        broadcastMessage(MSG_ON_SERVICE_STOPPED);
-        sIsRunning = false;
     }
 
     /**
@@ -961,6 +1042,28 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                     super.startForeground(NOTIFICATION_ID, notification);
                 } catch (Throwable t2) {
                     logger.error("startForeground retry failed: {}", t2.getMessage());
+                    // Do not leave a zombie: sIsRunning stays true and JS already got
+                    // MSG_ON_SERVICE_STARTED, but without a foreground notification this is an
+                    // ordinary background service that the system kills within minutes (seconds
+                    // under Doze) — tracking dies with no signal whatsoever. Tell the app.
+                    onError(new PluginException(
+                            "Failed to start foreground service: " + t2.getMessage(),
+                            PluginException.SERVICE_ERROR));
+                    // v5.0 — A10: reporting the error was not enough. sIsRunning stayed true and
+                    // the process kept an ordinary background service that the OS kills silently,
+                    // so the app believed it was tracking. Tear down through the same idempotent
+                    // path stop() uses and emit MSG_ON_SERVICE_STOPPED, so the app sees a clean
+                    // stop. releaseResources() is idempotent, so the later onDestroy() (triggered
+                    // by stopSelf()) does not double-release.
+                    releaseResources();
+                    if (mProvider != null) {
+                        mProvider.onStop();
+                    }
+                    mIsInForeground = false;
+                    stopForeground(true);
+                    sIsRunning = false;
+                    broadcastMessage(MSG_ON_SERVICE_STOPPED);
+                    stopSelf();
                     return;
                 }
             }
@@ -1061,6 +1164,25 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                // ThreadUtils.runOnUiThread wraps this in a FutureTask nobody calls get() on, so
+                // ANY exception thrown here used to vanish: the JS caller still saw success while
+                // the rest of the reconfiguration (heartbeat, drivingEvents, wakeLockMode) silently
+                // never ran. Catch, log and surface it instead.
+                try {
+                    applyConfigOnUiThread(currentConfig);
+                } catch (Throwable t) {
+                    logger.error("configure() failed: {}", t.getMessage(), t);
+                    onError(new PluginException("configure() failed: " + t.getMessage(),
+                            PluginException.SERVICE_ERROR));
+                }
+            }
+        });
+    }
+
+    /** Body of {@link #configure(Config)} that must run on the UI thread. */
+    private void applyConfigOnUiThread(final Config currentConfig) {
+        {
+            {
                 if (sIsRunning) {
                     if (currentConfig.getStartForeground() == true && mConfig.getStartForeground() == false) {
                         stopForeground();
@@ -1087,7 +1209,18 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                     }
                 }
 
-                if (currentConfig.getLocationProvider() != mConfig.getLocationProvider()) {
+                // Objects.equals, not !=: these are boxed Integers and reference comparison only
+                // happens to work inside the -128..127 Integer cache. Any value built outside it
+                // would tear down and recreate the provider on every configure() call.
+                // mProvider is null when the Android service is "started" but LocationService.start()
+                // has not run (e.g. it was brought up by REGISTER_HEADLESS_TASK, which does not
+                // check isStarted()). Dereferencing it threw an NPE that nobody ever saw.
+                if (mProvider == null) {
+                    logger.warn("configure() before provider creation; stored config only");
+                    return;
+                }
+
+                if (!java.util.Objects.equals(currentConfig.getLocationProvider(), mConfig.getLocationProvider())) {
                     boolean shouldStart = mProvider.isStarted();
                     mProvider.onDestroy();
                     LocationProviderFactory spf = new LocationProviderFactory(LocationServiceImpl.this);
@@ -1111,6 +1244,18 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                     if (!prevHb.equals(newHb)) {
                         scheduleHeartbeat(); // cancels and reschedules with the new interval (or stops if 0)
                     }
+                    // v5.0 — A6: enableWatchdog was only honoured by start(), so toggling it at
+                    // runtime did nothing until a service restart (on) and left the old runnable
+                    // posted forever (off). Same call shape as start().
+                    // v5.0 — F4: never cancel the runnable here. Turning enableWatchdog off at
+                    // runtime must not stop the drivingEvents tick; the watchdog branch inside the
+                    // runnable is already gated on the flag. Only re-arm the staleness baseline so
+                    // enabling it does not fire an immediate restart.
+                    if (Boolean.TRUE.equals(mConfig.getEnableWatchdog())) {
+                        mLastLocationTime = System.currentTimeMillis();
+                    }
+                    mMainHandler.removeCallbacks(mWatchdogRunnable);
+                    mMainHandler.postDelayed(mWatchdogRunnable, WATCHDOG_INTERVAL_MS);
                     // Driver-insights detector: rebuild if the config dict changed.
                     Config.DrivingEventsOptions prevDe = currentConfig.getDrivingEvents();
                     Config.DrivingEventsOptions newDe = mConfig.getDrivingEvents();
@@ -1139,7 +1284,7 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
                     }
                 }
             }
-        });
+        }
     }
 
     /** Shallow value equality for DrivingEventsOptions; avoids needless detector rebuilds. */
@@ -1297,6 +1442,12 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     @Override
     public void onStationary(BackgroundLocation location) {
         logger.debug("New stationary {}", location.toString());
+
+        // A stationary fix is still proof the provider is alive. Without this, DISTANCE_FILTER
+        // parked at a depot delivers only onStationary(), mLastLocationTime goes stale, and the
+        // watchdog tore down and recreated the provider every 60s all night — burning battery
+        // precisely when the vehicle was not moving.
+        mLastLocationTime = System.currentTimeMillis();
 
         location = transformLocation(location);
         if (location == null) {

@@ -32,13 +32,13 @@ public class SQLiteLocationDAOTest {
 
     @Before
     public void deleteDatabase() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         ctx.deleteDatabase(SQLiteOpenHelper.SQLITE_DATABASE_NAME);
     }
 
     @Test
     public void persistLocation() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -75,7 +75,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void persistLocationIsMock() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -97,7 +97,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void deleteLocationById() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -117,7 +117,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void deleteAllLocations() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -138,7 +138,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void getAllLocations() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -178,7 +178,7 @@ public class SQLiteLocationDAOTest {
     @Test
     public void persistLocationWithRowLimit() {
         int maxRows = 100;
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -193,7 +193,7 @@ public class SQLiteLocationDAOTest {
     @Test
     public void persistLocationWithRowLimitWhenMaxRowsReduced() {
         int maxRowsRun[] = {100, 10};
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -212,7 +212,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void persistLocationWithBatchId() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -225,7 +225,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void getLocationsForSyncCount() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -253,7 +253,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void getLocationById() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -280,7 +280,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void getFirstPendingLocation() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -310,7 +310,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void getNextPendingLocation() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -340,7 +340,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void getPendingLocationsCount() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -369,7 +369,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void deleteFirstPendingLocation() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -399,7 +399,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void deletePendingLocations() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 
@@ -430,7 +430,7 @@ public class SQLiteLocationDAOTest {
 
     @Test
     public void persistLocationForSync() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 

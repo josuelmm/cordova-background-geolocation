@@ -97,6 +97,12 @@ enum {
     instance.altitude = [NSNumber numberWithDouble:location.altitude];
     instance.latitude = [NSNumber numberWithDouble:location.coordinate.latitude];
     instance.longitude = [NSNumber numberWithDouble:location.coordinate.longitude];
+    // v4.5.6 — D6: iOS only ever produces CoreLocation fixes, so the textual provider is
+    // always "gps". Without this the default post template resolved @provider to null and
+    // the JS `providerChange` event (which keys off loc.provider) never fired on iOS.
+    // `locationProvider` (the numeric DISTANCE_FILTER/ACTIVITY/RAW id) is stamped by each
+    // provider right after building the instance.
+    instance.provider = @"gps";
 
     if (@available(iOS 15.0, *)) {
         if (location.sourceInformation != nil && location.sourceInformation.isSimulatedBySoftware) {
@@ -354,7 +360,9 @@ enum {
 
 - (BOOL) hasAccuracy
 {
-    if (accuracy == nil || accuracy < 0) return NO;
+    // v4.5.5 — `accuracy` is an NSNumber*; the old `accuracy < 0` compared the POINTER,
+    // which is never negative, so a negative (invalid) accuracy was reported as valid.
+    if (accuracy == nil || [accuracy doubleValue] < 0) return NO;
     return YES;
 }
 

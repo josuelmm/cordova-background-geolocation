@@ -1,3 +1,5 @@
+// `:CordovaLib` used to be included here as a source project, but the directory is an
+// empty stub in this repository, which made the whole Gradle build unresolvable.
+// `:CDVBackgroundGeolocation` now consumes the Cordova framework from Maven Central instead.
 include ':common'
 include ':CDVBackgroundGeolocation'
-include ':CordovaLib'

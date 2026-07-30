@@ -53,7 +53,7 @@ public class LocationServiceTest {
         LocationServiceImpl.setLocationProviderFactory(mLocationProviderFactory);
 
         try {
-            Context context = InstrumentationRegistry.getTargetContext();
+            Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
             // Create the mService Intent.
             Intent serviceIntent = new Intent(context, LocationServiceImpl.class);
             // Bind the mService and grab a reference to the binder.
@@ -76,7 +76,7 @@ public class LocationServiceTest {
 
     @Test(timeout = 5000)
     public void testWithStartedService() throws TimeoutException, InterruptedException {
-        final Context context = InstrumentationRegistry.getTargetContext();
+        final Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         final CountDownLatch latch = new CountDownLatch(1);
 
         BroadcastReceiver serviceBroadcastReceiver = new BroadcastReceiver() {
@@ -143,7 +143,7 @@ public class LocationServiceTest {
             }
         };
 
-        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(InstrumentationRegistry.getTargetContext());
+        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(InstrumentationRegistry.getInstrumentation().getTargetContext());
         lbm.registerReceiver(serviceBroadcastReceiver, new IntentFilter(LocationServiceImpl.ACTION_BROADCAST));
 
         mService.start();
@@ -179,7 +179,7 @@ public class LocationServiceTest {
             }
         };
 
-        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(InstrumentationRegistry.getTargetContext());
+        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(InstrumentationRegistry.getInstrumentation().getTargetContext());
         lbm.registerReceiver(serviceBroadcastReceiver, new IntentFilter(LocationServiceImpl.ACTION_BROADCAST));
 
         Config config = Config.getDefault();
@@ -227,7 +227,7 @@ public class LocationServiceTest {
             }
         };
 
-        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(InstrumentationRegistry.getTargetContext());
+        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(InstrumentationRegistry.getInstrumentation().getTargetContext());
         lbm.registerReceiver(serviceBroadcastReceiver, new IntentFilter(LocationServiceImpl.ACTION_BROADCAST));
 
         LocationServiceImpl.setLocationTransform(new LocationTransform() {

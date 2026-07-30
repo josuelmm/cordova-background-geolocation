@@ -33,12 +33,13 @@ var unsubscribeAll = function (channels) {
 }
 
 var execWithPromise = function (suceess, failure, method, data) {
-  if (!suceess && !failure) {
-    return new Promise(function (resolve, reject) {
-      exec(resolve, reject, 'BackgroundGeolocation', method, data);    
-    });
+  var p = new Promise(function (resolve, reject) {
+    exec(resolve, reject, 'BackgroundGeolocation', method, data || []);
+  });
+  if (suceess || failure) {
+    p.then(suceess || function () {}, failure || function () {});
   }
-  exec(suceess || function() {}, failure || function() {}, 'BackgroundGeolocation', method, data || []);
+  return p;
 }
 
 var BackgroundGeolocation = {
@@ -320,7 +321,23 @@ var BackgroundGeolocation = {
   on: function (event, callbackFn) {
     assert(this.events.indexOf(event) > -1, [TAG, '#on unknown event "' + event + '"']);
     if (!callbackFn) {
-      return radio(event);
+      // NOTE: do not return radio(event) directly. radio.$ is a singleton whose
+      // channelName mutates on every radio(x) call and on every broadcast, so a
+      // later unsubscribe(cb) would operate on whatever channel was selected last
+      // and the listener would never be removed (listener leak).
+      return {
+        subscribe: function (cb) {
+          radio(event).subscribe(cb);
+          return {
+            unsubscribe: function () {
+              radio(event).unsubscribe(cb);
+            }
+          };
+        },
+        unsubscribe: function (cb) {
+          radio(event).unsubscribe(cb);
+        }
+      };
     }
     radio(event).subscribe(callbackFn);
     return {
@@ -342,6 +359,96 @@ var BackgroundGeolocation = {
     unsubscribeAll([event]);
   }
 };
+
+// ---------------------------------------------------------------------------
+// Runtime values for the enums declared in BackgroundGeolocation.d.ts.
+//
+// `export enum X` in a .d.ts is a TYPE-ONLY declaration: it emits no JavaScript.
+// TypeScript still compiles a member read into a property access on this module
+// (`BackgroundGeolocation_1.X.member`), so without the objects below every such
+// read is `undefined` at runtime.
+//
+// Values reuse the constants declared above wherever an equivalent one already
+// exists, so the two can never drift. The objects are frozen, and numeric
+// members also carry the reverse mapping a real TypeScript enum has
+// (e.g. BackgroundGeolocationAccuracy[0] === 'HIGH').
+// ---------------------------------------------------------------------------
+
+var defineEnum = function (name, members) {
+  var e = {};
+  Object.keys(members).forEach(function (key) {
+    var value = members[key];
+    e[key] = value;
+    if (typeof value === 'number') {
+      e[value] = key; // TS numeric enums are bidirectional
+    }
+  });
+  BackgroundGeolocation[name] = Object.freeze(e);
+};
+
+// Member name === member value for every event, so derive it from `events`.
+defineEnum('BackgroundGeolocationEvents', BackgroundGeolocation.events.reduce(function (acc, event) {
+  acc[event] = event;
+  return acc;
+}, {}));
+
+defineEnum('BackgroundGeolocationLocationCode', {
+  PERMISSION_DENIED: BackgroundGeolocation.PERMISSION_DENIED,
+  LOCATION_UNAVAILABLE: BackgroundGeolocation.LOCATION_UNAVAILABLE,
+  TIMEOUT: BackgroundGeolocation.TIMEOUT
+});
+
+defineEnum('BackgroundGeolocationNativeProvider', {
+  gps: 'gps',
+  network: 'network',
+  passive: 'passive',
+  fused: 'fused'
+});
+
+defineEnum('BackgroundGeolocationLocationProvider', {
+  DISTANCE_FILTER_PROVIDER: BackgroundGeolocation.DISTANCE_FILTER_PROVIDER,
+  ACTIVITY_PROVIDER: BackgroundGeolocation.ACTIVITY_PROVIDER,
+  RAW_PROVIDER: BackgroundGeolocation.RAW_PROVIDER
+});
+
+defineEnum('BackgroundGeolocationAuthorizationStatus', {
+  NOT_AUTHORIZED: BackgroundGeolocation.NOT_AUTHORIZED,
+  AUTHORIZED: BackgroundGeolocation.AUTHORIZED,
+  AUTHORIZED_FOREGROUND: BackgroundGeolocation.AUTHORIZED_FOREGROUND
+});
+
+defineEnum('BackgroundGeolocationLogLevel', {
+  TRACE: BackgroundGeolocation.LOG_TRACE,
+  DEBUG: BackgroundGeolocation.LOG_DEBUG,
+  INFO: BackgroundGeolocation.LOG_INFO,
+  WARN: BackgroundGeolocation.LOG_WARN,
+  ERROR: BackgroundGeolocation.LOG_ERROR
+});
+
+defineEnum('BackgroundGeolocationProvider', {
+  ANDROID_DISTANCE_FILTER_PROVIDER: BackgroundGeolocation.DISTANCE_FILTER_PROVIDER,
+  ANDROID_ACTIVITY_PROVIDER: BackgroundGeolocation.ACTIVITY_PROVIDER,
+  RAW_PROVIDER: BackgroundGeolocation.RAW_PROVIDER
+});
+
+defineEnum('BackgroundGeolocationAccuracy', {
+  HIGH: BackgroundGeolocation.HIGH_ACCURACY,
+  MEDIUM: BackgroundGeolocation.MEDIUM_ACCURACY,
+  LOW: BackgroundGeolocation.LOW_ACCURACY,
+  PASSIVE: BackgroundGeolocation.PASSIVE_ACCURACY
+});
+
+defineEnum('BackgroundGeolocationMode', {
+  BACKGROUND: BackgroundGeolocation.BACKGROUND_MODE,
+  FOREGROUND: BackgroundGeolocation.FOREGROUND_MODE
+});
+
+defineEnum('BackgroundGeolocationIOSActivity', {
+  AutomotiveNavigation: 'AutomotiveNavigation',
+  OtherNavigation: 'OtherNavigation',
+  Fitness: 'Fitness',
+  Other: 'Other'
+});
 
 channel.deviceready.subscribe(function () {
   // register app global listeners

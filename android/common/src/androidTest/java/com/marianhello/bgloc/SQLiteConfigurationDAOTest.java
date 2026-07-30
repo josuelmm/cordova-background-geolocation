@@ -32,14 +32,14 @@ import java.util.HashMap;
 public class SQLiteConfigurationDAOTest {
     @Before
     public void deleteDatabase() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteOpenHelper.getHelper(ctx).close();
         ctx.deleteDatabase(SQLiteOpenHelper.SQLITE_DATABASE_NAME);
     }
 
     @Test
     public void persistConfiguration() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteConfigurationDAO dao = new SQLiteConfigurationDAO(db);
 
@@ -103,7 +103,7 @@ public class SQLiteConfigurationDAOTest {
 
     @Test
     public void persistConfigurationWithArrayListTemplate() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteConfigurationDAO dao = new SQLiteConfigurationDAO(db);
 
@@ -134,7 +134,7 @@ public class SQLiteConfigurationDAOTest {
 
     @Test
     public void persistConfigurationWithHashMapTemplate() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteConfigurationDAO dao = new SQLiteConfigurationDAO(db);
 
@@ -165,7 +165,7 @@ public class SQLiteConfigurationDAOTest {
 
     @Test
     public void persistConfigurationWithComplexTemplate() throws JSONException {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         SQLiteConfigurationDAO dao = new SQLiteConfigurationDAO(db);
 

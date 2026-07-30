@@ -93,6 +93,11 @@ typedef NS_ENUM(NSUInteger, MAURMotionType) {
     currentConfig = config;
 
     locationManager.pausesLocationUpdatesAutomatically = [config pauseLocationUpdates];
+    // v4.5.6 — D20: showsBackgroundLocationIndicator used to be applied only by the
+    // DISTANCE_FILTER provider, so the setting was silently ignored under ACTIVITY.
+    if ([config hasShowsBackgroundLocationIndicator]) {
+        [locationManager setShowsBackgroundLocationIndicator:[config showsBackgroundLocationIndicator]];
+    }
     locationManager.activityType = [config decodeActivityType];
     locationManager.distanceFilter = config.distanceFilter.integerValue; // meters
     locationManager.desiredAccuracy = [config decodeDesiredAccuracy];
@@ -297,12 +302,17 @@ typedef NS_ENUM(NSUInteger, MAURMotionType) {
     // which produced phantom "moving" rows during a STILL window.
     if (lastMotionType == MAURMotionTypeNotMoving) {
         [self stopTracking];
-        [self.delegate onStationaryChanged:[MAURLocation fromCLLocation:[locations lastObject]]];
+        // v4.5.6 — D6: stamp the numeric provider id (ACTIVITY_PROVIDER == 1).
+        MAURLocation *stationaryLoc = [MAURLocation fromCLLocation:[locations lastObject]];
+        stationaryLoc.locationProvider = [NSNumber numberWithInt:ACTIVITY_PROVIDER];
+        [self.delegate onStationaryChanged:stationaryLoc];
         return;
     }
 
     for (CLLocation *location in locations) {
         MAURLocation *bgloc = [MAURLocation fromCLLocation:location];
+        // v4.5.6 — D6: stamp the numeric provider id (ACTIVITY_PROVIDER == 1).
+        bgloc.locationProvider = [NSNumber numberWithInt:ACTIVITY_PROVIDER];
         [self.delegate onLocationChanged:bgloc];
     }
 }
@@ -312,12 +322,15 @@ typedef NS_ENUM(NSUInteger, MAURMotionType) {
     [self.delegate onError:error];
 }
 
-- (void) onPause:(CLLocationManager*)manager
+// v4.5.5 — renamed from onPause:/onResume: to match the MAURLocationManagerDelegate protocol.
+// MAURLocationManager guards these calls with respondsToSelector:@selector(onLocationPause:),
+// so under the old names pause/resume events were never delivered.
+- (void) onLocationPause:(CLLocationManager*)manager
 {
     [self.delegate onLocationPause];
 }
 
-- (void) onResume:(CLLocationManager*)manager
+- (void) onLocationResume:(CLLocationManager*)manager
 {
     [self.delegate onLocationResume];
 }

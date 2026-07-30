@@ -10,6 +10,7 @@ import org.json.JSONTokener;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 
 /**
  * Created by finch on 9.12.2017.
@@ -48,7 +49,8 @@ public class LocationTemplateFactory {
     }
 
     public static LocationTemplate getDefault() {
-        HashMap attrs = new HashMap<String, String>();
+        // LinkedHashMap so the default payload always serializes its keys in this order.
+        HashMap attrs = new LinkedHashMap<String, String>();
         attrs.put("provider", "@provider");
         attrs.put("locationProvider", "@locationProvider");
         attrs.put("time", "@time");
@@ -66,6 +68,12 @@ public class LocationTemplateFactory {
         attrs.put("events", "@events");
         attrs.put("battery", "@battery");
         attrs.put("isCharging", "@isCharging");
+        // v5.0 — C5/D24 parity: iOS already ships `mocked` in its default template
+        // (MAURConfig.getDefaultTemplate), so a backend filtering on `mocked === true` saw the
+        // field from iOS clients and never from Android ones. `@mocked` resolves in
+        // BackgroundLocation.getValueForKey; with mockLocationPolicy != 'flag' it is null and the
+        // form-urlencoded/JSON serializers drop it, so nothing changes for those setups.
+        attrs.put("mocked", "@mocked");
         return new HashMapLocationTemplate(attrs);
     }
 }

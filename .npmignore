@@ -17,6 +17,8 @@
 !/plugin.xml
 !/package.json
 !/www
+# Regression tests are dev-only; keep them out of the published tarball.
+/www/__tests__
 !/angular
 # Only ship ng-packagr output for ./angular, not old tsc .js/.d.ts
 /angular/*.js

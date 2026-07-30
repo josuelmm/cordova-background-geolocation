@@ -44,13 +44,38 @@ public class ConfigMapperTest {
         Assert.assertEquals(config.getInterval().intValue(), jConfig.getInt("interval"));
         Assert.assertEquals(config.getFastestInterval().intValue(), jConfig.getInt("fastestInterval"));
         Assert.assertEquals(config.getActivitiesInterval().intValue(), jConfig.getInt("activitiesInterval"));
-        Assert.assertEquals(config.getNotificationIconColor(), jConfig.getString("notificationIconColor"));
-        Assert.assertEquals(config.getLargeNotificationIcon(), jConfig.getString("notificationIconLarge"));
-        Assert.assertEquals(config.getSmallNotificationIcon(), jConfig.getString("notificationIconSmall"));
+        // Default is "" (cleared), which ConfigMapper now serializes as JSON null for
+        // every empty value, not just the NullString sentinel instance. Identity
+        // comparison could not tell them apart and broke after any Parcel/SQLite
+        // round-trip, so "" and the sentinel are deliberately equivalent now.
+        Assert.assertTrue(Config.isNullString(config.getNotificationIconColor()));
+        Assert.assertTrue(jConfig.isNull("notificationIconColor"));
+        // Default is "" (cleared), which ConfigMapper now serializes as JSON null for
+        // every empty value, not just the NullString sentinel instance. Identity
+        // comparison could not tell them apart and broke after any Parcel/SQLite
+        // round-trip, so "" and the sentinel are deliberately equivalent now.
+        Assert.assertTrue(Config.isNullString(config.getLargeNotificationIcon()));
+        Assert.assertTrue(jConfig.isNull("notificationIconLarge"));
+        // Default is "" (cleared), which ConfigMapper now serializes as JSON null for
+        // every empty value, not just the NullString sentinel instance. Identity
+        // comparison could not tell them apart and broke after any Parcel/SQLite
+        // round-trip, so "" and the sentinel are deliberately equivalent now.
+        Assert.assertTrue(Config.isNullString(config.getSmallNotificationIcon()));
+        Assert.assertTrue(jConfig.isNull("notificationIconSmall"));
         Assert.assertEquals(config.getStartForeground().booleanValue(), jConfig.getBoolean("startForeground"));
         Assert.assertEquals(config.getStopOnStillActivity().booleanValue(), jConfig.getBoolean("stopOnStillActivity"));
-        Assert.assertEquals(config.getUrl(), jConfig.getString("url"));
-        Assert.assertEquals(config.getSyncUrl(), jConfig.getString("syncUrl"));
+        // Default is "" (cleared), which ConfigMapper now serializes as JSON null for
+        // every empty value, not just the NullString sentinel instance. Identity
+        // comparison could not tell them apart and broke after any Parcel/SQLite
+        // round-trip, so "" and the sentinel are deliberately equivalent now.
+        Assert.assertTrue(Config.isNullString(config.getUrl()));
+        Assert.assertTrue(jConfig.isNull("url"));
+        // Default is "" (cleared), which ConfigMapper now serializes as JSON null for
+        // every empty value, not just the NullString sentinel instance. Identity
+        // comparison could not tell them apart and broke after any Parcel/SQLite
+        // round-trip, so "" and the sentinel are deliberately equivalent now.
+        Assert.assertTrue(Config.isNullString(config.getSyncUrl()));
+        Assert.assertTrue(jConfig.isNull("syncUrl"));
         Assert.assertEquals(config.getSyncThreshold().intValue(), jConfig.getInt("syncThreshold"));
         Assert.assertEquals(Boolean.TRUE.equals(config.getSyncEnabled()), jConfig.getBoolean("sync"));
         Assert.assertEquals(new JSONObject(config.getHttpHeaders()).toString(), jConfig.getJSONObject("httpHeaders").toString());

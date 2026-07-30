@@ -6,6 +6,13 @@
 export type Event = 'location' | 'stationary' | 'activity' | 'start' | 'stop' | 'error' | 'authorization' | 'foreground' | 'background' | 'abort_requested' | 'http_authorization' | 'heartbeat' | 'syncStart' | 'syncProgress' | 'syncSuccess' | 'syncError' | 'tripStart' | 'tripEnd' | 'moving' | 'stopped' | 'speeding' | 'providerChange' | 'sos' | 'hardBrake' | 'rapidAcceleration' | 'sharpTurn' | 'possibleCrash' | 'phoneUsageWhileDriving';
 
 /** Event names enum (compatibility with @awesome-cordova-plugins style). Use e.g. BackgroundGeolocation.on(BackgroundGeolocationEvents.location, cb). */
+/**
+ * Runtime-backed. BackgroundGeolocation.js defines a frozen object with exactly these
+ * members, so reading one (e.g. `BackgroundGeolocationEvents.location`) resolves at runtime:
+ * TypeScript compiles the read into a property access on the module object. (Native Node
+ * ESM cannot see named exports of this CommonJS module; under a bundler it works.)
+ * The same value is also exported from `@josuelmm/cordova-background-geolocation/angular`.
+ */
 export enum BackgroundGeolocationEvents {
   http_authorization = 'http_authorization',
   abort_requested = 'abort_requested',
@@ -48,7 +55,17 @@ type ActivityType = 'IN_VEHICLE' | 'ON_BICYCLE' | 'ON_FOOT' | 'RUNNING' | 'STILL
 type LogLevel = 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 type LocationProvider = 0 | 1 | 2;
 type AuthorizationStatus = 0 | 1 | 2;
-type AccuracyLevel = 0 | 100 | 1000 | 10000 | number;
+/**
+ * Desired accuracy in meters.
+ *
+ * The four named values (HIGH/MEDIUM/LOW/PASSIVE) are the documented presets and are what
+ * autocomplete suggests, but the native layer forwards this straight through as a plain meter
+ * value, so any non-negative number is valid — e.g. `desiredAccuracy: 10`.
+ *
+ * `(number & {})` keeps the literal suggestions in editors while still accepting any number.
+ * A plain `0 | 100 | 1000 | 10000` union would reject working configurations.
+ */
+type AccuracyLevel = 0 | 100 | 1000 | 10000 | (number & {});
 type LocationErrorCode = 1 | 2 | 3;
 type ServiceMode = 0 | 1;
 
@@ -211,7 +228,11 @@ export interface ConfigureOptions {
    * Platform: Android
    * Provider: all
    *
-   * @default false
+   * @default true — this doc previously said `false`, but `Config.getDefault()` has always set
+   * `true`, which is also the only workable default: on Android 8+ a background service without a
+   * foreground notification is killed within minutes. Omitting this option therefore yields a
+   * persistent notification (and, on Android 13+, a POST_NOTIFICATIONS prompt). Set it explicitly
+   * to `false` only if you accept that tracking stops when the app leaves the foreground.
    */
   startForeground?: boolean;
 
@@ -617,11 +638,54 @@ export interface ConfigureOptions {
     hardBrakeMps2?: number;
     /** Acceleration threshold (m/s²) for `rapidAcceleration` during a trip. Default 3.5. */
     rapidAccelMps2?: number;
-    /** Bearing change rate (deg/s) for `sharpTurn`. Requires speed ≥ 5 m/s. Default 30. */
+    /**
+     * Bearing change rate (deg/s) for `sharpTurn`. Default 30. `0` disables.
+     *
+     * Hard-coded gates on top of this threshold (Android `DrivingEventsDetector`):
+     * - the fix must carry a **bearing** and the previous bearing anchor must be at most
+     *   5000 ms old (`MAX_DELTA_MS`) and at least 500 ms old (`MIN_DELTA_MS`); a fix without
+     *   bearing invalidates the anchor;
+     * - the fix must carry a **speed of at least 5 m/s (~18 km/h)** — a non-configurable floor
+     *   that suppresses GPS bearing jitter while stopped or crawling;
+     * - a fixed **4000 ms cooldown** (`DRIVING_EVENT_COOLDOWN_MS`, not configurable) between
+     *   consecutive `sharpTurn` emissions, so one long curve fires once, not on every fix.
+     *
+     * Unlike the other v4.1 events, `sharpTurn` does **not** require an active trip.
+     */
     sharpTurnDegPerSec?: number;
-    /** Velocity drop in km/h within `crashWindowMs` while tripActive — triggers `possibleCrash`. Default 25. */
+    /**
+     * Velocity-drop threshold in km/h that triggers the GPS heuristic for `possibleCrash`
+     * (`source: 'gps'`). Default 25. `0` disables the GPS heuristic.
+     *
+     * The event is far more constrained than "a drop of this many km/h". ALL of the following
+     * must hold (Android `DrivingEventsDetector`; iOS mirrors it):
+     * 1. `drivingEvents.enabled === true` **and a trip is active** (`tripStart` already fired,
+     *    `tripEnd` not yet) — a crash while merely "moving" is never reported;
+     * 2. the fix carries a speed, and a previous speed sample exists;
+     * 3. `crashImpactKmh > 0 && crashWindowMs > 0`;
+     * 4. a `peak` speed exists in the sliding window: the highest speed recorded no more than
+     *    `crashWindowMs` ago and at least `min(500 ms, crashWindowMs)` ago (the minimum age
+     *    stops batched fixes sharing a timestamp from reading as an instant velocity collapse);
+     * 5. `(peak - currentSpeed) * 3.6 >= crashImpactKmh` — the actual drop;
+     * 6. **`currentSpeed < 1.5 m/s` (~5.4 km/h)** — the vehicle must have ended near a stop.
+     *    Non-configurable. A big deceleration that ends at, say, 40 km/h does NOT fire;
+     * 7. **`peak * 3.6 >= crashImpactKmh`** — the pre-impact speed must itself exceed the
+     *    threshold, so a drop from a low speed cannot qualify;
+     * 8. a fixed **4000 ms cooldown** (`DRIVING_EVENT_COOLDOWN_MS`) since the last
+     *    `possibleCrash`. Not configurable — `sensorCrashCooldownMs` applies only to the
+     *    separate sensor-fusion pipeline, not to this GPS heuristic.
+     *
+     * `value` in the event payload is the measured drop in km/h.
+     */
     crashImpactKmh?: number;
-    /** Window in ms used to evaluate the crash impact. Default 2000. */
+    /**
+     * Width in ms of the sliding window used to find the pre-impact peak speed. Default 2000.
+     * `0` disables the GPS crash heuristic. The window keeps up to 32 speed samples; samples
+     * younger than `min(500 ms, crashWindowMs)` are ignored as the peak candidate (see
+     * `crashImpactKmh`). Note that with fleet-style update intervals (10-60 s) a 2000 ms window
+     * will rarely contain a usable peak, so `possibleCrash` is effectively silent unless the
+     * location update rate is high — widen this value for low-frequency configurations.
+     */
     crashWindowMs?: number;
 
     // v4.2 — Real sensor fusion (accelerometer + gyroscope).
@@ -950,7 +1014,7 @@ export interface BackgroundGeolocationPlugin {
    */
   getCurrentLocation(
     success?: (location: Location) => void,
-    fail?: (error: LocationError) => void | null,
+    fail?: ((error: LocationError) => void) | null,
     options?: LocationOptions
   ): Promise<Location>;
 
@@ -1325,16 +1389,31 @@ export interface BackgroundGeolocationPlugin {
    *
    * Platform: Android, iOS
    *
-   * @param limit Limits number of returned entries.
-   * @param fromId Return entries after <code>fromId</code>. Useful if you plan to implement infinite log scrolling
-   * @param minLevel Available levels: ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]
+   * NOTE — the arguments are strictly **positional** (see `www/BackgroundGeolocation.js`,
+   * `getLogEntries: function(limit, offset = 0, minLevel = "DEBUG", success, failure)`).
+   * The JS defaults for `offset` (`0`) and `minLevel` (`"DEBUG"`) can therefore only ever
+   * apply in the promise form, e.g. `await getLogEntries(100)`. As soon as you want to pass
+   * callbacks you must also pass `offset` and `minLevel` explicitly — omitting them would
+   * shift the callbacks into their slots:
+   *
+   *     await BackgroundGeolocation.getLogEntries(100);                        // ok, defaults apply
+   *     await BackgroundGeolocation.getLogEntries(100, 0, 'INFO');             // ok
+   *     BackgroundGeolocation.getLogEntries(100, 0, 'DEBUG', onOk, onErr);     // ok
+   *     BackgroundGeolocation.getLogEntries(100, onOk);                        // WRONG: onOk lands in `offset`
+   *
+   * @param limit Limits number of returned entries. Required — it has no default.
+   * @param offset Optional, defaults to `0` in the promise form only. Number of entries to skip;
+   *   useful to implement infinite log scrolling. Android treats it as an offset,
+   *   iOS as "return entries after this log-entry id".
+   * @param minLevel Optional, defaults to `"DEBUG"` in the promise form only.
+   *   Available levels: ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]
    * @param success
    * @param fail
    */
   getLogEntries(
     limit: number,
-    fromId: number,
-    minLevel: LogLevel,
+    offset?: number,
+    minLevel?: LogLevel,
     success?: (entries: LogEntry[]) => void,
     fail?: (error: BackgroundGeolocationError) => void
   ): Promise<LogEntry[]>;
@@ -1417,7 +1496,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'location',
-    callback?: (location: Location) => void
+    callback: (location: Location) => void
+  ): EventSubscription;
+  on(
+    eventName: 'location'
   ): Subscribable<Location>;
 
   /**
@@ -1428,7 +1510,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'stationary',
-    callback?: (location: StationaryLocation) => void
+    callback: (location: StationaryLocation) => void
+  ): EventSubscription;
+  on(
+    eventName: 'stationary'
   ): Subscribable<StationaryLocation>;
 
   /**
@@ -1439,7 +1524,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'activity',
-    callback?: (activity: Activity) => void
+    callback: (activity: Activity) => void
+  ): EventSubscription;
+  on(
+    eventName: 'activity'
   ): Subscribable<Activity>;
 
   /**
@@ -1452,7 +1540,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'start',
-    callback?: () => void
+    callback: () => void
+  ): EventSubscription;
+  on(
+    eventName: 'start'
   ): Subscribable<void>;
 
   /**
@@ -1465,7 +1556,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'stop',
-    callback?: () => void
+    callback: () => void
+  ): EventSubscription;
+  on(
+    eventName: 'stop'
   ): Subscribable<void>;
 
   /**
@@ -1476,7 +1570,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'error',
-    callback?: (error: BackgroundGeolocationError) => void
+    callback: (error: BackgroundGeolocationError) => void
+  ): EventSubscription;
+  on(
+    eventName: 'error'
   ): Subscribable<BackgroundGeolocationError>;
 
   /**
@@ -1490,7 +1587,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'authorization',
-    callback?: (status: AuthorizationStatus) => void
+    callback: (status: AuthorizationStatus) => void
+  ): EventSubscription;
+  on(
+    eventName: 'authorization'
   ): Subscribable<AuthorizationStatus>;
 
   /**
@@ -1503,7 +1603,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'foreground',
-    callback?: () => void
+    callback: () => void
+  ): EventSubscription;
+  on(
+    eventName: 'foreground'
   ): Subscribable<void>;
 
   /**
@@ -1516,7 +1619,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'background',
-    callback?: () => void
+    callback: () => void
+  ): EventSubscription;
+  on(
+    eventName: 'background'
   ): Subscribable<void>;
 
   /**
@@ -1529,7 +1635,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'abort_requested',
-    callback?: () => void
+    callback: () => void
+  ): EventSubscription;
+  on(
+    eventName: 'abort_requested'
   ): Subscribable<void>;
 
   /**
@@ -1542,7 +1651,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'http_authorization',
-    callback?: () => void
+    callback: () => void
+  ): EventSubscription;
+  on(
+    eventName: 'http_authorization'
   ): Subscribable<void>;
 
   /**
@@ -1556,7 +1668,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'heartbeat',
-    callback?: (location?: Location) => void
+    callback: (location?: Location) => void
+  ): EventSubscription;
+  on(
+    eventName: 'heartbeat'
   ): Subscribable<Location | void>;
 
   /**
@@ -1568,7 +1683,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'syncStart',
-    callback?: () => void
+    callback: () => void
+  ): EventSubscription;
+  on(
+    eventName: 'syncStart'
   ): Subscribable<void>;
 
   /**
@@ -1580,7 +1698,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'syncProgress',
-    callback?: (progress: number) => void
+    callback: (progress: number) => void
+  ): EventSubscription;
+  on(
+    eventName: 'syncProgress'
   ): Subscribable<number>;
 
   /**
@@ -1592,7 +1713,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'syncSuccess',
-    callback?: (data: { sent: number }) => void
+    callback: (data: { sent: number }) => void
+  ): EventSubscription;
+  on(
+    eventName: 'syncSuccess'
   ): Subscribable<{ sent: number }>;
 
   /**
@@ -1604,7 +1728,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'syncError',
-    callback?: (data: { httpStatus: number; message: string }) => void
+    callback: (data: { httpStatus: number; message: string }) => void
+  ): EventSubscription;
+  on(
+    eventName: 'syncError'
   ): Subscribable<{ httpStatus: number; message: string }>;
 
   /**
@@ -1614,7 +1741,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'tripStart',
-    callback?: (location: Location) => void
+    callback: (location: Location) => void
+  ): EventSubscription;
+  on(
+    eventName: 'tripStart'
   ): Subscribable<Location>;
 
   /**
@@ -1624,7 +1754,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'tripEnd',
-    callback?: (data: { location: Location; distance: number; durationMs: number }) => void
+    callback: (data: { location: Location; distance: number; durationMs: number }) => void
+  ): EventSubscription;
+  on(
+    eventName: 'tripEnd'
   ): Subscribable<{ location: Location; distance: number; durationMs: number }>;
 
   /**
@@ -1633,7 +1766,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'moving',
-    callback?: (location: Location) => void
+    callback: (location: Location) => void
+  ): EventSubscription;
+  on(
+    eventName: 'moving'
   ): Subscribable<Location>;
 
   /**
@@ -1642,7 +1778,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'stopped',
-    callback?: (location: Location) => void
+    callback: (location: Location) => void
+  ): EventSubscription;
+  on(
+    eventName: 'stopped'
   ): Subscribable<Location>;
 
   /**
@@ -1653,7 +1792,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'speeding',
-    callback?: (data: { location: Location; speedKmh: number; limitKmh: number }) => void
+    callback: (data: { location: Location; speedKmh: number; limitKmh: number }) => void
+  ): EventSubscription;
+  on(
+    eventName: 'speeding'
   ): Subscribable<{ location: Location; speedKmh: number; limitKmh: number }>;
 
   /**
@@ -1663,7 +1805,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'providerChange',
-    callback?: (data: { provider: string }) => void
+    callback: (data: { provider: string }) => void
+  ): EventSubscription;
+  on(
+    eventName: 'providerChange'
   ): Subscribable<{ provider: string }>;
 
   /**
@@ -1673,7 +1818,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'sos',
-    callback?: (data: { location?: Location; [key: string]: any }) => void
+    callback: (data: { location?: Location; [key: string]: any }) => void
+  ): EventSubscription;
+  on(
+    eventName: 'sos'
   ): Subscribable<{ location?: Location; [key: string]: any }>;
 
   /**
@@ -1683,7 +1831,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'hardBrake',
-    callback?: (data: { location: Location; value: number }) => void
+    callback: (data: { location: Location; value: number }) => void
+  ): EventSubscription;
+  on(
+    eventName: 'hardBrake'
   ): Subscribable<{ location: Location; value: number }>;
 
   /**
@@ -1692,17 +1843,26 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'rapidAcceleration',
-    callback?: (data: { location: Location; value: number }) => void
+    callback: (data: { location: Location; value: number }) => void
+  ): EventSubscription;
+  on(
+    eventName: 'rapidAcceleration'
   ): Subscribable<{ location: Location; value: number }>;
 
   /**
    * v4.1 — GPS-derived sharp turn. `value` is the bearing-change rate in deg/s.
-   * Only fires when speed ≥ 5 m/s to avoid GPS jitter at low speeds.
+   * Only fires when the fix reports speed ≥ 5 m/s (~18 km/h, non-configurable) to avoid GPS
+   * bearing jitter at low speeds, when consecutive bearing samples are 500-5000 ms apart, and
+   * at most once per fixed 4 s cooldown. Does not require an active trip.
+   * See `drivingEvents.sharpTurnDegPerSec` for the full condition list.
    * @since 4.1.0
    */
   on(
     eventName: 'sharpTurn',
-    callback?: (data: { location: Location; value: number }) => void
+    callback: (data: { location: Location; value: number }) => void
+  ): EventSubscription;
+  on(
+    eventName: 'sharpTurn'
   ): Subscribable<{ location: Location; value: number }>;
 
   /**
@@ -1711,11 +1871,20 @@ export interface BackgroundGeolocationPlugin {
    * v4.2 adds the `source` field to distinguish the GPS heuristic from the accelerometer
    * pipeline (`drivingEvents.sensorFusion`). App should ALWAYS confirm with the user
    * before notifying contacts — false positives are possible.
+   *
+   * The `'gps'` source is NOT just "a velocity drop within `crashWindowMs`": it additionally
+   * requires an **active trip**, a final speed **below 1.5 m/s** (~5.4 km/h), a pre-impact peak
+   * speed that itself exceeds `crashImpactKmh`, and a fixed **4 s cooldown**
+   * (`sensorCrashCooldownMs` governs only the `'sensor'` source). See
+   * `drivingEvents.crashImpactKmh` for the complete list of conditions.
    * @since 4.1.0
    */
   on(
     eventName: 'possibleCrash',
-    callback?: (data: { location: Location; value: number; source: 'gps' | 'sensor' }) => void
+    callback: (data: { location: Location; value: number; source: 'gps' | 'sensor' }) => void
+  ): EventSubscription;
+  on(
+    eventName: 'possibleCrash'
   ): Subscribable<{ location: Location; value: number; source: 'gps' | 'sensor' }>;
 
   /**
@@ -1726,7 +1895,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: 'phoneUsageWhileDriving',
-    callback?: (location?: Location) => void
+    callback: (location?: Location) => void
+  ): EventSubscription;
+  on(
+    eventName: 'phoneUsageWhileDriving'
   ): Subscribable<Location | void>;
 
   /**
@@ -1734,7 +1906,10 @@ export interface BackgroundGeolocationPlugin {
    */
   on(
     eventName: BackgroundGeolocationEvents,
-    callback?: (data: Location | StationaryLocation | Activity | BackgroundGeolocationError | AuthorizationStatus | number | { sent: number } | { httpStatus: number; message: string } | void) => void
+    callback: (data: Location | StationaryLocation | Activity | BackgroundGeolocationError | AuthorizationStatus | number | { sent: number } | { httpStatus: number; message: string } | void) => void
+  ): EventSubscription;
+  on(
+    eventName: BackgroundGeolocationEvents
   ): Subscribable<Location | StationaryLocation | Activity | BackgroundGeolocationError | AuthorizationStatus | number | { sent: number } | { httpStatus: number; message: string } | void>;
 
 }
@@ -1769,6 +1944,13 @@ export interface BackgroundGeolocationErrorLike {
 }
 
 /** Location error codes (compatibility with @awesome-cordova-plugins style). */
+/**
+ * Runtime-backed. BackgroundGeolocation.js defines a frozen object with exactly these
+ * members, so reading one (e.g. `BackgroundGeolocationLocationCode.TIMEOUT`) resolves at runtime:
+ * TypeScript compiles the read into a property access on the module object. (Native Node
+ * ESM cannot see named exports of this CommonJS module; under a bundler it works.)
+ * The same value is also exported from `@josuelmm/cordova-background-geolocation/angular`.
+ */
 export enum BackgroundGeolocationLocationCode {
   PERMISSION_DENIED = 1,
   LOCATION_UNAVAILABLE = 2,
@@ -1776,6 +1958,13 @@ export enum BackgroundGeolocationLocationCode {
 }
 
 /** Native provider strings (compatibility with @awesome-cordova-plugins style). */
+/**
+ * Runtime-backed. BackgroundGeolocation.js defines a frozen object with exactly these
+ * members, so reading one (e.g. `BackgroundGeolocationNativeProvider.gps`) resolves at runtime:
+ * TypeScript compiles the read into a property access on the module object. (Native Node
+ * ESM cannot see named exports of this CommonJS module; under a bundler it works.)
+ * The same value is also exported from `@josuelmm/cordova-background-geolocation/angular`.
+ */
 export enum BackgroundGeolocationNativeProvider {
   gps = 'gps',
   network = 'network',
@@ -1784,6 +1973,13 @@ export enum BackgroundGeolocationNativeProvider {
 }
 
 /** Location provider IDs (compatibility with @awesome-cordova-plugins style). */
+/**
+ * Runtime-backed. BackgroundGeolocation.js defines a frozen object with exactly these
+ * members, so reading one (e.g. `BackgroundGeolocationLocationProvider.RAW_PROVIDER`) resolves at runtime:
+ * TypeScript compiles the read into a property access on the module object. (Native Node
+ * ESM cannot see named exports of this CommonJS module; under a bundler it works.)
+ * The same value is also exported from `@josuelmm/cordova-background-geolocation/angular`.
+ */
 export enum BackgroundGeolocationLocationProvider {
   DISTANCE_FILTER_PROVIDER = 0,
   ACTIVITY_PROVIDER = 1,
@@ -1791,6 +1987,13 @@ export enum BackgroundGeolocationLocationProvider {
 }
 
 /** Authorization status (compatibility with @awesome-cordova-plugins style). */
+/**
+ * Runtime-backed. BackgroundGeolocation.js defines a frozen object with exactly these
+ * members, so reading one (e.g. `BackgroundGeolocationAuthorizationStatus.AUTHORIZED`) resolves at runtime:
+ * TypeScript compiles the read into a property access on the module object. (Native Node
+ * ESM cannot see named exports of this CommonJS module; under a bundler it works.)
+ * The same value is also exported from `@josuelmm/cordova-background-geolocation/angular`.
+ */
 export enum BackgroundGeolocationAuthorizationStatus {
   NOT_AUTHORIZED = 0,
   AUTHORIZED = 1,
@@ -1798,6 +2001,13 @@ export enum BackgroundGeolocationAuthorizationStatus {
 }
 
 /** Log levels (compatibility with @awesome-cordova-plugins style). */
+/**
+ * Runtime-backed. BackgroundGeolocation.js defines a frozen object with exactly these
+ * members, so reading one (e.g. `BackgroundGeolocationLogLevel.INFO`) resolves at runtime:
+ * TypeScript compiles the read into a property access on the module object. (Native Node
+ * ESM cannot see named exports of this CommonJS module; under a bundler it works.)
+ * The same value is also exported from `@josuelmm/cordova-background-geolocation/angular`.
+ */
 export enum BackgroundGeolocationLogLevel {
   TRACE = 'TRACE',
   DEBUG = 'DEBUG',
@@ -1807,6 +2017,13 @@ export enum BackgroundGeolocationLogLevel {
 }
 
 /** Provider enum (compatibility with @awesome-cordova-plugins style). */
+/**
+ * Runtime-backed. BackgroundGeolocation.js defines a frozen object with exactly these
+ * members, so reading one (e.g. `BackgroundGeolocationProvider.RAW_PROVIDER`) resolves at runtime:
+ * TypeScript compiles the read into a property access on the module object. (Native Node
+ * ESM cannot see named exports of this CommonJS module; under a bundler it works.)
+ * The same value is also exported from `@josuelmm/cordova-background-geolocation/angular`.
+ */
 export enum BackgroundGeolocationProvider {
   ANDROID_DISTANCE_FILTER_PROVIDER = 0,
   ANDROID_ACTIVITY_PROVIDER = 1,
@@ -1814,6 +2031,13 @@ export enum BackgroundGeolocationProvider {
 }
 
 /** Desired accuracy in meters (compatibility with @awesome-cordova-plugins style). Values match this plugin. */
+/**
+ * Runtime-backed. BackgroundGeolocation.js defines a frozen object with exactly these
+ * members, so reading one (e.g. `BackgroundGeolocationAccuracy.HIGH`) resolves at runtime:
+ * TypeScript compiles the read into a property access on the module object. (Native Node
+ * ESM cannot see named exports of this CommonJS module; under a bundler it works.)
+ * The same value is also exported from `@josuelmm/cordova-background-geolocation/angular`.
+ */
 export enum BackgroundGeolocationAccuracy {
   HIGH = 0,
   MEDIUM = 100,
@@ -1822,12 +2046,26 @@ export enum BackgroundGeolocationAccuracy {
 }
 
 /** Mode for switchMode (compatibility with @awesome-cordova-plugins style). */
+/**
+ * Runtime-backed. BackgroundGeolocation.js defines a frozen object with exactly these
+ * members, so reading one (e.g. `BackgroundGeolocationMode.FOREGROUND`) resolves at runtime:
+ * TypeScript compiles the read into a property access on the module object. (Native Node
+ * ESM cannot see named exports of this CommonJS module; under a bundler it works.)
+ * The same value is also exported from `@josuelmm/cordova-background-geolocation/angular`.
+ */
 export enum BackgroundGeolocationMode {
   BACKGROUND = 0,
   FOREGROUND = 1,
 }
 
 /** iOS activity type (compatibility with @awesome-cordova-plugins style). */
+/**
+ * Runtime-backed. BackgroundGeolocation.js defines a frozen object with exactly these
+ * members, so reading one (e.g. `BackgroundGeolocationIOSActivity.Fitness`) resolves at runtime:
+ * TypeScript compiles the read into a property access on the module object. (Native Node
+ * ESM cannot see named exports of this CommonJS module; under a bundler it works.)
+ * The same value is also exported from `@josuelmm/cordova-background-geolocation/angular`.
+ */
 export enum BackgroundGeolocationIOSActivity {
   AutomotiveNavigation = 'AutomotiveNavigation',
   OtherNavigation = 'OtherNavigation',

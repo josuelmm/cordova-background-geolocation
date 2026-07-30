@@ -6,5 +6,9 @@ dependencies {
     implementation 'io.github.nishkarsh:android-permissions:2.1.8'
     // promises
     implementation 'com.github.jparkie:promise:1.0.3'
+    // Imported by LocationServiceImpl, BackgroundGeolocationFacade and SyncAdapter.
+    // Previously only reached the classpath transitively (via android-permissions/appcompat),
+    // so any bump of those could break the plugin build with a confusing error.
+    implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.1.0'
 }
 

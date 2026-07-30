@@ -17,8 +17,8 @@
        specific language governing permissions and limitations
        under the License.
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.marianhello.backgroundgeolocation" android:versionName="1.0" android:versionCode="1">
+<!-- NOTE: `package` moved to `namespace` in build.gradle (required by AGP 8+). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <service
             android:name="com.marianhello.bgloc.sync.SyncService"
@@ -55,7 +55,6 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
-        <uses-library android:name="org.apache.http.legacy" android:required="true" />
     </application>
 
     <uses-feature android:name="android.hardware.location" android:required="false" />

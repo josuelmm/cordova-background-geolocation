@@ -206,7 +206,78 @@ public class ConfigMapper {
             config.setMaxAcceptedAccuracy((float) jObject.getDouble("maxAcceptedAccuracy"));
         }
 
+        validate(config);
         return config;
+    }
+
+    /**
+     * Rejects values that the native layer cannot honour, at the JS→native boundary.
+     *
+     * <p>There was no validation at all before. An out-of-range value went straight through,
+     * got persisted to SQLite by configure(), and then threw deep inside the service — e.g.
+     * {@code locationProvider: 3} makes LocationProviderFactory raise
+     * "Provider not found" so tracking never starts, and because the bad value is now stored,
+     * the same crash repeats on every launch and on startOnBoot. Failing loudly here turns a
+     * permanent silent breakage into an immediate, actionable JS rejection.
+     */
+    private static void validate(Config config) throws JSONException {
+        requireOneOf("locationProvider", config.getLocationProvider(), 0, 1, 2);
+        requireNonNegative("interval", config.getInterval());
+        requireNonNegative("fastestInterval", config.getFastestInterval());
+        requireNonNegative("activitiesInterval", config.getActivitiesInterval());
+        requireNonNegative("heartbeatInterval", config.getHeartbeatInterval());
+        requireNonNegative("distanceFilter", config.getDistanceFilter());
+        requireAtLeast("syncThreshold", config.getSyncThreshold(), 1);
+        requireAtLeast("maxLocations", config.getMaxLocations(), 1);
+        requireRange("activityConfidenceThreshold", config.getActivityConfidenceThreshold(), 0, 100);
+
+        if (config.getStationaryRadius() != null && config.getStationaryRadius() < 0) {
+            throw new JSONException("stationaryRadius must be >= 0, got " + config.getStationaryRadius());
+        }
+        if (config.getMaxAcceptedAccuracy() != null && config.getMaxAcceptedAccuracy() < 0) {
+            throw new JSONException("maxAcceptedAccuracy must be >= 0, got " + config.getMaxAcceptedAccuracy());
+        }
+
+        requireOneOfString("httpMethod", config.getHttpMethod(), "POST", "GET", "PUT", "PATCH");
+        requireOneOfString("syncHttpMethod", config.getSyncHttpMethod(), "POST", "GET", "PUT", "PATCH");
+        requireOneOfString("httpMode", config.getHttpMode(), "batch", "single");
+        requireOneOfString("syncMode", config.getSyncMode(), "batch", "single");
+        requireOneOfString("mockLocationPolicy", config.getMockLocationPolicy(), "allow", "flag", "drop");
+        requireOneOfString("wakeLockMode", config.getWakeLockMode(), "none", "posting", "always");
+    }
+
+    private static void requireOneOf(String name, Integer value, int... allowed) throws JSONException {
+        if (value == null) return;
+        for (int a : allowed) {
+            if (value == a) return;
+        }
+        throw new JSONException(name + " must be one of " + java.util.Arrays.toString(allowed) + ", got " + value);
+    }
+
+    private static void requireOneOfString(String name, String value, String... allowed) throws JSONException {
+        if (value == null) return;
+        for (String a : allowed) {
+            if (a.equalsIgnoreCase(value)) return;
+        }
+        throw new JSONException(name + " must be one of " + java.util.Arrays.toString(allowed) + ", got " + value);
+    }
+
+    private static void requireNonNegative(String name, Integer value) throws JSONException {
+        if (value != null && value < 0) {
+            throw new JSONException(name + " must be >= 0, got " + value);
+        }
+    }
+
+    private static void requireAtLeast(String name, Integer value, int min) throws JSONException {
+        if (value != null && value < min) {
+            throw new JSONException(name + " must be >= " + min + ", got " + value);
+        }
+    }
+
+    private static void requireRange(String name, Integer value, int min, int max) throws JSONException {
+        if (value != null && (value < min || value > max)) {
+            throw new JSONException(name + " must be between " + min + " and " + max + ", got " + value);
+        }
     }
 
     public static JSONObject toJSONObject(Config config) throws JSONException {
@@ -216,15 +287,15 @@ public class ConfigMapper {
         json.put("desiredAccuracy", config.getDesiredAccuracy());
         json.put("debug", config.isDebugging());
         json.put("notificationsEnabled", config.getNotificationsEnabled());
-        json.put("notificationTitle", config.getNotificationTitle() != Config.NullString ? config.getNotificationTitle() : JSONObject.NULL);
-        json.put("notificationText", config.getNotificationText() != Config.NullString ? config.getNotificationText() : JSONObject.NULL);
+        json.put("notificationTitle", !Config.isNullString(config.getNotificationTitle()) ? config.getNotificationTitle() : JSONObject.NULL);
+        json.put("notificationText", !Config.isNullString(config.getNotificationText()) ? config.getNotificationText() : JSONObject.NULL);
         json.put("notificationSyncTitle", config.getNotificationSyncTitle());
         json.put("notificationSyncText", config.getNotificationSyncText());
         json.put("notificationSyncCompletedText", config.getNotificationSyncCompletedText());
         json.put("notificationSyncFailedText", config.getNotificationSyncFailedText());
-        json.put("notificationIconLarge", config.getLargeNotificationIcon() != Config.NullString ? config.getLargeNotificationIcon() : JSONObject.NULL);
-        json.put("notificationIconSmall", config.getSmallNotificationIcon() != Config.NullString ? config.getSmallNotificationIcon() : JSONObject.NULL);
-        json.put("notificationIconColor", config.getNotificationIconColor() != Config.NullString ? config.getNotificationIconColor() : JSONObject.NULL);
+        json.put("notificationIconLarge", !Config.isNullString(config.getLargeNotificationIcon()) ? config.getLargeNotificationIcon() : JSONObject.NULL);
+        json.put("notificationIconSmall", !Config.isNullString(config.getSmallNotificationIcon()) ? config.getSmallNotificationIcon() : JSONObject.NULL);
+        json.put("notificationIconColor", !Config.isNullString(config.getNotificationIconColor()) ? config.getNotificationIconColor() : JSONObject.NULL);
         json.put("stopOnTerminate", config.getStopOnTerminate());
         json.put("startOnBoot", config.getStartOnBoot());
         json.put("startForeground", config.getStartForeground());
@@ -233,8 +304,8 @@ public class ConfigMapper {
         json.put("fastestInterval", config.getFastestInterval());
         json.put("activitiesInterval", config.getActivitiesInterval());
         json.put("stopOnStillActivity", config.getStopOnStillActivity());
-        json.put("url", config.getUrl() != Config.NullString ? config.getUrl() : JSONObject.NULL);
-        json.put("syncUrl", config.getSyncUrl() != Config.NullString  ? config.getSyncUrl() : JSONObject.NULL);
+        json.put("url", !Config.isNullString(config.getUrl()) ? config.getUrl() : JSONObject.NULL);
+        json.put("syncUrl", !Config.isNullString(config.getSyncUrl())  ? config.getSyncUrl() : JSONObject.NULL);
         json.put("syncThreshold", config.getSyncThreshold());
         json.put("sync", config.getSyncEnabled());
         json.put("httpHeaders", new JSONObject(config.getHttpHeaders()));

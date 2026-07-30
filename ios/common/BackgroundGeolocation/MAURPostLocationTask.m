@@ -7,6 +7,7 @@
 //
 
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import "Reachability.h"
 #import "MAURSQLiteLocationDAO.h"
 #import "MAURBackgroundSync.h"
@@ -48,16 +49,28 @@ static MAURLocationTransform s_locationTransform = nil;
     uploader.delegate = self;
     
     reach = [Reachability reachabilityWithHostname:@"www.google.com"];
+    // v4.5.5 — the blocks used to capture `self` implicitly (via the `hasConnectivity` ivar),
+    // creating a retain cycle Reachability -> block -> self -> reach. Capture weakly instead.
+    // The reachableBlock also called [_reach stopNotifier], which killed the monitor after the
+    // very first reachability event, so connectivity was never observed again. Removed.
+    __weak typeof(self) weakSelf = self;
     reach.reachableBlock = ^(Reachability *_reach) {
         // keep in mind this is called on a background thread
         // and if you are updating the UI it needs to happen
         // on the main thread:
-        hasConnectivity = YES;
-        [_reach stopNotifier];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf == nil) {
+            return;
+        }
+        strongSelf->hasConnectivity = YES;
     };
-    
-    reach.unreachableBlock = ^(Reachability *reach) {
-        hasConnectivity = NO;
+
+    reach.unreachableBlock = ^(Reachability *_reach) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf == nil) {
+            return;
+        }
+        strongSelf->hasConnectivity = NO;
     };
 
     return self;
@@ -67,6 +80,11 @@ static MAURLocationTransform s_locationTransform = nil;
 {
     hasConnectivity = YES;
     [reach startNotifier];
+    // v4.5.6 — D10: adopt upload tasks that survived in the background NSURLSession from a
+    // previous run of the process. Nothing used to call -start on the uploader, so after a
+    // relaunch those orphaned uploads were never resumed nor reported and their rows stayed
+    // SyncPending until the 15-min stale-rescue in -sync: picked them up.
+    [uploader start];
 }
 
 - (void) stop
@@ -78,8 +96,29 @@ static MAURLocationTransform s_locationTransform = nil;
 {
     // Take this variable on the main thread to be safe
     MAURLocationTransform locationTransform = s_locationTransform;
+
+    // v4.5.5 — reserve background execution time for the asynchronous work below. Without it
+    // iOS can suspend the app while the SQLite write / HTTP POST is still in flight and the
+    // location is silently lost. Every exit path below must call finishBackgroundTask().
+    UIApplication *application = [UIApplication sharedApplication];
+    __block UIBackgroundTaskIdentifier bgTask = UIBackgroundTaskInvalid;
+    bgTask = [application beginBackgroundTaskWithExpirationHandler:^{
+        if (bgTask != UIBackgroundTaskInvalid) {
+            [application endBackgroundTask:bgTask];
+            bgTask = UIBackgroundTaskInvalid;
+        }
+    }];
+
+    // Guarded against double-end: once ended the identifier is reset to UIBackgroundTaskInvalid.
+    void (^finishBackgroundTask)(void) = ^{
+        if (bgTask != UIBackgroundTaskInvalid) {
+            [application endBackgroundTask:bgTask];
+            bgTask = UIBackgroundTaskInvalid;
+        }
+    };
+
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-        
+
         MAURLocation *location = inLocation;
 
         if (locationTransform != nil) {
@@ -93,6 +132,7 @@ static MAURLocationTransform s_locationTransform = nil;
             location = locationTransform(location);
 
             if (location == nil) {
+                finishBackgroundTask();
                 return;
             }
 
@@ -147,6 +187,7 @@ static MAURLocationTransform s_locationTransform = nil;
             NSString *policy = self.config.mockLocationPolicy ?: @"allow";
             if ([@"drop" isEqualToString:policy]) {
                 DDLogInfo(@"%@ Simulated/mock location dropped (mockLocationPolicy=drop)", TAG);
+                finishBackgroundTask();
                 return;
             }
             // "flag": leave it. The simulated NSNumber is already on the model and propagates via toResultFromTemplate.
@@ -178,6 +219,9 @@ static MAURLocationTransform s_locationTransform = nil;
                 [self sync];
             }
         }
+
+        // Terminal exit — covers both the post-OK and post-KO paths above.
+        finishBackgroundTask();
     });
 }
 
@@ -347,7 +391,9 @@ static MAURLocationTransform s_locationTransform = nil;
     // belongs in real-time post (httpMode="single" + httpMethod=GET) instead.
     NSString *resolvedSyncUrl = [MAURUrlTemplateResolver resolve:self.config.syncUrl location:nil queryParams:self.config.queryParams];
     NSString *syncMethod = self.config.syncHttpMethod ?: @"POST";
-    [uploader sync:resolvedSyncUrl withTemplate:self.config._template withHttpHeaders:self.config.httpHeaders withMethod:syncMethod];
+    // v4.5.6 — D26: honour syncMode ("single" => one request per location, "batch" => array).
+    NSString *syncMode = self.config.syncMode ?: @"batch";
+    [uploader sync:resolvedSyncUrl withTemplate:self.config._template withHttpHeaders:self.config.httpHeaders withMethod:syncMethod withMode:syncMode];
 }
 
 #pragma mark - Location transform

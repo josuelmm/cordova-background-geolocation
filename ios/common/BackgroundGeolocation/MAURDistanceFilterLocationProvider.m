@@ -108,10 +108,16 @@ enum {
     DDLogInfo(@"%@ will start", TAG);
     
     NSUInteger authStatus;
-    
+
     if ([CLLocationManager respondsToSelector:@selector(authorizationStatus)]) { // iOS 4.2+
-        authStatus = [CLLocationManager authorizationStatus];
-        
+        // v4.5.6 — D21: +[CLLocationManager authorizationStatus] is deprecated since iOS 14;
+        // use the instance property there and keep the class method for iOS < 14.
+        if (@available(iOS 14.0, *)) {
+            authStatus = locationManager.authorizationStatus;
+        } else {
+            authStatus = [CLLocationManager authorizationStatus];
+        }
+
         if (authStatus == kCLAuthorizationStatusDenied) {
             if (outError != NULL) {
                 NSDictionary *errorDictionary = @{
@@ -140,7 +146,11 @@ enum {
         // we can stop later on when recieved callback on user denial
         // it's neccessary to start call startUpdatingLocation in iOS < 8.0 to show user prompt!
         
-        if (authStatus == kCLAuthorizationStatusNotDetermined) {
+        // v4.5.5 — also escalate from "When In Use" to "Always". Previously only the
+        // NotDetermined case asked, so a user who granted WhenInUse was never prompted for
+        // the Always permission that background tracking actually requires.
+        if (authStatus == kCLAuthorizationStatusNotDetermined ||
+            authStatus == kCLAuthorizationStatusAuthorizedWhenInUse) {
             if ([locationManager respondsToSelector:@selector(requestAlwaysAuthorization)]) {  //iOS 8.0+
                 DDLogVerbose(@"%@ requestAlwaysAuthorization", TAG);
                 [locationManager requestAlwaysAuthorization];
@@ -231,7 +241,10 @@ enum {
     MAURLocation *bestLocation = nil;
     for (CLLocation *location in locations) {
         MAURLocation *bgloc = [MAURLocation fromCLLocation:location];
-        
+        // v4.5.6 — D6: stamp the numeric provider id (DISTANCE_FILTER_PROVIDER == 0). The
+        // stationary copy below inherits it through -copyWithZone:.
+        bgloc.locationProvider = [NSNumber numberWithInt:DISTANCE_FILTER_PROVIDER];
+
         // test the age of the location measurement to determine if the measurement is cached
         // in most cases you will not want to rely on cached measurements
         DDLogDebug(@"Location age %f", [bgloc locationAge]);
@@ -512,6 +525,13 @@ enum {
  */
 - (BOOL) locationIsBeyondStationaryRegion:(MAURLocation*)location
 {
+    // v4.5.5 — when there is no stationary region, messaging nil returned NO for
+    // containsCoordinate and the `!containsCoordinate` below turned that into YES,
+    // i.e. "beyond the region" was reported even though no region had been set.
+    if (stationaryRegion == nil) {
+        return NO;
+    }
+
     CLLocationCoordinate2D regionCenter = [stationaryRegion center];
     BOOL containsCoordinate = [stationaryRegion containsCoordinate:[location coordinate]];
     

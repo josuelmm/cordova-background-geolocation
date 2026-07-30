@@ -100,11 +100,21 @@ public class PostLocationTask {
                 logger.info("Mock location dropped (mockLocationPolicy=drop)");
                 return;
             }
-            // "flag": leave it but caller can read isFromMockProvider() / mocked field.
+            // "flag": keep it, but make sure the mock marker is actually recorded so the
+            // `@mocked` / `@isFromMockProvider` placeholders resolve to a real boolean instead of
+            // null. Without this the flag never reached the backend and 'flag' == 'allow'.
+            if ("flag".equals(policy)) {
+                location.setIsFromMockProvider(true);
+            }
             // "allow": no-op.
         }
 
-        long locationId = mLocationDAO.persistLocation(location);
+        // Honour maxLocations. The unbounded overload was the only one ever called, so every
+        // synced location stayed as a dead row forever and the table grew without limit.
+        Integer maxLocations = mConfig.getMaxLocations();
+        long locationId = (maxLocations != null && maxLocations > 0)
+                ? mLocationDAO.persistLocation(location, maxLocations)
+                : mLocationDAO.persistLocation(location);
         location.setLocationId(locationId);
 
         if (mSessionDAO != null && mSessionDAO.isSessionActive()) {
@@ -229,10 +239,34 @@ public class PostLocationTask {
         boolean isStatusOkay = responseCode >= 200 && responseCode < 300;
 
         if (!isStatusOkay) {
+            // Distinguish permanent from transient. A 4xx (other than 401/408/429) means the
+            // payload itself is unacceptable, so retrying it forever can never succeed — it just
+            // grows the queue without bound and blocks everything behind it. Treat those as
+            // "consumed" so the location leaves the queue, and log loudly enough to diagnose.
+            if (isPermanentHttpFailure(responseCode)) {
+                logger.error("Server rejected location permanently (HTTP {}). Dropping it instead "
+                        + "of retrying forever; check url/postTemplate/httpHeaders.", responseCode);
+                return true;
+            }
             logger.warn("Server error while posting locations responseCode: {}", responseCode);
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * True for statuses that will never succeed on retry.
+     *
+     * <p>401 is excluded because the app can refresh credentials and the plugin already raises
+     * {@code http_authorization} for it; 408 (timeout) and 429 (rate limit) are explicitly
+     * transient. 3xx is excluded too: it is followed by HttpURLConnection, and if it surfaces here
+     * it usually means a streamed body could not be replayed, which a retry may resolve.
+     */
+    private static boolean isPermanentHttpFailure(int responseCode) {
+        if (responseCode < 400 || responseCode >= 500) {
+            return false;
+        }
+        return responseCode != 401 && responseCode != 408 && responseCode != 429;
     }
 }

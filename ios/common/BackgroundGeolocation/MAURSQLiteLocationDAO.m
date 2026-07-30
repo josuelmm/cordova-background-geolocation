@@ -59,6 +59,55 @@
     return locations;
 }
 
+// v5.0 — D5: SELECT the valid locations and mark exactly those rows Deleted, in ONE transaction.
+// `getValidLocationsAndDelete` used to be wired to -getLocationsForSync, which only flips the rows
+// to SyncPending; nothing ever confirmed the upload, so -restoreStaleSyncLocationsOlderThan:
+// pushed them back to PostPending and the caller got the same locations again.
+// The UPDATE is scoped to the ids we actually collected (never a blanket
+// `WHERE status = PostPending`), so rows INSERTed while this transaction is open survive.
+- (NSArray<MAURLocation*>*) getValidLocationsAndDelete
+{
+    __block NSMutableArray* locations = [[NSMutableArray alloc] init];
+
+    NSString *sql = [[self getLocationSelectString] stringByAppendingString: @" WHERE " @LC_COLUMN_NAME_STATUS @" = ? ORDER BY " @LC_COLUMN_NAME_RECORDED_AT];
+
+    [queue inTransaction:^(FMDatabase *database, BOOL *rollback) {
+        NSMutableArray *locationIds = [[NSMutableArray alloc] init];
+
+        FMResultSet *rs = [database executeQuery:sql, @(MAURLocationPostPending)];
+        while([rs next]) {
+            MAURLocation *location = [self convertToLocation:rs];
+            [locations addObject:location];
+            if (location.locationId != nil) {
+                [locationIds addObject:location.locationId];
+            }
+        }
+        [rs close];
+
+        if ([locationIds count] == 0) {
+            return;
+        }
+
+        NSString *upd = [NSString stringWithFormat:@"UPDATE %@ SET %@ = ? WHERE %@ IN (%@)",
+                         @LC_TABLE_NAME, @LC_COLUMN_NAME_STATUS, @LC_COLUMN_NAME_ID,
+                         [self placeholdersForCount:[locationIds count]]];
+        NSMutableArray *args = [[NSMutableArray alloc] initWithCapacity:([locationIds count] + 1)];
+        [args addObject:@(MAURLocationDeleted)];
+        [args addObjectsFromArray:locationIds];
+
+        if (![database executeUpdate:upd withArgumentsInArray:args]) {
+            NSLog(@"getValidLocationsAndDelete: marking %lu rows deleted failed code: %d: message: %@",
+                  (unsigned long)[locationIds count], [database lastErrorCode], [database lastErrorMessage]);
+            // Returning rows we could not mark deleted is exactly what produces duplicates on the
+            // consumer side: roll back and report nothing.
+            *rollback = YES;
+            [locations removeAllObjects];
+        }
+    }];
+
+    return locations;
+}
+
 - (NSArray<MAURLocation*>*) getAllLocations
 {
     __block NSMutableArray* locations = [[NSMutableArray alloc] init];
@@ -199,6 +248,14 @@
 
 - (NSNumber*) persistLocation:(MAURLocation*)location limitRows:(NSInteger)maxRows
 {
+    // v4.5.5 — with maxRows <= 0 the row-count branches below could never insert: `rowCount <
+    // maxRows` is false for an empty table, so control fell through to the recycling UPDATE,
+    // which ran against `WHERE id = 0` (MIN(id) of an empty table) and silently dropped the
+    // location. Treat a non-positive cap as "no cap" and just insert.
+    if (maxRows <= 0) {
+        return [self persistLocation:location];
+    }
+
     __block NSNumber *locationId;
     NSTimeInterval timestamp = [[NSDate date] timeIntervalSince1970];
     NSNumber *recordedAt = [NSNumber numberWithDouble:timestamp];
@@ -411,6 +468,65 @@
     return success;
 }
 
+- (BOOL) restoreFailedSyncLocations:(NSArray<NSNumber*>*)locationIds error:(NSError * __autoreleasing *)outError
+{
+    // v5.0 — D4: batch-scoped undo. The global -restoreFailedSyncLocations: flips EVERY SyncPending
+    // row back to PostPending, so when one upload fails while a sibling upload is still in flight
+    // (single mode creates one task per location), the sibling's rows are resurrected and uploaded
+    // a second time. Restore only the ids this task owns.
+    if (locationIds == nil || [locationIds count] == 0) {
+        return YES;
+    }
+
+    __block BOOL success = YES;
+    NSString *sql = [NSString stringWithFormat:@"UPDATE %@ SET %@ = ? WHERE %@ = ? AND %@ IN (%@)",
+                     @LC_TABLE_NAME, @LC_COLUMN_NAME_STATUS, @LC_COLUMN_NAME_STATUS, @LC_COLUMN_NAME_ID,
+                     [self placeholdersForCount:[locationIds count]]];
+    NSMutableArray *args = [[NSMutableArray alloc] initWithCapacity:([locationIds count] + 2)];
+    [args addObject:@(MAURLocationPostPending)];
+    [args addObject:@(MAURLocationSyncPending)];
+    [args addObjectsFromArray:locationIds];
+
+    [queue inDatabase:^(FMDatabase *database) {
+        if (![database executeUpdate:sql withArgumentsInArray:args]) {
+            int errorCode = [database lastErrorCode];
+            NSString *errorMessage = [database lastErrorMessage];
+            NSLog(@"restoreFailedSyncLocations(ids) failed code: %d: message: %@", errorCode, errorMessage);
+            if (outError != NULL) {
+                *outError = [NSError errorWithDomain:Domain code:errorCode userInfo:@{ NSLocalizedDescriptionKey: errorMessage ?: @"" }];
+            }
+            success = NO;
+        }
+    }];
+    return success;
+}
+
+- (BOOL) restoreFailedSyncLocationsBefore:(NSTimeInterval)cutoff error:(NSError * __autoreleasing *)outError
+{
+    // v5.0 — D4: batch-mode counterpart of -deleteSyncedLocationsBefore:. A batch upload owns the
+    // SyncPending rows recorded at or before the cutoff captured when it started; rows recorded
+    // during the upload belong to the next batch and must keep their current state.
+    __block BOOL success = YES;
+    NSString *sql = @"UPDATE " @LC_TABLE_NAME
+        @" SET " @LC_COLUMN_NAME_STATUS @" = ? "
+        @" WHERE " @LC_COLUMN_NAME_STATUS @" = ? AND " @LC_COLUMN_NAME_RECORDED_AT @" <= ?";
+    [queue inDatabase:^(FMDatabase *database) {
+        if (![database executeUpdate:sql,
+                @(MAURLocationPostPending),
+                @(MAURLocationSyncPending),
+                @(cutoff)]) {
+            int errorCode = [database lastErrorCode];
+            NSString *errorMessage = [database lastErrorMessage];
+            NSLog(@"restoreFailedSyncLocationsBefore failed code: %d: message: %@", errorCode, errorMessage);
+            if (outError != NULL) {
+                *outError = [NSError errorWithDomain:Domain code:errorCode userInfo:@{ NSLocalizedDescriptionKey: errorMessage ?: @"" }];
+            }
+            success = NO;
+        }
+    }];
+    return success;
+}
+
 - (BOOL) deletePendingSyncLocations:(NSError * __autoreleasing *)outError
 {
     __block BOOL success = YES;
@@ -460,6 +576,17 @@
 - (NSString*) getDatabasePath
 {
     return [helper getDatabasePath];
+}
+
+// v5.0 — D5/D4: "?,?,?" bind list for an `id IN (...)` clause. Ids are never interpolated into
+// the SQL text, they stay bound parameters.
+- (NSString*) placeholdersForCount:(NSUInteger)count
+{
+    NSMutableString *placeholders = [NSMutableString string];
+    for (NSUInteger i = 0; i < count; i++) {
+        [placeholders appendString:(i == 0 ? @"?" : @",?")];
+    }
+    return placeholders;
 }
 
 - (NSString*) getLocationSelectString {

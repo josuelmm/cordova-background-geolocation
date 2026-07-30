@@ -21,13 +21,13 @@ import java.util.HashMap;
 
 public class HashMapLocationTemplateTest {
     @Test
-    public void testObjectTemplateToString() {
+    public void testObjectTemplateToString() throws Exception {
         HashMap props = new HashMap();
         props.put("foo", "bar");
         props.put("pretzels", 123);
         HashMapLocationTemplate tpl = new HashMapLocationTemplate(props);
 
-        Assert.assertEquals("{\"foo\":\"bar\",\"pretzels\":123}" , tpl.toString());
+        TestHelper.assertJsonEquals("{\"foo\":\"bar\",\"pretzels\":123}", tpl.toString());
     }
 
     @Test

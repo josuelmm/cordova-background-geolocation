@@ -48,6 +48,12 @@
 - (void) setDesiredAccuracy:(CLLocationAccuracy)newDesiredAccuracy;
 - (CLLocationAccuracy) desiredAccuracy;
 
+// v5.0 — D3: iOS 14 "Precise Location: Off" handling. Main thread only.
+// Returns YES the first time a reduced authorization is observed, so the caller reports
+// +reducedAccuracyError once through the plugin error channel.
+- (BOOL) requestTemporaryFullAccuracyIfReduced;
++ (NSError *) reducedAccuracyError;
+
 + (MAURLocationManager*)sharedInstance; // Singleton method
 
 @end

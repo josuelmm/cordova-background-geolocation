@@ -145,21 +145,32 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         // URL substitution they should use httpMode="single" + url= ... (real-time) or syncMode="single".
         String resolvedUrl = com.marianhello.bgloc.http.UrlTemplateResolver.resolve(url, null, config.getQueryParams());
         String syncMethod = config.getSyncHttpMethod();
-        if (uploadLocations(file, resolvedUrl, httpHeaders, syncMethod)) {
-            logger.info("Batch sync successful");
-            batchManager.setBatchCompleted(batchStartMillis);
-            if (file.delete()) {
-                logger.info("Batch file has been deleted: {}", file.getAbsolutePath());
+        // Receives the number of locations the server accepted before a mid-batch failure.
+        int[] accepted = new int[]{ -1 };
+        try {
+            if (uploadLocations(file, resolvedUrl, httpHeaders, syncMethod, accepted)) {
+                logger.info("Batch sync successful");
+                batchManager.setBatchCompleted(batchStartMillis);
             } else {
+                logger.warn("Batch sync failed due server error");
+                // Confirm whatever the server already took so it is not resent as a duplicate.
+                // The remainder keeps its batch_start and is picked up by the next batch, whose
+                // batchStartMillis is larger and therefore matches `batch_start < ?`.
+                if (accepted[0] > 0) {
+                    batchManager.setBatchPartiallyCompleted(batchStartMillis, accepted[0]);
+                }
+                syncResult.stats.numIoExceptions++;
+            }
+        } finally {
+            // Always remove the temp file. It used to be deleted only on success, so every failed
+            // sync left a locations*.json behind and they accumulated indefinitely.
+            if (file.exists() && !file.delete()) {
                 logger.warn("Batch file has not been deleted: {}", file.getAbsolutePath());
             }
-        } else {
-            logger.warn("Batch sync failed due server error");
-            syncResult.stats.numIoExceptions++;
         }
     }
 
-    private boolean uploadLocations(File file, String url, HashMap httpHeaders, String method) {
+    private boolean uploadLocations(File file, String url, HashMap httpHeaders, String method, int[] acceptedOut) {
         NotificationCompat.Builder builder = null;
 
         if (notificationsEnabled) {
@@ -176,24 +187,18 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         syncStart.putInt("action", LocationServiceImpl.MSG_ON_SYNC_START);
         broadcastMessage(syncStart);
 
-        // Count locations being uploaded (best-effort, API-21+ safe).
-        int locationsAttempted = 0;
-        java.io.FileInputStream fis = null;
-        try {
-            fis = new java.io.FileInputStream(file);
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = fis.read(buf)) > 0) baos.write(buf, 0, n);
-            org.json.JSONArray arr = new org.json.JSONArray(new String(baos.toByteArray(), "UTF-8"));
-            locationsAttempted = arr.length();
-        } catch (Throwable ignored) { /* best-effort; emit 0 if we cannot read */
-        } finally {
-            if (fis != null) try { fis.close(); } catch (Exception ignored) {}
-        }
+        // Count locations being uploaded, streaming.
+        //
+        // This used to slurp the whole batch file into a ByteArrayOutputStream, copy it into a
+        // String, and parse it into a JSONArray — three full copies in heap — purely to read
+        // arr.length(). HttpPostService then read the same file again. With a large syncThreshold
+        // or a queue accumulated offline that was an OutOfMemoryError in the ":sync" process, and
+        // the batch could never be sent (so it was retried forever). JsonReader walks the array
+        // and counts without materialising it.
+        int locationsAttempted = countLocationsStreaming(file);
 
         try {
-            int responseCode = HttpPostService.postJSONFile(url, file, httpHeaders, this, method);
+            int responseCode = HttpPostService.postJSONFile(url, file, httpHeaders, this, method, acceptedOut);
 
             // All 2xx statuses are okay
             boolean isStatusOkay = responseCode >= 200 && responseCode < 300;
@@ -293,9 +298,44 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         broadcastMessage(progBundle);
     }
 
+    /**
+     * Counts the top-level elements of the batch JSON array without loading it into memory.
+     *
+     * @return the number of locations, or 0 if the file cannot be read/parsed (best effort — this
+     *         value only feeds the sync progress events).
+     */
+    private int countLocationsStreaming(File file) {
+        android.util.JsonReader reader = null;
+        try {
+            reader = new android.util.JsonReader(
+                    new java.io.InputStreamReader(new java.io.FileInputStream(file), "UTF-8"));
+            int count = 0;
+            reader.beginArray();
+            while (reader.hasNext()) {
+                reader.skipValue();
+                count++;
+            }
+            reader.endArray();
+            return count;
+        } catch (Throwable t) {
+            logger.debug("Could not count batch locations: {}", t.getMessage());
+            return 0;
+        } finally {
+            if (reader != null) {
+                try { reader.close(); } catch (Exception ignored) { }
+            }
+        }
+    }
+
     private void broadcastMessage(Bundle bundle) {
         Intent intent = new Intent(LocationServiceImpl.ACTION_BROADCAST);
         intent.putExtras(bundle);
-        LocalBroadcastManager.getInstance(getContext().getApplicationContext()).sendBroadcast(intent);
+        // This adapter runs in the ":sync" process (see SyncService in the manifest), and
+        // LocalBroadcastManager only delivers within a single process — every sync event emitted
+        // here used to be dropped before reaching the plugin. Send a real broadcast restricted to
+        // our own package so it crosses the process boundary while staying internal.
+        Context appContext = getContext().getApplicationContext();
+        intent.setPackage(appContext.getPackageName());
+        appContext.sendBroadcast(intent);
     }
 }

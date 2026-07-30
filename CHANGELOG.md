@@ -1,5 +1,118 @@
 # Changelog
 
+## [5.0.0](https://github.com/josuelmm/cordova-background-geolocation/tree/5.0.0) (2026-07-30)
+
+> **Major.** Auditoría completa del plugin (Android, iOS, capa JS, Angular, driving events, tests y
+> CI) con ~132 hallazgos corregidos. Hay cambios de comportamiento observable, de ahí el salto de
+> major. Estado real, verificaciones ejecutadas y lo que sigue abierto: **`MEJORAS.md`**.
+> Impacto en el consumidor y procedimiento de instalación: **`COMPATIBILIDAD.md`**.
+>
+> **iOS no se ha compilado** (no hay macOS/Xcode en el entorno donde se hicieron los cambios) y **no
+> hay pruebas en dispositivo real**. No publiques sin ambas.
+
+### Fixed — dejaba de emitir posiciones (bloqueante)
+- **`DISTANCE_FILTER` se detenía para siempre al entrar en estacionario.** Los `PendingIntent` de
+  alarma usaban intents *explícitos* hacia receivers registrados dinámicamente (clases internas
+  privadas, ausentes de todo manifest); Android descartaba cada broadcast en silencio, así que la
+  alarma de salida de estacionario nunca llegaba y no se volvía a pedir ninguna localización. Ahora
+  son implícitos con `setPackage()`.
+- **`ACTIVITY_PROVIDER` nunca recibía actividad**: mismo defecto, más una colisión de `requestCode`
+  con `DISTANCE_FILTER`.
+- **Si `startForeground()` fallaba, el servicio quedaba zombi**: reportaba el error pero seguía
+  "arrancado" como servicio background ordinario, que el sistema mata en minutos sin avisar. Ahora
+  hace teardown completo, emite `MSG_ON_SERVICE_STOPPED` y `stopSelf()`.
+- **Comandos perdidos en silencio**: `startService()` desde background lanza en Android 8+; se
+  tragaba la excepción. Ahora reintenta por `startForegroundService()` **solo** en los comandos que
+  promocionan el servicio (los demás romperían la promesa de 5 s y matarían el proceso) y loguea
+  `Command LOST` cuando no hay entrega.
+- **`RawLocationProvider` no se recuperaba** si la localización estaba apagada al arrancar: nunca
+  quedaba registrado en `LocationManager`, así que `onProviderEnabled()` no podía llegar. Ahora se
+  arma un receptor de `PROVIDERS_CHANGED` mientras no haya proveedor.
+- **`enableWatchdog` no se persistía** (`Config.merge()` no lo propagaba) y `configure()` no
+  reprogramaba el watchdog en caliente.
+
+### Fixed — pérdida y duplicación de posiciones
+- **Duplicados garantizados en cada lote que fallaba a mitad** y **carrera en `BatchManager`** que
+  marcaba posiciones como enviadas sin haberse escrito.
+- `maxLocations` no se aplicaba: la tabla crecía sin límite. Nuevo índice `status_batch_idx`
+  (**DB version 23**).
+- **WAL activado**: el proceso `:sync` y el principal abren la misma base; con el journal por
+  defecto las escrituras de uno bloqueaban las lecturas del otro.
+- Eventos `sync*` emitidos con `LocalBroadcastManager` **desde el proceso `:sync`** nunca llegaban a
+  JS (es process-local). Ahora es un broadcast global con `setPackage()`.
+- `HttpURLConnection` no se cerraba ni se consumía la respuesta; `syncHttpMethod` se ignoraba en el
+  envío por lote; `READ_TIMEOUT` bajado de 120 s a 30 s (un servidor colgado retenía el wake lock
+  dos minutos por intento).
+
+### Fixed — iOS
+- **Precisión reducida (iOS 14+) nunca detectada ni solicitada** → trayectos inventados de km. Ahora
+  se pide `requestTemporaryFullAccuracyAuthorizationWithPurposeKey:` y `plugin.xml` incluye
+  `NSLocationTemporaryUsageDescriptionDictionary`.
+- **Nunca se pedía el upgrade `WhenInUse` → `Always`**: el tracking moría al pasar a background.
+- **`getValidLocationsAndDelete` no borraba** (llamaba a `getLocationsForSync`, que solo marca
+  `SyncPending`): el contador de pendientes bajaba a 0 y 15 min después las filas resucitaban.
+- **`restoreFailedSyncLocations` revertía TODAS las filas `SyncPending`**, incluidas las de otro
+  upload en vuelo. Ahora se acota al lote del task (por ids o por cutoff).
+- **La `NSURLSession` de background se creaba en cada `init`** con identificador fijo → crash de
+  Foundation al recargar la WebView. Ahora es singleton (`dispatch_once`) con delegado forwarder.
+- **`handleEventsForBackgroundURLSession` implementado**: los uploads que terminaban con la app
+  suspendida quedaban huérfanos. Requiere forwarding desde el `AppDelegate` en algunas versiones de
+  cordova-ios; snippet en `CDVBackgroundGeolocation.m`.
+- POST en background sin `beginBackgroundTask`, `hasAccuracy` comparando un puntero,
+  `getCurrentLocation()` bloqueando un hilo ~24 días, ciclo de retención en Reachability,
+  `onLocationPause:`/`onLocationResume:` mal nombrados, y 20 puntos más — ver `MEJORAS.md` §4.
+
+### Fixed — driving events
+- **`tripEnd` nunca se emitía al aparcar**: toda la máquina de estados solo avanzaba dentro de
+  `onLocation()`, y al detenerse el proveedor deja de entregar fixes. Android: nuevo `tick(nowMs)`
+  invocado desde el temporizador periódico del servicio, que ahora se postea **siempre** que el
+  servicio corre (colgarlo de `enableWatchdog`, cuyo default es `false`, dejaba el agujero abierto
+  en el caso más común). iOS: nuevo timer propio de 60 s, independiente de `heartbeatInterval`.
+  Ambos cierran `stopped` y `tripEnd` sin necesidad de más posiciones, con la duración medida
+  hasta que el vehículo dejó de moverse.
+- **`hardBrake` / `possibleCrash` falsos en cada despertar**: la entrega en lote colapsaba Δt hacia
+  0. Android e iOS derivan ahora los deltas del timestamp del fix, con piso de 500 ms y techo de
+  5 s, y los cooldowns corren en un reloj monotónico.
+- **Un fix sin velocidad se trataba como 0** y la máquina lo leía como `stopped`, cerrando viajes
+  activos. Ahora se descarta antes de la lógica derivada de velocidad (en ambas plataformas).
+- Sensor fusion: de ~100 callbacks/s a ~35 (acelerómetro 20 Hz, giróscopo `SENSOR_DELAY_UI`), fuera
+  del hilo principal.
+
+### Fixed — capa JS / Angular
+- **Fuga de listeners**: `unsubscribe()` desregistraba del canal equivocado. Test de regresión que
+  falla contra el código original (detecta 50 listeners acumulados).
+- **Los 10 `enum` solo existían en el `.d.ts`** (declaración type-only): compilaban y valían
+  `undefined` en runtime. Ahora tienen valor real, congelado, con mapeo inverso.
+- `AccuracyLevel` mantiene `number` — cualquier valor numérico sigue aceptándose.
+
+### Changed — build y toolchain
+- Gradle 5.1.1 → **8.14.3**, AGP 3.4.1 → **8.13.0**, jcenter → `google()` + `mavenCentral()`,
+  `package=` del manifest → `namespace`, **compileSdk 36**, **minSdk 24**, **Java 17**.
+- `androidx.core` 1.1.0 → 1.13.1, `appcompat` 1.1.0 → 1.7.0.
+- El proyecto Gradle del plugin volvía a compilar por primera vez; **68 tests unitarios** corren
+  (antes: ninguno).
+
+### Changed — CI
+- Nuevo job que compila y **testea el proyecto del plugin** (antes solo se compilaba una app
+  Capacitor efímera).
+- Nuevo job de **emulador** con los 72 tests instrumentados, que no compilaban
+  (`InstrumentationRegistry.getTargetContext()`, retirado en androidx.test 1.4+).
+- Nuevo job de **tests JS** (`npm run test:js`).
+- **Scheme compartido de iOS commiteado** para que `xcodebuild test` funcione en un checkout limpio.
+  El job sigue `continue-on-error` hasta su primer run verde en macOS.
+- `publish-npm.yml` ya no publica sin verificación previa: build de Angular + build y tests de
+  Android antes de `npm publish`.
+
+### Fixed — misc
+- `getPluginVersion()` devolvía `4.5.5` hard-codeado en Android e iOS.
+
+### Breaking
+- `getConfig()` devuelve `null` donde antes devolvía `""` en los campos opcionales sin valor
+  (el round-trip por `Parcel` destruía la nulabilidad).
+- `minSdk` sube a 24; `cordova-android >= 13`, `cordova-ios >= 7`.
+- DB version 22 → 23 (migración automática).
+- Detalle completo de cada cambio de API observable: `COMPATIBILIDAD.md`.
+
 ## [4.5.5](https://github.com/josuelmm/cordova-background-geolocation/tree/4.5.5) (2026-06-05)
 
 ### Added — `@time_seconds` placeholder
@@ -25,6 +138,13 @@
 - **Android `HttpPostService.jsonToUrlEncoded`** ahora omite cualquier campo con `JSONObject.NULL`, `null` literal o stringify a `"null"`. Defensa en 3 capas (`isNull` + `opt==null` + `"null".equals`).
 - **iOS `MAURPostLocationTask` rama form-urlencoded** ídem (`NSNull`, `nil`, `"null"`, `"<null>"`).
 - Aplica a **todos los paths HTTP**: POST real-time (foreground + background), `forceSync()` manual, sync automático por threshold, `httpMode='single'` y `httpMode='batch'`.
+
+## [4.5.3](https://github.com/josuelmm/cordova-background-geolocation/tree/4.5.3) (2026-05-12)
+
+### Fixed (BLOQUEANTE — sync HTTP 400 cuando los placeholders resuelven a null)
+- Primera entrega del fix de sync form-urlencoded: con un `postTemplate` personalizado que incluyera placeholders modernos (`@speed`, `@events`, `@battery`, …), los batches llevaban `field: null` cuando la location no tenía valor para ese placeholder. El serializador form-urlencoded emitía entonces las cadenas literales `speed=null` / `events=null`, que `OsmAndProtocolDecoder` de Traccar rechazaba con `NumberFormatException` ("For input string: null") → **HTTP 400**.
+- **Android `HttpPostService.jsonToUrlEncoded`** e **iOS `MAURPostLocationTask`** (rama form-urlencoded) omiten `JSONObject.NULL` / `NSNull` / `null` literal. Cubre POST real-time (foreground + background), `forceSync()`, sync automático por threshold, y `httpMode='single'` y `'batch'`.
+- Versión consolidada y re-documentada en **4.5.4**; ver esa entrada para el detalle completo.
 
 ## [4.5.2](https://github.com/josuelmm/cordova-background-geolocation/tree/4.5.2) (2026-05-10)
 

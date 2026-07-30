@@ -34,7 +34,7 @@ public class SQLiteLocationDAOThreadTest {
 
     @Before
     public void deleteDatabase() {
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         ctx.deleteDatabase(SQLiteOpenHelper.SQLITE_DATABASE_NAME);
     }
 
@@ -42,7 +42,7 @@ public class SQLiteLocationDAOThreadTest {
     public void persistLocationFromMultipleThreads() {
         int threadsCount = 100;
 
-        Context ctx = InstrumentationRegistry.getTargetContext();
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SQLiteDatabase db = new SQLiteOpenHelper(ctx).getWritableDatabase();
         final SQLiteLocationDAO dao = new SQLiteLocationDAO(db);
 

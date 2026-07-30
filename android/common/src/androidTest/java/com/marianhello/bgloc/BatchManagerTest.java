@@ -53,7 +53,7 @@ public class BatchManagerTest {
 
     @Before
     public void setUp() {
-        mContext = InstrumentationRegistry.getTargetContext();
+        mContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
         mDbHelper = SQLiteOpenHelper.getHelper(mContext);
         prepareDatabase();
     }

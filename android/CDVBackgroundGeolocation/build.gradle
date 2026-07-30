@@ -2,33 +2,51 @@ apply plugin: 'com.android.library'
 apply from: '../common/VERSIONS.gradle'
 
 android {
-    compileSdkVersion project.ext.getCompileSdkVersion()
+    namespace 'com.marianhello.cdvbackgroundgeolocation'
+    compileSdk project.ext.getCompileSdkVersion()
     buildToolsVersion project.ext.getBuildToolsVersion()
 
     defaultConfig {
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
-        minSdkVersion project.ext.getMinSdkVersion()
-        targetSdkVersion project.ext.getTargetSdkVersion()
-        versionCode 1
-        versionName "1.0"
+        minSdk project.ext.getMinSdkVersion()
     }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+
     testOptions {
-        //unitTests.includeAndroidResources = true
         unitTests.returnDefaultValues = true
+        unitTests.includeAndroidResources = true
+    }
+
+    lint {
+        abortOnError false
     }
 }
 
 dependencies {
-    testCompile testLibs.junit
-    testCompile testLibs.robolectric
-    compile libs.slf4j
-    compile project(':CordovaLib')
-    compile fileTree(dir: 'libs', include: ['*.jar'])
-    compile project(path: ':common')
+    testImplementation testLibs.junit
+    testImplementation testLibs.robolectric
+    testImplementation testLibs.json
+    testImplementation testLibs.mockitoCore
+    implementation libs.slf4j
+    // BackgroundGeolocationPlugin references com.intentfilter.androidpermissions.PermissionManager
+    // directly, so it is a first-party dependency of this module, not just of :common.
+    implementation libs.permissions
+    // The `:CordovaLib` source project is an empty stub in this repository. Consume the
+    // published framework instead so this module is actually buildable and testable.
+    // `compileOnly`: the host Cordova app always provides its own CordovaLib at runtime.
+    compileOnly 'org.apache.cordova:framework:12.0.1'
+    testImplementation 'org.apache.cordova:framework:12.0.1'
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation project(path: ':common')
 }

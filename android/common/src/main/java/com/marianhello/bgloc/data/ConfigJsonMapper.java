@@ -199,7 +199,7 @@ public final class ConfigJsonMapper {
 
     /** Map {@link Config#NullString} or null to JSONObject.NULL so the sentinel survives. */
     private static Object nullable(String s) {
-        if (s == null || s == Config.NullString) return JSONObject.NULL;
+        if (s == null || Config.isNullString(s)) return JSONObject.NULL;
         return s;
     }
 

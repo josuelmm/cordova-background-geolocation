@@ -174,6 +174,11 @@
     [queue inDatabase:^(FMDatabase *database) {
         FMResultSet *rs = [database executeQuery:sql];
         while([rs next]) {
+            // Deliberately plain `init`, not `initWithDefaults`: `has*()` is defined as
+            // "field != nil", so seeding defaults here would make every has*() return YES for a
+            // stored row and silently break Config merge semantics (and MAURSQLiteConfigurationDAOTest
+            // .testPersistConfiguration, which asserts the opposite). Defaults are applied by the
+            // caller when no row exists at all.
             config = [[MAURConfig alloc] init];
             if ([self isNonNull:rs columnIndex:1]) {
                 config.stationaryRadius = [NSNumber numberWithInt:[rs intForColumnIndex:1]];
@@ -264,6 +269,10 @@
     if (config.mockLocationPolicy != nil) j[@"mockLocationPolicy"] = config.mockLocationPolicy;
     if (config.drivingEvents != nil)    j[@"drivingEvents"]    = config.drivingEvents;
     if (config.includeBattery != nil)   j[@"includeBattery"]   = config.includeBattery;
+    // v4.5.5 — these two were silently dropped on persist, so they reverted to defaults
+    // after every app restart.
+    if (config.activityConfidenceThreshold != nil) j[@"activityConfidenceThreshold"] = config.activityConfidenceThreshold;
+    if (config.maxAcceptedAccuracy != nil) j[@"maxAcceptedAccuracy"] = config.maxAcceptedAccuracy;
     if (config._showsBackgroundLocationIndicator != nil) j[@"showsBackgroundLocationIndicator"] = config._showsBackgroundLocationIndicator;
     NSError *err = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:j options:0 error:&err];
@@ -286,6 +295,8 @@
     if (j[@"mockLocationPolicy"]) config.mockLocationPolicy = j[@"mockLocationPolicy"];
     if ([j[@"drivingEvents"] isKindOfClass:[NSDictionary class]]) config.drivingEvents = j[@"drivingEvents"];
     if (j[@"includeBattery"] != nil) config.includeBattery = j[@"includeBattery"];
+    if (j[@"activityConfidenceThreshold"] != nil) config.activityConfidenceThreshold = j[@"activityConfidenceThreshold"];
+    if (j[@"maxAcceptedAccuracy"] != nil) config.maxAcceptedAccuracy = j[@"maxAcceptedAccuracy"];
     if (j[@"showsBackgroundLocationIndicator"] != nil) config._showsBackgroundLocationIndicator = j[@"showsBackgroundLocationIndicator"];
 }
 

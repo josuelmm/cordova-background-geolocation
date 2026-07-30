@@ -166,6 +166,34 @@ BackgroundGeolocation.on('location', (loc: Location) => { ... });
 
 **Type aliases / compatibility:** `BackgroundGeolocationConfig` = `ConfigureOptions`, `BackgroundGeolocationResponse` = `Location`. `BackgroundGeolocationEvents` is an enum (e.g. `BackgroundGeolocationEvents.location`). Enums and types match [@awesome-cordova-plugins/background-geolocation](https://github.com/danielsogl/awesome-cordova-plugins/blob/master/src/%40awesome-cordova-plugins/plugins/background-geolocation/index.ts) where applicable; **accuracy values** in this plugin are `0, 100, 1000, 10000` (use `BackgroundGeolocation.HIGH_ACCURACY` etc. or the `BackgroundGeolocationAccuracy` enum from the types).
 
+#### Enums: type from the root, value from `/angular`
+
+`www/BackgroundGeolocation.d.ts` is a **declaration file**. Declaration files emit no JavaScript, so the `export enum`s declared there (`BackgroundGeolocationEvents`, `BackgroundGeolocationAccuracy`, `BackgroundGeolocationMode`, `BackgroundGeolocationProvider`, `BackgroundGeolocationLogLevel`, `BackgroundGeolocationAuthorizationStatus`, `BackgroundGeolocationLocationProvider`, `BackgroundGeolocationNativeProvider`, `BackgroundGeolocationLocationCode`, `BackgroundGeolocationIOSActivity`) **have no runtime value** when imported from the root package. The code type-checks and then fails at runtime or at bundle time:
+
+```ts
+// ✗ WRONG — compiles, but the enum object does not exist at runtime
+import { BackgroundGeolocationEvents } from '@josuelmm/cordova-background-geolocation';
+BackgroundGeolocation.on(BackgroundGeolocationEvents.location, cb); // undefined at runtime
+```
+
+To use an enum **as a value**, import it from the `/angular` entry point, which is real compiled JavaScript (works in any Angular/Ionic app, and in any bundler that honours `exports`):
+
+```ts
+// ✓ RIGHT — runtime value
+import { BackgroundGeolocationEvents } from '@josuelmm/cordova-background-geolocation/angular';
+BackgroundGeolocation.on(BackgroundGeolocationEvents.location, cb);
+```
+
+From the root package, use them **as types only** — that always works:
+
+```ts
+// ✓ RIGHT — type-only usage from the root package
+import type { BackgroundGeolocationEvents } from '@josuelmm/cordova-background-geolocation';
+function subscribe(evt: BackgroundGeolocationEvents) { /* ... */ }
+```
+
+Alternatively, pass the plain string literal (`'location'`, `'possibleCrash'`, …) — the `Event` union type accepts it — or use the plugin constants below, which *are* real runtime properties of the plugin object.
+
 **Constants** (accuracy, provider, mode) are on the plugin object:
 
 ```ts

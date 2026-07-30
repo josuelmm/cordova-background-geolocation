@@ -1,4 +1,4 @@
-import { Injectable, InjectionToken } from '@angular/core';
+import { Injectable, InjectionToken, NgZone } from '@angular/core';
 
 /**
  * Token used to provide BackgroundGeolocationService without triggering JIT.
@@ -22,6 +22,13 @@ export const BACKGROUND_GEOLOCATION_SERVICE = new InjectionToken<BackgroundGeolo
  */
 @Injectable()
 export class BackgroundGeolocationService {
+
+  /**
+   * Native plugin events are emitted from outside the Angular zone, so change
+   * detection would not run for them. Every listener registered through on() is
+   * re-entered into the zone with zone.run().
+   */
+  constructor(private zone: NgZone) {}
 
   /** Returns the global plugin instance (Cordova/Capacitor). */
   private get plugin(): any {
@@ -49,16 +56,6 @@ export class BackgroundGeolocationService {
 
   stop(): Promise<void> {
     return this.ensurePlugin().stop();
-  }
-
-  /** Inform the native plugin that the background task may complete (iOS). Call after handling location/stationary in the callback. */
-  finish(): Promise<void> {
-    return this.ensurePlugin().finish();
-  }
-
-  /** Force the plugin to enter "moving" or "stationary" state (iOS). */
-  changePace(isMoving: boolean): Promise<void> {
-    return this.ensurePlugin().changePace(isMoving);
   }
 
   getCurrentLocation(
@@ -306,21 +303,26 @@ export class BackgroundGeolocationService {
    */
   on(eventName: string, callback?: (value: any) => void): { subscribe(cb: (value: any) => void): { unsubscribe(): void }; unsubscribe(): void } {
     const plugin = this.ensurePlugin();
+    const zone = this.zone;
     if (callback !== undefined) {
-      const sub = plugin.on(eventName, callback) as { remove?: () => void };
-      return {
-        subscribe(cb: (value: any) => void) {
-          const s = cb ? (plugin.on(eventName, cb) as { remove?: () => void }) : null;
-          return { unsubscribe() { s?.remove?.(); } };
+      const zoned = (value: any) => zone.run(() => callback(value));
+      const sub = plugin.on(eventName, zoned) as { remove?: () => void };
+      const subscription = {
+        // subscribe() must NOT register a second listener: the callback passed to
+        // on() is already subscribed. Return the very same subscription instead.
+        subscribe(_cb?: (value: any) => void) {
+          return { unsubscribe() { sub.remove?.(); } };
         },
         unsubscribe() { sub.remove?.(); }
       };
+      return subscription;
     }
     const channel = plugin.on(eventName) as { subscribe: (cb: (v: any) => void) => void; unsubscribe: (cb: (v: any) => void) => void };
     return {
       subscribe(cb: (value: any) => void) {
-        channel.subscribe(cb);
-        return { unsubscribe() { channel.unsubscribe(cb); } };
+        const zoned = (value: any) => zone.run(() => cb(value));
+        channel.subscribe(zoned);
+        return { unsubscribe() { channel.unsubscribe(zoned); } };
       },
       unsubscribe() { /* no-op when no callback */ }
     };

@@ -16,13 +16,13 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 
-import static androidx.test.platform.app.InstrumentationRegistry.getContext;
+import static androidx.test.core.app.ApplicationProvider.getApplicationContext;
 import static com.marianhello.bgloc.data.sqlite.SQLiteLocationContract.LocationEntry.SQL_DROP_LOCATION_TABLE;
 import static junit.framework.Assert.assertEquals;
 
 public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
     public void deleteDatabase() {
-        SQLiteOpenHelper dbHelper = new SQLiteOpenHelper(getContext());
+        SQLiteOpenHelper dbHelper = new SQLiteOpenHelper(getApplicationContext());
         SQLiteDatabase db = dbHelper.getWritableDatabase();
         dbHelper.execAndLogSql(db, SQL_DROP_LOCATION_TABLE);
         dbHelper.onCreate(db);
@@ -37,7 +37,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testPersistLocation() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         Location location = new Location("fake");
         location.setAccuracy(200);
@@ -72,7 +72,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testPersistLocationIsMock() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         BackgroundLocation bgLocation = new BackgroundLocation();
         bgLocation.setMockLocationsEnabled(true);
@@ -92,7 +92,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testDeleteLocationById() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         BackgroundLocation bgLocation = BackgroundLocation.fromLocation(new Location("fake"));
         Collection<BackgroundLocation> locations = null;
@@ -110,7 +110,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testDeleteAllLocations() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
         Collection<BackgroundLocation> locations = null;
 
         for (int i = 0; i < 10; i++) {
@@ -128,7 +128,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testGetAllLocations() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         Location location = null;
         BackgroundLocation bgLocation = null;
@@ -165,7 +165,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testPersistLocationWithRowLimit() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         int maxRows = 100;
 
@@ -179,7 +179,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testShouldReplaceOldLocation() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         dao.persistLocation(BackgroundLocation.fromLocation(new Location("old")), 1);
         dao.persistLocation(BackgroundLocation.fromLocation(new Location("new")), 1);
@@ -191,7 +191,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testPersistLocationWithRowLimitWhenMaxRowsReduced() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         int maxRowsRun[] = {100, 10};
 
@@ -210,7 +210,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testPersistLocationWithBatchId() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         BackgroundLocation location = new BackgroundLocation();
         location.setBatchStartMillis(1000L);
@@ -221,7 +221,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testGetLocationsForSyncCount() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         BackgroundLocation location;
         for (int i = 1; i < 100; i++) {
@@ -247,7 +247,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testGetLocationById() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         Location location = null;
         BackgroundLocation bgLocation = null;
@@ -272,7 +272,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testGetFirstPendingLocation() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         BackgroundLocation location = null;
 
@@ -300,7 +300,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testGetNextPendingLocation() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         BackgroundLocation location = null;
 
@@ -328,7 +328,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testGetPendingLocationsCount() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         BackgroundLocation location = null;
 
@@ -355,7 +355,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testDeleteFirstPendingLocation() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         BackgroundLocation location = null;
 
@@ -383,7 +383,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testDeletePendingLocations() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         BackgroundLocation location = null;
 
@@ -412,7 +412,7 @@ public class ContentProviderLocationDAOTest extends LocationProviderTestCase {
 
     @Test
     public void testPersistLocationForSync() {
-        LocationDAO dao = new ContentProviderLocationDAO(getContext());
+        LocationDAO dao = new ContentProviderLocationDAO(getApplicationContext());
 
         BackgroundLocation location = new BackgroundLocation();
         location.setProvider("fake");

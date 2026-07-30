@@ -38,7 +38,20 @@ public class Config implements Parcelable
     public static final int RAW_PROVIDER = 2;
 
     // NULL string config option to distinguish between java null
+    /**
+     * Sentinel meaning "explicitly cleared" (as opposed to "not provided"), for the String options
+     * that JS can reset by passing null.
+     *
+     * <p>Compare with {@link #isNullString(String)}, never with {@code ==} / {@code !=}: it is an
+     * empty String, so identity comparison stopped matching the moment the value made a round trip
+     * through a Parcel or SQLite, and every caller then serialized "" instead of JSON null.
+     */
     public static final String NullString = new String();
+
+    /** True when {@code s} is null or the {@link #NullString} sentinel (i.e. an empty String). */
+    public static boolean isNullString(String s) {
+        return s == null || s.isEmpty();
+    }
 
     private Float stationaryRadius;
     private Integer distanceFilter;
@@ -198,9 +211,9 @@ public class Config implements Parcelable
     }
 
     private Config(Parcel in) {
-        setStationaryRadius(in.readFloat());
-        setDistanceFilter(in.readInt());
-        setDesiredAccuracy(in.readInt());
+        setStationaryRadius((Float) in.readValue(null));
+        setDistanceFilter((Integer) in.readValue(null));
+        setDesiredAccuracy((Integer) in.readValue(null));
         setDebugging((Boolean) in.readValue(null));
         setNotificationTitle(in.readString());
         setNotificationText(in.readString());
@@ -215,16 +228,16 @@ public class Config implements Parcelable
         setStartOnBoot((Boolean) in.readValue(null));
         setStartForeground((Boolean) in.readValue(null));
         setNotificationsEnabled((Boolean) in.readValue(null));
-        setLocationProvider(in.readInt());
-        setInterval(in.readInt());
-        setFastestInterval(in.readInt());
-        setActivitiesInterval(in.readInt());
+        setLocationProvider((Integer) in.readValue(null));
+        setInterval((Integer) in.readValue(null));
+        setFastestInterval((Integer) in.readValue(null));
+        setActivitiesInterval((Integer) in.readValue(null));
         setStopOnStillActivity((Boolean) in.readValue(null));
         setUrl(in.readString());
         setSyncUrl(in.readString());
-        setSyncThreshold(in.readInt());
+        setSyncThreshold((Integer) in.readValue(null));
         setSyncEnabled((Boolean) in.readValue(null));
-        setMaxLocations(in.readInt());
+        setMaxLocations((Integer) in.readValue(null));
         setEnableWatchdog((Boolean) in.readValue(null));
         setShowTime((Boolean) in.readValue(null));
         setShowDistance((Boolean) in.readValue(null));
@@ -350,9 +363,14 @@ public class Config implements Parcelable
 
     // write your object's data to the passed-in Parcel
     public void writeToParcel(Parcel out, int flags) {
-        out.writeFloat(getStationaryRadius());
-        out.writeInt(getDistanceFilter());
-        out.writeInt(getDesiredAccuracy());
+        // writeValue for every boxed field, mirrored by readValue in Config(Parcel).
+        // writeFloat/writeInt auto-unboxed (NPE on a partially-populated Config, e.g. the
+        // one ConfigMapper returns before merge) and, on the way back, readFloat/readInt
+        // could never produce null — so after any Parcel round-trip every has*() answered
+        // true and Config.merge()'s partial-update semantics silently broke.
+        out.writeValue(getStationaryRadius());
+        out.writeValue(getDistanceFilter());
+        out.writeValue(getDesiredAccuracy());
         out.writeValue(isDebugging());
         out.writeString(getNotificationTitle());
         out.writeString(getNotificationText());
@@ -367,16 +385,16 @@ public class Config implements Parcelable
         out.writeValue(getStartOnBoot());
         out.writeValue(getStartForeground());
         out.writeValue(getNotificationsEnabled());
-        out.writeInt(getLocationProvider());
-        out.writeInt(getInterval());
-        out.writeInt(getFastestInterval());
-        out.writeInt(getActivitiesInterval());
+        out.writeValue(getLocationProvider());
+        out.writeValue(getInterval());
+        out.writeValue(getFastestInterval());
+        out.writeValue(getActivitiesInterval());
         out.writeValue(getStopOnStillActivity());
         out.writeString(getUrl());
         out.writeString(getSyncUrl());
-        out.writeInt(getSyncThreshold());
+        out.writeValue(getSyncThreshold());
         out.writeValue(getSyncEnabled());
-        out.writeInt(getMaxLocations());
+        out.writeValue(getMaxLocations());
         out.writeValue(getEnableWatchdog());
         out.writeValue(getShowTime());
         out.writeValue(getShowDistance());
@@ -1061,13 +1079,17 @@ public class Config implements Parcelable
         if (config2.hasActivitiesInterval()) {
             merger.setActivitiesInterval(config2.getActivitiesInterval());
         }
-        if (config2.hasNotificationIconColor()) {
+        // `!= null` rather than the has*() helpers: those also require non-empty, so passing
+        // null/"" from JS (which ConfigMapper turns into Config.NullString, i.e. "") was treated
+        // as "not provided" and the previous icon/colour survived — there was no way to clear one
+        // once set.
+        if (config2.getNotificationIconColor() != null) {
             merger.setNotificationIconColor(config2.getNotificationIconColor());
         }
-        if (config2.hasLargeNotificationIcon()) {
+        if (config2.getLargeNotificationIcon() != null) {
             merger.setLargeNotificationIcon(config2.getLargeNotificationIcon());
         }
-        if (config2.hasSmallNotificationIcon()) {
+        if (config2.getSmallNotificationIcon() != null) {
             merger.setSmallNotificationIcon(config2.getSmallNotificationIcon());
         }
         if (config2.hasStartForeground()) {
@@ -1105,6 +1127,13 @@ public class Config implements Parcelable
         }
         if (config2.hasShowDistance()) {
             merger.setShowDistance(config2.getShowDistance());
+        }
+        // enableWatchdog was missing here. configure() merges the incoming config onto the stored
+        // one and persists the result, so `configure({enableWatchdog:true})` was dropped on every
+        // call and the flag stayed at its `false` default forever — there was no way to turn the
+        // watchdog on, and a provider that died silently was never restarted.
+        if (config2.hasEnableWatchdog()) {
+            merger.setEnableWatchdog(config2.getEnableWatchdog());
         }
         if (config2.httpMethod != null) {
             merger.setHttpMethod(config2.getHttpMethod());

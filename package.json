@@ -1,6 +1,6 @@
 {
   "name": "@josuelmm/cordova-background-geolocation",
-  "version": "4.5.5",
+  "version": "5.0.0",
   "description": "Cordova Background Geolocation (fork actualizado)",
   "main": "./www/BackgroundGeolocation.js",
   "types": "./www/BackgroundGeolocation.d.ts",
@@ -32,9 +32,12 @@
   },
   "scripts": {
     "build:angular": "npx ng-packagr -p angular/ng-package.json && node scripts/fix-angular-dts-paths.js",
+    "prepare": "npm run build:angular",
     "prepack": "npm run build:angular",
     "pack": "npm pack",
-    "build": "npm run build:angular && npm pack"
+    "build": "npm run build:angular && npm pack",
+    "test:js": "node www/__tests__/radio.test.js && node www/__tests__/enums.test.js",
+    "test": "npm run test:js"
   },
   "cordova": {
     "id": "cordova-background-geolocation",
@@ -139,6 +142,16 @@
         "cordova": ">=10.0.0",
         "cordova-android": ">=12.0.0",
         "cordova-ios": ">=6.2.0"
+      },
+      "4.5.5": {
+        "cordova": ">=10.0.0",
+        "cordova-android": ">=12.0.0",
+        "cordova-ios": ">=6.2.0"
+      },
+      "5.0.0": {
+        "cordova": ">=12.0.0",
+        "cordova-android": ">=13.0.0",
+        "cordova-ios": ">=7.0.0"
       }
     }
   },

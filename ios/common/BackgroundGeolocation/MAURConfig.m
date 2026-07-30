@@ -128,8 +128,16 @@
     if (isNotNull(config[@"activityConfidenceThreshold"])) {
         instance.activityConfidenceThreshold = config[@"activityConfidenceThreshold"];
     }
-    if (isNotNull(config[@"maxAcceptedAccuracy"])) {
-        instance.maxAcceptedAccuracy = config[@"maxAcceptedAccuracy"];
+    // v4.5.6 — D30: an explicit null must be able to switch the accuracy filter back off.
+    // Previously `maxAcceptedAccuracy: null` was ignored and the previous value survived,
+    // so once set the filter could never be disabled at runtime.
+    if (config[@"maxAcceptedAccuracy"] != nil) {
+        if (isNull(config[@"maxAcceptedAccuracy"])) {
+            instance.maxAcceptedAccuracy = nil;
+            instance.resetMaxAcceptedAccuracy = YES;
+        } else {
+            instance.maxAcceptedAccuracy = config[@"maxAcceptedAccuracy"];
+        }
     }
     if (isNotNull(config[@"saveBatteryOnBackground"])) {
         instance._saveBatteryOnBackground = config[@"saveBatteryOnBackground"];
@@ -235,7 +243,10 @@
     if (newConfig.activityConfidenceThreshold != nil) {
         merger.activityConfidenceThreshold = newConfig.activityConfidenceThreshold;
     }
-    if (newConfig.maxAcceptedAccuracy != nil) {
+    // v4.5.6 — D30: honour an explicit `maxAcceptedAccuracy: null` as "disable the filter".
+    if (newConfig.resetMaxAcceptedAccuracy) {
+        merger.maxAcceptedAccuracy = nil;
+    } else if (newConfig.maxAcceptedAccuracy != nil) {
         merger.maxAcceptedAccuracy = newConfig.maxAcceptedAccuracy;
     }
     if ([newConfig hasSaveBatteryOnBackground]) {
@@ -547,6 +558,9 @@
              @"events": @"@events",
              @"battery": @"@battery",
              @"isCharging": @"@isCharging",
+             // v4.5.6 — D24: expose the mock/simulated flag so `mockLocationPolicy: 'flag'`
+             // actually marks the payload. Android sends the equivalent isFromMockProvider.
+             @"mocked": @"@simulated",
              };
 }
 

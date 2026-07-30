@@ -64,27 +64,56 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
     // v4.5.4 — Aggressive interval used while acquiring stationary location or speed (FLP path).
     private static final long ACQUISITION_INTERVAL_MS = 1000L;
 
-    private Boolean isMoving = false;
-    private Boolean isAcquiringStationaryLocation = false;
-    private Boolean isAcquiringSpeed = false;
-    private Integer locationAcquisitionAttempts = 0;
+    private volatile Boolean isMoving = false;
+    // volatile: the stationary alarm / polling receivers are delivered on the service's
+    // HandlerThread (LocationServiceImpl.registerReceiver passes mServiceHandler), while
+    // onStart/onStop/onConfigure/handleNewLocation run on the main thread. Without a memory
+    // barrier the two threads could see different halves of this state machine — e.g. stay in
+    // acquisition mode forever, or subscribe to the FLP twice.
+    private volatile Boolean isAcquiringStationaryLocation = false;
+    private volatile Boolean isAcquiringSpeed = false;
+    private volatile Integer locationAcquisitionAttempts = 0;
 
-    private Location lastLocation;
-    private Location stationaryLocation;
-    private float stationaryRadius;
+    private volatile Location lastLocation;
+    private volatile Location stationaryLocation;
+    private volatile float stationaryRadius;
     private PendingIntent stationaryAlarmPI;
     private PendingIntent stationaryLocationPollingPI;
     private PendingIntent singleUpdatePI;          // legacy path only
-    private long stationaryLocationPollingInterval;
+    private volatile long stationaryLocationPollingInterval;
 
-    private Integer scaledDistanceFilter;
+    private volatile Integer scaledDistanceFilter;
+
+    /**
+     * v5.0 — A16: {@code volatile} above only buys visibility. Every transition here is a
+     * read-modify-write over several fields at once, and they run on different threads: the
+     * stationary alarm / polling receivers are delivered on the service's HandlerThread
+     * (see {@code LocationServiceImpl.registerReceiver}), while {@code onStart}/{@code onStop}/
+     * {@code onCommand}/{@code onConfigure} and the location callbacks run on the main thread.
+     * {@code StationaryAlarmReceiver} → {@code setPace(false)} interleaving with
+     * {@code setPace(true)} from {@code onCommand} could leave {@code isMoving == true} AND
+     * {@code isAcquiringStationaryLocation == true}, or two live location subscriptions.
+     *
+     * <p>A dedicated lock, not {@code this}: the service and the receivers both hold references
+     * to this provider, so an external {@code synchronized (provider)} would join this lock's
+     * ordering and could deadlock.
+     *
+     * <p><b>Invariant:</b> never call out to the delegate while holding it —
+     * {@code handleLocation}, {@code handleStationary}, {@code handleServiceError} and
+     * {@code handleSecurityException} reach {@code LocationServiceImpl}, whose {@code stop()} /
+     * {@code configure()} are {@code synchronized} on the service and call back into the
+     * provider. Holding both in opposite orders is a textbook inversion. Compute under the lock,
+     * release, then report. {@code playDebugTone}/{@code showDebugToast} never touch the
+     * delegate, so they may stay inside.
+     */
+    private final Object mStateLock = new Object();
 
     private FusedLocationProviderClient fusedClient;  // null on the legacy path
     private LocationManager locationManager;           // always non-null after onCreate
     private AlarmManager alarmManager;
     private boolean usingFused = false;
 
-    private boolean isStarted = false;
+    private volatile boolean isStarted = false;
 
     /** v4.5.1: read overrides from {@link com.marianhello.bgloc.Config}; fall back to defaults. */
     private long getStationaryTimeout() {
@@ -167,20 +196,28 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
                 ? PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_MUTABLE
                 : PendingIntent.FLAG_CANCEL_CURRENT;
 
-        Intent stationaryAlarmIntent = new Intent(mContext, StationaryAlarmReceiver.class);
-        stationaryAlarmIntent.setAction(STATIONARY_ALARM_ACTION);
+        // IMPORTANT: these intents must stay *implicit* (action-only, restricted to our own
+        // package). The receivers below are context-registered inner classes that are not, and
+        // must not be, declared in the manifest. ActivityManager only matches context-registered
+        // receivers when the broadcast carries no explicit component, so targeting the receiver
+        // class here (`new Intent(mContext, XReceiver.class)`) made Android drop every one of
+        // these broadcasts silently: the stationary alarm never fired, the provider stopped
+        // requesting locations after entering the stationary state, and tracking died for good.
+        // setPackage() keeps the broadcast internal, which is also what API 34+ requires to
+        // build a PendingIntent from an implicit intent.
+        String pkg = mContext.getPackageName();
+
+        Intent stationaryAlarmIntent = new Intent(STATIONARY_ALARM_ACTION).setPackage(pkg);
         stationaryAlarmPI = PendingIntent.getBroadcast(mContext, 9000, stationaryAlarmIntent, updateCurrentFlag);
         registerReceiver(stationaryAlarmReceiver, new IntentFilter(STATIONARY_ALARM_ACTION));
 
-        Intent stationaryLocationMonitorIntent = new Intent(mContext, StationaryLocationMonitorReceiver.class);
-        stationaryLocationMonitorIntent.setAction(STATIONARY_LOCATION_MONITOR_ACTION);
+        Intent stationaryLocationMonitorIntent = new Intent(STATIONARY_LOCATION_MONITOR_ACTION).setPackage(pkg);
         stationaryLocationPollingPI = PendingIntent.getBroadcast(mContext, 9002, stationaryLocationMonitorIntent, updateCurrentFlag);
         registerReceiver(stationaryLocationMonitorReceiver, new IntentFilter(STATIONARY_LOCATION_MONITOR_ACTION));
 
         // Legacy single-update PI + receiver (only used when usingFused == false).
         if (!usingFused) {
-            Intent singleLocationUpdateIntent = new Intent(mContext, SingleUpdateReceiver.class);
-            singleLocationUpdateIntent.setAction(SINGLE_LOCATION_UPDATE_ACTION);
+            Intent singleLocationUpdateIntent = new Intent(SINGLE_LOCATION_UPDATE_ACTION).setPackage(pkg);
             singleUpdatePI = PendingIntent.getBroadcast(mContext, 9003, singleLocationUpdateIntent, singleUpdateFlag);
             registerReceiver(singleUpdateReceiver, new IntentFilter(SINGLE_LOCATION_UPDATE_ACTION));
         }
@@ -188,42 +225,50 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
 
     @Override
     public void onStart() {
-        if (isStarted) {
-            return;
-        }
-        if (locationManager == null) {
-            logger.error("LocationManager is null");
-            return;
-        }
-        if (alarmManager == null) {
-            logger.error("AlarmManager is null");
-            return;
-        }
-        if (mConfig == null) {
-            logger.warn("DistanceFilterLocationProvider started without config");
-            return;
-        }
+        // v5.0 — A16: serialized against the receivers' setPace() (see mStateLock).
+        synchronized (mStateLock) {
+            if (isStarted) {
+                return;
+            }
+            if (locationManager == null) {
+                logger.error("LocationManager is null");
+                return;
+            }
+            if (alarmManager == null) {
+                logger.error("AlarmManager is null");
+                return;
+            }
+            if (mConfig == null) {
+                logger.warn("DistanceFilterLocationProvider started without config");
+                return;
+            }
 
-        logger.info("Start recording (path={})", usingFused ? "fused" : "legacy");
-        scaledDistanceFilter = mConfig.getDistanceFilter();
-        isStarted = true;
+            logger.info("Start recording (path={})", usingFused ? "fused" : "legacy");
+            scaledDistanceFilter = mConfig.getDistanceFilter();
+            isStarted = true;
+        }
+        // setPace() takes the lock itself and reports errors after releasing it.
         setPace(false);
     }
 
     @Override
     public void onStop() {
-        if (!isStarted) {
-            return;
-        }
-        try {
-            unsubscribeLocationUpdates();
-            if (alarmManager != null) {
-                if (stationaryAlarmPI != null) alarmManager.cancel(stationaryAlarmPI);
-                if (stationaryLocationPollingPI != null) alarmManager.cancel(stationaryLocationPollingPI);
+        // v5.0 — A16: serialized; otherwise a stationary alarm arriving mid-stop could
+        // re-subscribe to the FLP right after unsubscribeLocationUpdates().
+        synchronized (mStateLock) {
+            if (!isStarted) {
+                return;
             }
-        } catch (SecurityException ignored) {
-        } finally {
-            isStarted = false;
+            try {
+                unsubscribeLocationUpdates();
+                if (alarmManager != null) {
+                    if (stationaryAlarmPI != null) alarmManager.cancel(stationaryAlarmPI);
+                    if (stationaryLocationPollingPI != null) alarmManager.cancel(stationaryLocationPollingPI);
+                }
+            } catch (SecurityException ignored) {
+            } finally {
+                isStarted = false;
+            }
         }
     }
 
@@ -239,6 +284,10 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
     @Override
     public void onConfigure(Config config) {
         super.onConfigure(config);
+        // v5.0 — A16: deliberately NOT holding mStateLock here. onStop() and onStart() are each
+        // atomic on their own, and onStart() ends in setPace(), which reports errors to the
+        // delegate — wrapping the pair would hold the lock across that call-out and reopen the
+        // lock-order inversion documented on mStateLock.
         if (isStarted) {
             onStop();
             onStart();
@@ -307,44 +356,59 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
      * @param value true → aggressive moving tracking, false → stationary monitoring
      */
     private void setPace(Boolean value) {
-        if (!isStarted) {
-            return;
-        }
-        if (mConfig == null) {
-            return;
-        }
+        // v5.0 — A16: the whole transition is one atomic unit. Two concurrent setPace() calls
+        // (receiver thread vs main thread) used to interleave between the field writes and the
+        // unsubscribe/subscribe pair, which could leave isMoving == true together with
+        // isAcquiringStationaryLocation == true, or two live subscriptions.
+        // Delegate call-outs are collected here and performed after the lock is released.
+        boolean noProviderAvailable = false;
+        SecurityException pendingSecurityException = null;
 
-        logger.info("Setting pace: {}", value);
+        synchronized (mStateLock) {
+            if (!isStarted) {
+                return;
+            }
+            if (mConfig == null) {
+                return;
+            }
 
-        Boolean wasMoving                = isMoving;
-        isMoving                         = value;
-        isAcquiringStationaryLocation    = false;
-        isAcquiringSpeed                 = false;
-        stationaryLocation               = null;
+            logger.info("Setting pace: {}", value);
 
-        try {
-            unsubscribeLocationUpdates();
+            Boolean wasMoving                = isMoving;
+            isMoving                         = value;
+            isAcquiringStationaryLocation    = false;
+            isAcquiringSpeed                 = false;
+            stationaryLocation               = null;
 
-            if (isMoving) {
-                if (!wasMoving) {
-                    isAcquiringSpeed = true;
+            try {
+                unsubscribeLocationUpdates();
+
+                if (isMoving) {
+                    if (!wasMoving) {
+                        isAcquiringSpeed = true;
+                    }
+                } else {
+                    isAcquiringStationaryLocation = true;
                 }
-            } else {
-                isAcquiringStationaryLocation = true;
-            }
 
-            if (!anyProviderEnabled()) {
-                handleServiceError("No location provider available (GPS and Network disabled).");
-            }
+                noProviderAvailable = !anyProviderEnabled();
 
-            if (usingFused) {
-                subscribeFused();
-            } else {
-                subscribeLegacy();
+                if (usingFused) {
+                    subscribeFused();
+                } else {
+                    subscribeLegacy();
+                }
+            } catch (SecurityException e) {
+                logger.error("Security exception: {}", e.getMessage());
+                pendingSecurityException = e;
             }
-        } catch (SecurityException e) {
-            logger.error("Security exception: {}", e.getMessage());
-            this.handleSecurityException(e);
+        }
+
+        if (noProviderAvailable) {
+            handleServiceError("No location provider available (GPS and Network disabled).");
+        }
+        if (pendingSecurityException != null) {
+            this.handleSecurityException(pendingSecurityException);
         }
     }
 
@@ -368,16 +432,16 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
             }
             request = b.build();
         }
-        try {
-            fusedClient.requestLocationUpdates(request, fusedCallback, Looper.getMainLooper());
-        } catch (SecurityException e) {
-            this.handleSecurityException(e);
-        }
+        // v5.0 — A16: let SecurityException propagate to setPace(), which reports it to the
+        // delegate AFTER releasing mStateLock. Reporting from here would do it under the lock.
+        fusedClient.requestLocationUpdates(request, fusedCallback, Looper.getMainLooper());
     }
 
     private void subscribeLegacy() {
         if (locationManager == null) return;
-        try {
+        // v5.0 — A16: SecurityException propagates to setPace(), which reports it to the delegate
+        // after releasing mStateLock (see the note on that field).
+        {
             if (isAcquiringSpeed || isAcquiringStationaryLocation) {
                 locationAcquisitionAttempts = 0;
                 // Burst: subscribe to every non-passive provider for fastest lock.
@@ -413,8 +477,6 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
                     locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, interval, distance, this);
                 }
             }
-        } catch (SecurityException e) {
-            this.handleSecurityException(e);
         }
     }
 
@@ -453,58 +515,85 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
      */
     private void handleNewLocation(Location location) {
         if (location == null) return;
-        logger.debug("Location change: {} isMoving={}", location.toString(), isMoving);
 
-        if (!isMoving && !isAcquiringStationaryLocation && stationaryLocation==null) {
-            // Perhaps our GPS signal was interrupted, re-acquire a stationary location now.
-            setPace(false);
+        // v5.0 — A16: the state machine runs under mStateLock so it cannot interleave with a
+        // stationary alarm arriving on the service HandlerThread. The two delegate call-outs
+        // (handleStationary / handleLocation) are deferred to after the lock is released; see the
+        // note on mStateLock for why holding it across them would risk a deadlock.
+        Location stationaryToReport = null;
+        float stationaryRadiusToReport = 0f;
+        Location locationToReport = null;
+        SecurityException pendingSecurityException = null;
+
+        synchronized (mStateLock) {
+            logger.debug("Location change: {} isMoving={}", location.toString(), isMoving);
+
+            if (!isMoving && !isAcquiringStationaryLocation && stationaryLocation==null) {
+                // Perhaps our GPS signal was interrupted, re-acquire a stationary location now.
+                // Reentrant: same thread, same lock.
+                setPace(false);
+            }
+
+            showDebugToast("mv:" + isMoving + ",acy:" + location.getAccuracy() + ",v:" + location.getSpeed() + ",df:" + scaledDistanceFilter);
+
+            // do/while(false): preserves the original method's early `return`s as `break`s so the
+            // deferred call-outs below still run. Behaviour is unchanged.
+            do {
+                if (isAcquiringStationaryLocation) {
+                    if (stationaryLocation == null || stationaryLocation.getAccuracy() > location.getAccuracy()) {
+                        stationaryLocation = location;
+                    }
+                    if (++locationAcquisitionAttempts == MAX_STATIONARY_ACQUISITION_ATTEMPTS) {
+                        isAcquiringStationaryLocation = false;
+                        pendingSecurityException = enterStationary(stationaryLocation);
+                        stationaryToReport = stationaryLocation;
+                        stationaryRadiusToReport = stationaryRadius;
+                    } else {
+                        playDebugTone(Tone.BEEP);
+                    }
+                    break;
+                } else if (isAcquiringSpeed) {
+                    if (++locationAcquisitionAttempts == MAX_SPEED_ACQUISITION_ATTEMPTS) {
+                        playDebugTone(Tone.DOODLY_DOO);
+                        isAcquiringSpeed = false;
+                        scaledDistanceFilter = calculateDistanceFilter(location.getSpeed());
+                        setPace(true);
+                    } else {
+                        playDebugTone(Tone.BEEP);
+                        break;
+                    }
+                } else if (isMoving) {
+                    playDebugTone(Tone.BEEP);
+
+                    if ((location.getSpeed() >= 1) && (location.getAccuracy() <= mConfig.getStationaryRadius())) {
+                        resetStationaryAlarm();
+                    }
+                    Integer newDistanceFilter = calculateDistanceFilter(location.getSpeed());
+                    if (newDistanceFilter != scaledDistanceFilter.intValue()) {
+                        logger.info("Updating distanceFilter: new={} old={}", newDistanceFilter, scaledDistanceFilter);
+                        scaledDistanceFilter = newDistanceFilter;
+                        setPace(true);
+                    }
+                    if (lastLocation != null && location.distanceTo(lastLocation) < mConfig.getDistanceFilter()) {
+                        break;
+                    }
+                } else if (stationaryLocation != null) {
+                    break;
+                }
+                lastLocation = location;
+                locationToReport = location;
+            } while (false);
         }
 
-        showDebugToast("mv:" + isMoving + ",acy:" + location.getAccuracy() + ",v:" + location.getSpeed() + ",df:" + scaledDistanceFilter);
-
-        if (isAcquiringStationaryLocation) {
-            if (stationaryLocation == null || stationaryLocation.getAccuracy() > location.getAccuracy()) {
-                stationaryLocation = location;
-            }
-            if (++locationAcquisitionAttempts == MAX_STATIONARY_ACQUISITION_ATTEMPTS) {
-                isAcquiringStationaryLocation = false;
-                enterStationary(stationaryLocation);
-                handleStationary(stationaryLocation, stationaryRadius);
-                return;
-            } else {
-                playDebugTone(Tone.BEEP);
-                return;
-            }
-        } else if (isAcquiringSpeed) {
-            if (++locationAcquisitionAttempts == MAX_SPEED_ACQUISITION_ATTEMPTS) {
-                playDebugTone(Tone.DOODLY_DOO);
-                isAcquiringSpeed = false;
-                scaledDistanceFilter = calculateDistanceFilter(location.getSpeed());
-                setPace(true);
-            } else {
-                playDebugTone(Tone.BEEP);
-                return;
-            }
-        } else if (isMoving) {
-            playDebugTone(Tone.BEEP);
-
-            if ((location.getSpeed() >= 1) && (location.getAccuracy() <= mConfig.getStationaryRadius())) {
-                resetStationaryAlarm();
-            }
-            Integer newDistanceFilter = calculateDistanceFilter(location.getSpeed());
-            if (newDistanceFilter != scaledDistanceFilter.intValue()) {
-                logger.info("Updating distanceFilter: new={} old={}", newDistanceFilter, scaledDistanceFilter);
-                scaledDistanceFilter = newDistanceFilter;
-                setPace(true);
-            }
-            if (lastLocation != null && location.distanceTo(lastLocation) < mConfig.getDistanceFilter()) {
-                return;
-            }
-        } else if (stationaryLocation != null) {
-            return;
+        if (stationaryToReport != null) {
+            handleStationary(stationaryToReport, stationaryRadiusToReport);
         }
-        lastLocation = location;
-        handleLocation(location);
+        if (locationToReport != null) {
+            handleLocation(locationToReport);
+        }
+        if (pendingSecurityException != null) {
+            this.handleSecurityException(pendingSecurityException);
+        }
     }
 
     public void resetStationaryAlarm() {
@@ -527,8 +616,8 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
      * The previous version also called {@code addProximityAlert} (geofence); that
      * path has been removed per product decision (no geofencing).
      */
-    private void enterStationary(Location location) {
-        if (location == null || mConfig == null) return;
+    private SecurityException enterStationary(Location location) {
+        if (location == null || mConfig == null) return null;
         try {
             unsubscribeLocationUpdates();
 
@@ -541,12 +630,22 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
 
             startPollingStationaryLocation(getStationaryPollLazy());
         } catch (SecurityException e) {
+            // v5.0 — A16: the caller (handleNewLocation) holds mStateLock; return the exception
+            // so it is reported to the delegate only after the lock is released.
             logger.error("Security exception: {}", e.getMessage());
-            this.handleSecurityException(e);
+            return e;
         }
+        return null;
     }
 
-    /** Engage aggressive geolocation after stationary exit. */
+    /**
+     * Engage aggressive geolocation after stationary exit.
+     *
+     * <p>v5.0 — A16: deliberately NOT holding {@link #mStateLock}. It only cancels an alarm and
+     * delegates the whole transition to {@code setPace(true)}, which is atomic on its own and
+     * reports errors after releasing the lock. Wrapping this method would hold the lock across
+     * that call-out.
+     */
     public void onExitStationaryRegion(Location location) {
         if (location == null || alarmManager == null) return;
 

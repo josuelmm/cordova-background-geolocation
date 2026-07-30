@@ -16,13 +16,14 @@ import static com.marianhello.bgloc.data.sqlite.SQLiteConfigurationContract.Conf
 import static com.marianhello.bgloc.data.sqlite.SQLiteConfigurationContract.ConfigurationEntry.SQL_DROP_CONFIG_TABLE;
 import static com.marianhello.bgloc.data.sqlite.SQLiteLocationContract.LocationEntry.SQL_CREATE_LOCATION_TABLE;
 import static com.marianhello.bgloc.data.sqlite.SQLiteLocationContract.LocationEntry.SQL_CREATE_LOCATION_TABLE_BATCH_ID_IDX;
+import static com.marianhello.bgloc.data.sqlite.SQLiteLocationContract.LocationEntry.SQL_CREATE_LOCATION_TABLE_STATUS_IDX;
 import static com.marianhello.bgloc.data.sqlite.SQLiteLocationContract.LocationEntry.SQL_CREATE_LOCATION_TABLE_TIME_IDX;
 import static com.marianhello.bgloc.data.sqlite.SQLiteLocationContract.LocationEntry.SQL_DROP_LOCATION_TABLE;
 
 public class SQLiteOpenHelper extends android.database.sqlite.SQLiteOpenHelper {
     private static final String TAG = SQLiteOpenHelper.class.getName();
     public static final String SQLITE_DATABASE_NAME = "cordova_bg_geolocation.db";
-    public static final int DATABASE_VERSION = 22;
+    public static final int DATABASE_VERSION = 23;
 
     public static final String TEXT_TYPE = " TEXT";
     public static final String INTEGER_TYPE = " INTEGER";
@@ -60,6 +61,25 @@ public class SQLiteOpenHelper extends android.database.sqlite.SQLiteOpenHelper {
         super(context, SQLITE_DATABASE_NAME, null, DATABASE_VERSION);
     }
 
+    /**
+     * v5.0 — B6: enable write-ahead logging.
+     *
+     * <p>Two processes open this same file: the app's main process (LocationServiceImpl writing
+     * fixes, the plugin reading them) and the ":sync" process (SyncAdapter draining the queue).
+     * Under the default rollback journal a writer takes an exclusive lock over the whole database,
+     * so a batch insert in one process blocked every read in the other — visible as multi-second
+     * stalls (and SQLiteDatabaseLockedException) while a sync was uploading. With WAL, readers and
+     * the single writer no longer block each other.
+     *
+     * <p>Foreign-key enforcement is deliberately NOT touched: the schema declares no FOREIGN KEY
+     * constraints, so turning it on would only add per-statement cost.
+     */
+    @Override
+    public void onConfigure(SQLiteDatabase db) {
+        super.onConfigure(db);
+        db.enableWriteAheadLogging();
+    }
+
     @Override
     public void onCreate(SQLiteDatabase db) {
         Log.d(TAG, "Creating db: " + this.getDatabaseName());
@@ -67,6 +87,7 @@ public class SQLiteOpenHelper extends android.database.sqlite.SQLiteOpenHelper {
         execAndLogSql(db, SQL_CREATE_CONFIG_TABLE);
         execAndLogSql(db, SQL_CREATE_LOCATION_TABLE_TIME_IDX);
         execAndLogSql(db, SQL_CREATE_LOCATION_TABLE_BATCH_ID_IDX);
+        execAndLogSql(db, SQL_CREATE_LOCATION_TABLE_STATUS_IDX);
         execAndLogSql(db, SessionEntry.SQL_CREATE_SESSION_TABLE);
         execAndLogSql(db, SessionEntry.SQL_CREATE_SESSION_TABLE_TIME_IDX);
     }
@@ -157,15 +178,34 @@ public class SQLiteOpenHelper extends android.database.sqlite.SQLiteOpenHelper {
                         " ADD COLUMN " + LocationEntry.COLUMN_NAME_BATTERY_LEVEL + INTEGER_TYPE);
                 alterSql.add("ALTER TABLE " + LocationEntry.TABLE_NAME +
                         " ADD COLUMN " + LocationEntry.COLUMN_NAME_IS_CHARGING + INTEGER_TYPE);
+            case 22:
+                // v4.5.6: index (valid, batch_start). Every per-fix pending count and every batch
+                // selection filters on those two columns and both were unindexed, so each query
+                // was a full table scan that got slower as the offline queue grew.
+                alterSql.add(SQL_CREATE_LOCATION_TABLE_STATUS_IDX);
 
                 break; // DO NOT FORGET TO MOVE DOWN BREAK ON DB UPGRADE!!!
             default:
-                onDowngrade(db, 0, 0);
+                // Reached only when oldVersion predates every migration path above, which means
+                // the schema cannot be reconciled incrementally. Dropping is the only way back to
+                // a consistent schema, but it destroys locations that were never synced — so at
+                // least make it visible in the log instead of happening silently.
+                Log.e(TAG, "No migration path from DB version " + oldVersion
+                        + "; dropping tables. Unsynced locations will be lost.");
+                onDowngrade(db, oldVersion, newVersion);
                 return;
         }
 
+        int failed = 0;
         for (String sql : alterSql) {
-            execAndLogSql(db, sql);
+            if (!execAndLogSql(db, sql)) {
+                failed++;
+            }
+        }
+        if (failed > 0) {
+            Log.e(TAG, "DB migration " + oldVersion + " -> " + newVersion + " INCOMPLETE: "
+                    + failed + " of " + alterSql.size() + " statements failed. "
+                    + "Expect read errors until the schema is repaired.");
         }
     }
 
@@ -178,12 +218,24 @@ public class SQLiteOpenHelper extends android.database.sqlite.SQLiteOpenHelper {
         onCreate(db);
     }
 
-    public void execAndLogSql(SQLiteDatabase db, String sql) {
+    /**
+     * Executes a schema statement, logging (but not rethrowing) failures.
+     *
+     * <p>Deliberately does not rethrow: a hard failure here would brick the app on upgrade.
+     * But a swallowed failure leaves the schema half-migrated and blows up much later inside
+     * hydrate(), far from the cause — so failures are logged at ERROR with the offending SQL,
+     * and {@link #onUpgrade} reports when a migration finished incomplete.
+     *
+     * @return true when the statement succeeded
+     */
+    public boolean execAndLogSql(SQLiteDatabase db, String sql) {
         Log.d(TAG, sql);
         try {
             db.execSQL(sql);
+            return true;
         } catch (SQLException e) {
-            Log.e(TAG, "Error executing sql: " + e.getMessage());
+            Log.e(TAG, "Error executing sql [" + sql + "]: " + e.getMessage(), e);
+            return false;
         }
     }
 }

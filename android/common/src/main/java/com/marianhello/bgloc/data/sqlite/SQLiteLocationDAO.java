@@ -77,12 +77,18 @@ public class SQLiteLocationDAO implements LocationDAO {
   }
 
   public Collection<BackgroundLocation> getValidLocationsAndDelete() {
+    // try/finally: if hydrate() throws (corrupt events_json, a column missing after a failed
+    // migration) endTransaction() was skipped and the thread kept the transaction open forever,
+    // so every later location insert failed until the process was restarted.
     db.beginTransactionNonExclusive();
-    Collection<BackgroundLocation> locations = getValidLocations();
-    deleteAllLocations();
-    db.setTransactionSuccessful();
-    db.endTransaction();
-    return locations;
+    try {
+      Collection<BackgroundLocation> locations = getValidLocations();
+      deleteAllLocations();
+      db.setTransactionSuccessful();
+      return locations;
+    } finally {
+      db.endTransaction();
+    }
   }
 
   public BackgroundLocation getLocationById(long id) {
@@ -232,6 +238,8 @@ public class SQLiteLocationDAO implements LocationDAO {
 
     String sql = null;
     Boolean shouldVacuum = false;
+    // Declared out here so it survives the try/finally below.
+    long locationId;
 
     long rowCount = DatabaseUtils.queryNumEntries(db, LocationEntry.TABLE_NAME);
 
@@ -240,7 +248,10 @@ public class SQLiteLocationDAO implements LocationDAO {
       return db.insertOrThrow(LocationEntry.TABLE_NAME, LocationEntry.COLUMN_NAME_NULLABLE, values);
     }
 
+    // try/finally: an exception between here and setTransactionSuccessful() used to skip
+    // endTransaction(), leaving the transaction open and blocking every later write.
     db.beginTransactionNonExclusive();
+    try {
 
     if (rowCount > maxRows) {
       sql = new StringBuilder("DELETE FROM ")
@@ -257,7 +268,6 @@ public class SQLiteLocationDAO implements LocationDAO {
 
     // get oldest location id to be overwritten
     Cursor cursor = null;
-    long locationId;
     try {
       cursor = db.query(
               LocationEntry.TABLE_NAME,
@@ -271,7 +281,14 @@ public class SQLiteLocationDAO implements LocationDAO {
                       ")"
               }),
               null, null, null, null);
-      cursor.moveToFirst();
+      // MIN(_id) returns no row (or NULL) when the table is empty, so getLong(0) threw
+      // CursorIndexOutOfBoundsException and the UPDATE below silently targeted id 0.
+      if (!cursor.moveToFirst() || cursor.isNull(0)) {
+        long inserted = db.insertOrThrow(LocationEntry.TABLE_NAME, LocationEntry.COLUMN_NAME_NULLABLE,
+                getContentValues(location));
+        db.setTransactionSuccessful();
+        return inserted;
+      }
       locationId = cursor.getLong(0);
     } finally {
       if (cursor != null) {
@@ -335,7 +352,9 @@ public class SQLiteLocationDAO implements LocationDAO {
     });
 
     db.setTransactionSuccessful();
-    db.endTransaction();
+    } finally {
+      db.endTransaction();
+    }
 
     if (shouldVacuum) { db.execSQL("VACUUM"); }
 
@@ -364,6 +383,10 @@ public class SQLiteLocationDAO implements LocationDAO {
 
   public BackgroundLocation deleteFirstUnpostedLocation() {
     BackgroundLocation location = getFirstUnpostedLocation();
+    // Returns null on an empty queue; dereferencing it here used to throw NPE.
+    if (location == null) {
+      return null;
+    }
     deleteLocationById(location.getLocationId());
 
     return location;

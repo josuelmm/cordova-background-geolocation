@@ -7,6 +7,7 @@
 
 #import "MAURLocation.h"
 #import "MAURLocationManager.h"
+#import "MAURLogging.h"
 
 #define SYSTEM_VERSION_EQUAL_TO(v)                  ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] == NSOrderedSame)
 #define SYSTEM_VERSION_GREATER_THAN(v)              ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] == NSOrderedDescending)
@@ -17,12 +18,23 @@
 #define LOCATION_DENIED         "User denied use of location services."
 #define LOCATION_RESTRICTED     "Application's use of location services is restricted."
 #define LOCATION_NOT_DETERMINED "User undecided on application's use of location services."
+// v5.0 — D3: reported through the existing onError: channel when the user granted location
+// access with "Precise Location" switched off (iOS 14+).
+#define LOCATION_REDUCED_ACCURACY "Reduced accuracy granted (Precise Location is off). Fixes may be off by kilometers."
+
+// v5.0 — D3: must match the NSLocationTemporaryUsageDescriptionDictionary key added by plugin.xml.
+static NSString *const PreciseLocationPurposeKey = @"PreciseLocationRequired";
 
 static MAURLocationManager* sharedCLDelegate = nil;
 static NSString *const TAG = @"MAURLocationManager";
 static NSString *const Domain = @"com.marianhello";
 
-@implementation MAURLocationManager
+@implementation MAURLocationManager {
+    // v5.0 — D3: keeps the temporary-full-accuracy request to once per reduced-accuracy episode
+    // instead of once per start (the ACTIVITY provider calls start:/stop: on every motion
+    // transition) or, worse, once per fix.
+    BOOL didHandleReducedAccuracy;
+}
 @synthesize locationManager, delegate;
 
 - (id)init
@@ -46,10 +58,16 @@ static NSString *const Domain = @"com.marianhello";
     NSAssert([NSThread isMainThread], @"%@ %@", TAG, @"should only be called from the main thread.");
 
     NSUInteger authStatus;
-    
+
     if ([CLLocationManager respondsToSelector:@selector(authorizationStatus)]) { // iOS 4.2+
-        authStatus = [CLLocationManager authorizationStatus];
-        
+        // v4.5.6 — D21: +[CLLocationManager authorizationStatus] is deprecated since iOS 14;
+        // use the instance property there and keep the class method for iOS < 14.
+        if (@available(iOS 14.0, *)) {
+            authStatus = locationManager.authorizationStatus;
+        } else {
+            authStatus = [CLLocationManager authorizationStatus];
+        }
+
         if (authStatus == kCLAuthorizationStatusDenied) {
             if (outError != NULL) {
                 NSDictionary *errorDictionary = @{
@@ -78,7 +96,11 @@ static NSString *const Domain = @"com.marianhello";
         // we can stop later on when recieved callback on user denial
         // it's neccessary to start call startUpdatingLocation in iOS < 8.0 to show user prompt!
         
-        if (authStatus == kCLAuthorizationStatusNotDetermined) {
+        // v4.5.5 — also escalate from "When In Use" to "Always". Previously only the
+        // NotDetermined case asked, so a user who granted WhenInUse was never prompted for
+        // the Always permission that background tracking actually requires.
+        if (authStatus == kCLAuthorizationStatusNotDetermined ||
+            authStatus == kCLAuthorizationStatusAuthorizedWhenInUse) {
             if ([locationManager respondsToSelector:@selector(requestAlwaysAuthorization)]) {  //iOS 8.0+
                 [locationManager requestAlwaysAuthorization];
             }
@@ -95,6 +117,68 @@ static NSString *const Domain = @"com.marianhello";
     NSAssert([NSThread isMainThread], @"%@ %@", TAG, @"should only be called from the main thread.");
     [locationManager stopUpdatingLocation];
     return YES;
+}
+
+/**
+ * v5.0 — D3: iOS 14 lets the user grant location access with "Precise Location" switched off.
+ * CoreLocation then fuzzes every fix to a ~1-3 km accuracy circle, which the plugin used to record
+ * as a genuine position, drawing kilometer-long phantom tracks. Ask (once per reduced-accuracy
+ * episode, never on every fix) for temporary full accuracy and log a warning while it stays
+ * reduced. Tracking is never aborted: coarse fixes are still better than nothing.
+ *
+ * The accuracy authorization is app-wide, so this reads the shared CLLocationManager and is valid
+ * for every location provider, including MAURDistanceFilterLocationProvider which owns its own
+ * CLLocationManager instance.
+ *
+ * @return YES the first time a reduced authorization is observed, so the caller can report it once
+ *         through the plugin error channel. NO when full accuracy is granted, when nothing has
+ *         been granted yet, when it was already reported, or below iOS 14.
+ */
+- (BOOL) requestTemporaryFullAccuracyIfReduced
+{
+    NSAssert([NSThread isMainThread], @"%@ %@", TAG, @"should only be called from the main thread.");
+
+    if (@available(iOS 14.0, *)) {
+        CLAuthorizationStatus authStatus = locationManager.authorizationStatus;
+        if (authStatus != kCLAuthorizationStatusAuthorizedAlways &&
+            authStatus != kCLAuthorizationStatusAuthorizedWhenInUse) {
+            // Nothing granted yet: the accuracy is meaningless until the user answered the
+            // prompt. Re-evaluated from the authorization-changed callback.
+            return NO;
+        }
+
+        if (locationManager.accuracyAuthorization != CLAccuracyAuthorizationReducedAccuracy) {
+            didHandleReducedAccuracy = NO; // full accuracy: re-arm for a later downgrade
+            return NO;
+        }
+
+        DDLogWarn(@"%@ %@", TAG, @"reduced accuracy authorization: Precise Location is off, recorded fixes may be off by kilometers");
+
+        if (didHandleReducedAccuracy) {
+            return NO;
+        }
+        didHandleReducedAccuracy = YES;
+
+        if ([locationManager respondsToSelector:@selector(requestTemporaryFullAccuracyAuthorizationWithPurposeKey:)]) {
+            [locationManager requestTemporaryFullAccuracyAuthorizationWithPurposeKey:PreciseLocationPurposeKey];
+        }
+
+        return YES;
+    }
+
+    return NO;
+}
+
+/**
+ * v5.0 — D3: message the caller reports through the plugin error channel when
+ * requestTemporaryFullAccuracyIfReduced returned YES.
+ */
++ (NSError *) reducedAccuracyError
+{
+    NSDictionary *errorDictionary = @{
+                                      NSLocalizedDescriptionKey: NSLocalizedString(@LOCATION_REDUCED_ACCURACY, nil)
+                                      };
+    return [NSError errorWithDomain:Domain code:MAURBGServiceError userInfo:errorDictionary];
 }
 
 - (BOOL) startMonitoringSignificantLocationChanges

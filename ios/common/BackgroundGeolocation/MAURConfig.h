@@ -51,6 +51,11 @@ enum {
 @property NSNumber *activityConfidenceThreshold;
 /** Discard fixes whose accuracy (m) is worse than this. nil = no filter. */
 @property NSNumber *maxAcceptedAccuracy;
+/** v4.5.6 — D30: YES when the incoming JS config carried an explicit `maxAcceptedAccuracy: null`,
+ *  i.e. "disable the filter". Needed because a nil value alone is indistinguishable from
+ *  "key not provided" during +merge:. Never copied by -copyWithZone: (it is a one-shot marker
+ *  that only travels on freshly parsed configs). */
+@property (nonatomic) BOOL resetMaxAcceptedAccuracy;
 @property NSNumber *_saveBatteryOnBackground;
 @property NSNumber *maxLocations;
 @property NSNumber *_pauseLocationUpdates;

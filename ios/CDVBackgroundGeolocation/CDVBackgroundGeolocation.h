@@ -44,4 +44,9 @@
 - (void) addEventListener:(CDVInvokedUrlCommand*)command;
 - (void) removeEventListener:(CDVInvokedUrlCommand*)command;
 
+/** v5.0 — D10: UIApplicationDelegate hook for background NSURLSession events. See the
+ *  implementation in CDVBackgroundGeolocation.m for what the host AppDelegate must forward when
+ *  the installed Cordova version does not do it automatically. */
+- (void) application:(UIApplication*)application handleEventsForBackgroundURLSession:(NSString*)identifier completionHandler:(void (^)(void))completionHandler;
+
 @end

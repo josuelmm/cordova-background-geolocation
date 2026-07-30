@@ -1,4 +1,4 @@
-import { NgModule } from '@angular/core';
+import { NgModule, NgZone } from '@angular/core';
 import {
   BackgroundGeolocationService,
   BACKGROUND_GEOLOCATION_SERVICE,
@@ -18,7 +18,8 @@ import {
   providers: [
     {
       provide: BACKGROUND_GEOLOCATION_SERVICE,
-      useFactory: () => new BackgroundGeolocationService(),
+      useFactory: (zone: NgZone) => new BackgroundGeolocationService(zone),
+      deps: [NgZone],
     },
     {
       provide: BackgroundGeolocationService,

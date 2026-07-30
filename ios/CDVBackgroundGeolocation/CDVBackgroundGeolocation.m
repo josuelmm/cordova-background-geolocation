@@ -15,6 +15,8 @@
 #import "MAURBackgroundTaskManager.h"
 #import "MAURSQLiteLocationDAO.h"
 #import "MAURBackgroundSync.h"
+// v4.5.6 — D17: reuse the shared CLLocationManager for the diagnostics read.
+#import "MAURLocationManager.h"
 #import <CoreMotion/CoreMotion.h>
 #import <UIKit/UIKit.h>
 
@@ -63,6 +65,72 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onPossibleCrashN:)     name:MAURPossibleCrashNotification     object:nil];
     // v4.2 sensor fusion
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onPhoneUsageWhileDrivingN:) name:MAURPhoneUsageWhileDrivingNotification object:nil];
+}
+
+/**
+ * v4.5.5 — CDVPlugin teardown hook. -pluginInitialize registers 19 notification observers and
+ * nothing ever removed them, so a webview reload left stale observers pointing at a dead
+ * plugin instance.
+ */
+- (void)dispose
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [super dispose];
+}
+
+/**
+ * v5.0 — D10: background NSURLSession completion handling.
+ *
+ * Uploads started by MAURBackgroundSync run in a background NSURLSession, so they keep going (and
+ * finish) while the app is suspended or not running. When that happens iOS relaunches / wakes the
+ * app and calls
+ *
+ *     -application:handleEventsForBackgroundURLSession:completionHandler:
+ *
+ * on the UIApplicationDelegate. Until now nothing implemented it: the session's queued
+ * completion callbacks were never flushed, the DB rows stayed SyncPending until the 15-minute
+ * stale-sync rescue, and iOS progressively throttled (and eventually stopped) waking the app for
+ * background transfers. That is why uploads finished while suspended appeared to be lost.
+ *
+ * NOTE ON WIRING — READ THIS IF BACKGROUND SYNC STILL LOOKS STUCK:
+ * Cordova's CDVAppDelegate forwards *some* unhandled UIApplicationDelegate selectors to plugins,
+ * but this particular one is NOT forwarded by all cordova-ios versions, and there is no
+ * NSNotification for it either (unlike didFinishLaunching / didEnterBackground), so it cannot be
+ * picked up with an observer and we do not swizzle the app delegate. If the forwarding is not
+ * available in the host project, the app MUST add this to its own AppDelegate:
+ *
+ *     - (void)application:(UIApplication *)application
+ *         handleEventsForBackgroundURLSession:(NSString *)identifier
+ *                           completionHandler:(void (^)(void))completionHandler
+ *     {
+ *         // "com.marianhello.session" — or compare against +[MAURBackgroundSync sessionIdentifier]
+ *         CDVViewController *vc = (CDVViewController *)self.viewController;
+ *         id plugin = [vc getCommandInstance:@"BackgroundGeolocation"];
+ *         if ([plugin respondsToSelector:@selector(application:handleEventsForBackgroundURLSession:completionHandler:)]) {
+ *             [plugin application:application
+ *   handleEventsForBackgroundURLSession:identifier
+ *                 completionHandler:completionHandler];
+ *         } else {
+ *             completionHandler();
+ *         }
+ *     }
+ *
+ * The identifier is matched against +[MAURBackgroundSync sessionIdentifier]; handlers for any other
+ * session are deliberately left alone (calling them would cut short another component's background
+ * time). The stored handler is invoked and released from
+ * -URLSessionDidFinishEventsForBackgroundURLSession: in MAURBackgroundSync.
+ */
+- (void) application:(UIApplication*)application handleEventsForBackgroundURLSession:(NSString*)identifier completionHandler:(void (^)(void))completionHandler
+{
+    NSString *ourIdentifier = [MAURBackgroundSync sessionIdentifier];
+    if (identifier != nil && [identifier isEqualToString:ourIdentifier]) {
+        NSLog(@"%@ #%@ %@", TAG, @"handleEventsForBackgroundURLSession", identifier);
+        // Class method: the plugin does not own the MAURBackgroundSync instance (the facade's
+        // MAURPostLocationTask does), and the handler is process-wide just like the session.
+        [MAURBackgroundSync setBackgroundSessionCompletionHandler:completionHandler];
+        return;
+    }
+    NSLog(@"%@ #%@ ignoring foreign session %@", TAG, @"handleEventsForBackgroundURLSession", identifier);
 }
 
 #pragma mark - v4.0 Phase 6 driver-insight observers
@@ -308,19 +376,28 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 {
     NSLog(@"%@ #%@", TAG, @"start");
     [self.commandDelegate runInBackground:^{
-        NSError *error = nil;
+        // v4.5.6 — D28: `start:` and the follow-up `configure:` used to share one NSError, so a
+        // failed start was overwritten by a successful configure and start() resolved OK.
+        NSError *startError = nil;
 
-        [facade start:&error];
-        if (error == nil) {
+        [facade start:&startError];
+        if (startError == nil) {
             [self sendEvent:@"start"];
         } else {
-            [self sendError:error];
+            [self sendError:startError];
         }
+
         CDVPluginResult* result = nil;
-        if ([facade configure:config error:&error]) {
-            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+        if (startError != nil) {
+            // Propagate the start failure; do not let configure: mask it.
+            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:[self errorToDictionary:startError]];
         } else {
-            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:[self errorToDictionary:error]];
+            NSError *configError = nil;
+            if ([facade configure:config error:&configError]) {
+                result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+            } else {
+                result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:[self errorToDictionary:configError]];
+            }
         }
         [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
     }];
@@ -333,19 +410,26 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 {
     NSLog(@"%@ #%@", TAG, @"stop");
     [self.commandDelegate runInBackground:^{
-        NSError *error = nil;
+        // v4.5.6 — D28: separate NSError for stop: and for the follow-up configure: call.
+        NSError *stopError = nil;
 
-        [facade stop:&error];
-        if (error == nil) {
+        [facade stop:&stopError];
+        if (stopError == nil) {
             [self sendEvent:@"stop"];
         } else {
-            [self sendError:error];
+            [self sendError:stopError];
         }
+
         CDVPluginResult* result = nil;
-        if ([facade configure:config error:&error]) {
-            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+        if (stopError != nil) {
+            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:[self errorToDictionary:stopError]];
         } else {
-            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:[self errorToDictionary:error]];
+            NSError *configError = nil;
+            if ([facade configure:config error:&configError]) {
+                result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+            } else {
+                result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:[self errorToDictionary:configError]];
+            }
         }
         [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
     }];
@@ -361,6 +445,8 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
     [self.commandDelegate runInBackground:^{
         MAUROperationalMode mode = [[command.arguments objectAtIndex: 0] intValue];
         [facade switchMode:mode];
+        // v4.5.5 — resolve the JS promise; without this the caller hung forever.
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK] callbackId:command.callbackId];
     }];
 }
 
@@ -407,23 +493,37 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
         [d setObject:[NSNumber numberWithBool:[facade locationServicesEnabled]] forKey:@"locationServicesEnabled"];
 
         // Authorization status (raw + human-readable)
-        CLAuthorizationStatus status;
-        if (@available(iOS 14.0, *)) {
-            CLLocationManager *lm = [[CLLocationManager alloc] init];
-            status = lm.authorizationStatus;
-            // accuracyAuthorization (Precise vs Reduced)
-            BOOL precise = (lm.accuracyAuthorization == CLAccuracyAuthorizationFullAccuracy);
-            [d setObject:[NSNumber numberWithBool:precise] forKey:@"preciseLocationEnabled"];
+        // v4.5.6 — D17: this whole method runs on a Cordova background queue. CLLocationManager
+        // must be created/queried on a thread with an active run loop and UIApplication is main
+        // thread only, so hop to the main queue for those reads — and reuse the shared manager
+        // instead of instantiating a throw-away CLLocationManager off the main thread.
+        __block CLAuthorizationStatus status = kCLAuthorizationStatusNotDetermined;
+        __block BOOL precise = YES; // pre-iOS 14 had no Reduced accuracy concept; report YES.
+        __block NSString *backgroundRefresh = @"unknown";
+        void (^readOnMain)(void) = ^{
+            CLLocationManager *lm = [MAURLocationManager sharedInstance].locationManager;
+            if (@available(iOS 14.0, *)) {
+                status = lm.authorizationStatus;
+                // accuracyAuthorization (Precise vs Reduced)
+                precise = (lm.accuracyAuthorization == CLAccuracyAuthorizationFullAccuracy);
+            } else {
+                status = [CLLocationManager authorizationStatus];
+            }
+            backgroundRefresh = [self backgroundRefreshStatusText];
+        };
+        // runInBackground: never runs on the main thread, but guard anyway: dispatch_sync onto
+        // the queue you are already on would deadlock.
+        if ([NSThread isMainThread]) {
+            readOnMain();
         } else {
-            status = [CLLocationManager authorizationStatus];
-            // Pre-iOS 14 had no Reduced accuracy concept; report YES.
-            [d setObject:[NSNumber numberWithBool:YES] forKey:@"preciseLocationEnabled"];
+            dispatch_sync(dispatch_get_main_queue(), readOnMain);
         }
+        [d setObject:[NSNumber numberWithBool:precise] forKey:@"preciseLocationEnabled"];
         [d setObject:[NSNumber numberWithInteger:status] forKey:@"authorization"];
         [d setObject:[self authorizationStatusText:status] forKey:@"authorizationStatusText"];
 
         // Background App Refresh
-        [d setObject:[self backgroundRefreshStatusText] forKey:@"backgroundRefreshStatus"];
+        [d setObject:backgroundRefresh forKey:@"backgroundRefreshStatus"];
 
         // Low Power Mode (iOS 9+)
         if (@available(iOS 9.0, *)) {
@@ -535,7 +635,7 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 - (void) getPluginVersion:(CDVInvokedUrlCommand*)command
 {
     NSLog(@"%@ #%@", TAG, @"getPluginVersion");
-    NSString *version = @"4.5.5"; // keep in sync with plugin.xml and Android PLUGIN_VERSION
+    NSString *version = @"5.0.0"; // keep in sync with plugin.xml and Android PLUGIN_VERSION
     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:version];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
@@ -621,7 +721,10 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
     [self.commandDelegate runInBackground:^{
         NSError *error = nil;
         NSArray *args = command.arguments;
-        int timeout = [args objectAtIndex: 0] == [NSNull null] ? INT_MAX : [[args objectAtIndex: 0] intValue];
+        // v4.5.6 — D11: default to 30s instead of INT_MAX. With INT_MAX the underlying
+        // INTULocationManager request effectively never timed out, so a caller that omitted
+        // options could park a worker thread indefinitely.
+        int timeout = [args objectAtIndex: 0] == [NSNull null] ? 30000 : [[args objectAtIndex: 0] intValue];
         long maximumAge = [args objectAtIndex: 1] == [NSNull null] ? LONG_MAX : [[args objectAtIndex: 1] longValue];
         BOOL enableHighAccuracy = [args objectAtIndex: 2] == [NSNull null] ? NO : [[args objectAtIndex: 2] boolValue];
 
@@ -665,6 +768,8 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 {
     int taskKey = [[command.arguments objectAtIndex: 0] intValue];
     [[MAURBackgroundTaskManager sharedTasks] endTaskWithKey:taskKey];
+    // v4.5.5 — resolve the JS promise; without this the caller hung forever.
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK] callbackId:command.callbackId];
 }
 
 - (void) forceSync:(CDVInvokedUrlCommand*)command
@@ -800,6 +905,10 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
     NSString *errorMessage = [error localizedDescription];
     if (errorMessage == nil) {
         errorMessage = [[userInfo objectForKey:NSUnderlyingErrorKey] localizedDescription];
+    }
+    // v4.5.6 — a nil value in a dictionary literal raises; never let an error report crash.
+    if (errorMessage == nil) {
+        errorMessage = @"";
     }
     return @{ @"code": [NSNumber numberWithLong:error.code], @"message": errorMessage};
 }

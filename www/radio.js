@@ -121,15 +121,26 @@
       subscribe: function() {
         var a = arguments,
           c = this.channels[this.channelName],
-          i, l = a.length,
-          p, ai = [];
-  
+          i, j, l = a.length,
+          p, ai = [], duplicate;
+
         //run through each arguments and subscribe it to the channel
         for (i = 0; i < l; i++) {
           ai = a[i];
           //if the user sent just a function, wrap the fucntion in an array [function]
           p = (typeof(ai) === "function") ? [ai] : ai;
-          if ((typeof(p) === 'object') && (p.length)) c.push(p);
+          if ((typeof(p) === 'object') && (p.length)) {
+            //do not subscribe the same callback twice to the same channel,
+            //otherwise repeated subscribe/unsubscribe cycles leak listeners
+            duplicate = false;
+            for (j = 0; j < c.length; j++) {
+              if (c[j][0] === p[0]) {
+                duplicate = true;
+                break;
+              }
+            }
+            if (!duplicate) c.push(p);
+          }
         }
         return this;
       },
@@ -149,23 +160,17 @@
       unsubscribe: function() {
         var a = arguments,
           i, j, c = this.channels[this.channelName],
-          l = a.length,
-          cl = c.length,
-          offset = 0,
-          jo;
+          l = a.length;
         //loop through each argument
         for (i = 0; i < l; i++) {
-          //need to reset vars that change as the channel array items are removed
-          offset = 0;
-          cl = c.length;
-          //loop through the channel
-          for (j = 0; j < cl; j++) {
-            jo = j - offset;
+          //loop through the channel and remove ONLY the first match, so one
+          //unsubscribe() call undoes exactly one subscribe() call
+          for (j = 0; j < c.length; j++) {
             //if there is a match with the argument and the channel function, unsubscribe it from the channel array
-            if (c[jo][0] === a[i]) {
+            if (c[j][0] === a[i]) {
               //unsubscribe matched item from the channel array
-              c.splice(jo, 1);
-              offset++;
+              c.splice(j, 1);
+              break;
             }
           }
         }

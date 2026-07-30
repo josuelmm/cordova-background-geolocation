@@ -93,13 +93,20 @@ public class ActivityRecognitionLocationProvider extends AbstractLocationProvide
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(mContext);
         activityRecognitionClient = ActivityRecognition.getClient(mContext);
 
-        Intent detectedActivitiesIntent = new Intent(mContext, DetectedActivitiesReceiver.class);
-        detectedActivitiesIntent.setAction(DETECTED_ACTIVITY_UPDATE);
+        // Implicit + setPackage(): DetectedActivitiesReceiver is a context-registered inner class
+        // that is not declared in the manifest, and ActivityManager only matches context-registered
+        // receivers when the broadcast has no explicit component. Targeting the class here meant
+        // activity updates never arrived, so lastActivity stayed UNKNOWN forever — the `activity`
+        // JS event never fired and stopOnStillActivity never worked.
+        Intent detectedActivitiesIntent =
+                new Intent(DETECTED_ACTIVITY_UPDATE).setPackage(mContext.getPackageName());
 
         int updateCurrentFlag = android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                 ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
                 : PendingIntent.FLAG_UPDATE_CURRENT;
-        detectedActivitiesPI = PendingIntent.getBroadcast(mContext, 9002, detectedActivitiesIntent, updateCurrentFlag);
+        // requestCode 9004: 9002 collides with DistanceFilterLocationProvider's stationary-polling
+        // PendingIntent, and FLAG_UPDATE_CURRENT would let one overwrite the other.
+        detectedActivitiesPI = PendingIntent.getBroadcast(mContext, 9004, detectedActivitiesIntent, updateCurrentFlag);
         registerReceiver(detectedActivitiesReceiver, new IntentFilter(DETECTED_ACTIVITY_UPDATE));
     }
 

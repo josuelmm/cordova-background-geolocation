@@ -132,9 +132,11 @@ public class BackgroundLocation implements Parcelable {
     private static BackgroundLocation fromParcel(Parcel in) {
         BackgroundLocation l = new BackgroundLocation();
 
-        l.locationId = in.readLong();
-        l.locationProvider = in.readInt();
-        l.batchStartMillis = in.readLong();
+        // Mirrors writeValue() above and restores real nulls, so toJSONObjectWithId() reports
+        // id:null for an unsaved location instead of a bogus id:0.
+        l.locationId = (Long) in.readValue(Long.class.getClassLoader());
+        l.locationProvider = (Integer) in.readValue(Integer.class.getClassLoader());
+        l.batchStartMillis = (Long) in.readValue(Long.class.getClassLoader());
         l.provider = in.readString();
         l.latitude = in.readDouble();
         l.longitude = in.readDouble();
@@ -256,9 +258,15 @@ public class BackgroundLocation implements Parcelable {
 
     @Override
     public void writeToParcel(Parcel dest, int flags) {
-        dest.writeLong(locationId);
-        dest.writeInt(locationProvider);
-        dest.writeLong(batchStartMillis);
+        // writeValue, not writeLong/writeInt: these three are boxed and null by default, so
+        // auto-unboxing threw NPE the moment a location was actually parcelled — which happens as
+        // soon as one crosses to the ":sync" process, goes through a PendingIntent, or the system
+        // serializes the Bundle under memory pressure. It would have died *before* the fix was
+        // persisted. It only ever "worked" because event delivery is same-process
+        // (LocalBroadcastManager) and skips serialization.
+        dest.writeValue(locationId);
+        dest.writeValue(locationProvider);
+        dest.writeValue(batchStartMillis);
         dest.writeString(provider);
         dest.writeDouble(latitude);
         dest.writeDouble(longitude);
@@ -1077,6 +1085,12 @@ public class BackgroundLocation implements Parcelable {
         }
         if ("@mockLocationsEnabled".equals(key)) {
             return hasMockLocationsEnabled() ? areMockLocationsEnabled() : JSONObject.NULL;
+        }
+        // The field the docs promise for mockLocationPolicy:'flag'. It was never emitted anywhere,
+        // so a backend filtering on `mocked === true` detected nothing and 'flag' behaved exactly
+        // like 'allow'. Always a boolean (never null) so the anti-fraud check is unambiguous.
+        if ("@mocked".equals(key)) {
+            return hasIsFromMockProvider() && isFromMockProvider();
         }
         // v4.3 — driving events array (only present if events were attached during this fix).
         if ("@events".equals(key)) {

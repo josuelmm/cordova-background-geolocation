@@ -310,7 +310,21 @@ public class BackgroundGeolocationFacade {
     private synchronized void registerServiceBroadcast() {
         if (mServiceBroadcastReceiverRegistered) return;
 
-        LocalBroadcastManager.getInstance(getContext()).registerReceiver(serviceBroadcastReceiver, new IntentFilter(LocationServiceImpl.ACTION_BROADCAST));
+        Context context = getContext();
+        LocalBroadcastManager.getInstance(context).registerReceiver(serviceBroadcastReceiver, new IntentFilter(LocationServiceImpl.ACTION_BROADCAST));
+
+        // LocalBroadcastManager is process-local, so it cannot deliver anything coming from
+        // SyncService, which runs in the ":sync" process. Without this second, package-scoped
+        // global receiver the syncStart / syncProgress / syncSuccess / syncError events (and the
+        // HTTP 285 abort_requested / HTTP 401 http_authorization signals) raised by SyncAdapter
+        // never reached JS at all.
+        IntentFilter globalFilter = new IntentFilter(LocationServiceImpl.ACTION_BROADCAST);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(serviceBroadcastReceiver, globalFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            context.registerReceiver(serviceBroadcastReceiver, globalFilter);
+        }
+
         mServiceBroadcastReceiverRegistered = true;
     }
 
@@ -320,6 +334,11 @@ public class BackgroundGeolocationFacade {
         Context context = getContext();
         if (context != null) {
             LocalBroadcastManager.getInstance(context).unregisterReceiver(serviceBroadcastReceiver);
+            try {
+                context.unregisterReceiver(serviceBroadcastReceiver);
+            } catch (IllegalArgumentException e) {
+                logger.debug("Global service receiver was not registered: {}", e.getMessage());
+            }
         }
 
         mServiceBroadcastReceiverRegistered = false;
@@ -341,6 +360,18 @@ public class BackgroundGeolocationFacade {
 
             @Override
             public void onPermissionDenied(DeniedPermissions deniedPermissions) {
+                // PERMISSIONS lists both COARSE and FINE, and this callback fires unless *all*
+                // of them are granted. On Android 12+ the user can grant "Approximate location"
+                // only, which is enough for the service to run — LocationServiceImpl and
+                // LocationServiceProxy both accept either one. Treating that as a hard denial
+                // meant start() silently did nothing on every call, forever.
+                if (hasPermissions()) {
+                    logger.info("Only coarse location granted; starting anyway");
+                    registerLocationModeChangeReceiver();
+                    registerServiceBroadcast();
+                    startBackgroundService();
+                    return;
+                }
                 logger.info("User denied requested permissions");
                 if (mDelegate != null) {
                     mDelegate.onAuthorizationChanged(BackgroundGeolocationFacade.AUTHORIZATION_DENIED);
@@ -597,8 +628,28 @@ public class BackgroundGeolocationFacade {
         return hasPermissions() ? AUTHORIZATION_AUTHORIZED : AUTHORIZATION_DENIED;
     }
 
+    /**
+     * True when the app holds a usable location permission.
+     *
+     * <p>Deliberately "any of PERMISSIONS", not "all of them": on Android 12+ granting only
+     * "Approximate location" yields COARSE without FINE, and the service runs fine with either
+     * (see {@code LocationServiceImpl.hasLocationPermission()} and
+     * {@code LocationServiceProxy.hasLocationPermission()}, which have always accepted either).
+     * Requiring both made checkStatus() and getAuthorizationStatus() report DENIED for a setup
+     * that actually works.
+     */
     public boolean hasPermissions() {
-        return hasPermissions(getContext(), PERMISSIONS);
+        return hasAnyPermission(getContext(), PERMISSIONS);
+    }
+
+    /** True if at least one of {@code permissions} is granted. */
+    public static boolean hasAnyPermission(Context context, String[] permissions) {
+        for (String perm : permissions) {
+            if (ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public boolean locationServicesEnabled() throws PluginException {

@@ -6,52 +6,35 @@ def resourcePrefix = getResourcePrefix()
 
 // https://hackernoon.com/android-how-to-add-gradle-dependencies-using-foreach-c4cbcc070458
 def projDependencies = [
-    [configuration: "androidTestImplementation", dependency: androidLibs.supportAnnotations],
+    [configuration: "androidTestImplementation", dependency: androidLibs.annotations],
     [configuration: "androidTestImplementation", dependency: testLibs.testRunner],
     [configuration: "androidTestImplementation", dependency: testLibs.testRules],
+    [configuration: "androidTestImplementation", dependency: testLibs.testCore],
+    [configuration: "androidTestImplementation", dependency: testLibs.testExtJunit],
+    [configuration: "androidTestImplementation", dependency: testLibs.junit],
+    // Provides androidx.test.filters.* used by the JVM unit tests.
     [configuration: "testImplementation", dependency: testLibs.testRunner],
     [configuration: "testImplementation", dependency: testLibs.testRules],
+    [configuration: "testImplementation", dependency: testLibs.testCore],
     [configuration: "testImplementation", dependency: testLibs.junit],
     [configuration: "testImplementation", dependency: testLibs.json],
     [configuration: "testImplementation", dependency: testLibs.robolectric],
     [configuration: "testImplementation", dependency: testLibs.mockitoCore],
     [configuration: "implementation", dependency: androidLibs.playServicesLocation],
-    [configuration: "implementation", dependency: androidLibs.supportCompat],
+    [configuration: "implementation", dependency: androidLibs.coreKtx],
     [configuration: "implementation", dependency: androidLibs.appcompat],
-    [configuration: "implementation", dependency: libs.permissions,
-        options: { exclude group: 'com.android.support', module: 'appcompat-v7'}],
+    // Imported by LocationServiceImpl, BackgroundGeolocationFacade and SyncAdapter.
+    // Previously resolved only transitively, which made the build fragile.
+    [configuration: "implementation", dependency: androidLibs.localBroadcastManager],
+    [configuration: "implementation", dependency: libs.permissions],
     [configuration: "implementation", dependency: libs.logback],
     [configuration: "implementation", dependency: libs.slf4j],
     [configuration: "implementation", dependency: libs.promise],
 ]
 
-buildscript {
-    repositories {
-        maven {
-            url 'https://maven.google.com/'
-            name 'Google'
-        }
-        jcenter()
-    }
-    dependencies {
-        classpath 'com.android.tools.build:gradle:3.4.1'
-
-        // NOTE: Do not place your application dependencies here; they belong
-        // in the individual module build.gradle files
-    }
-}
-
-allprojects {
-    repositories {
-        maven {
-            url 'https://maven.google.com'
-        }
-        jcenter()
-    }
-}
-
 android {
-    compileSdkVersion project.ext.getCompileSdkVersion()
+    namespace 'com.marianhello.backgroundgeolocation'
+    compileSdk project.ext.getCompileSdkVersion()
     buildToolsVersion project.ext.getBuildToolsVersion()
 
     // Tip: https://stackoverflow.com/questions/39987669/renamingdelegatingcontext-is-deprecated-how-do-we-test-sqlite-db-now/52170737#52170737
@@ -65,9 +48,12 @@ android {
         resValue "string", resourcePrefix + "account_type", accountPrefix + '.account'
         resValue "string", resourcePrefix + "content_authority", accountPrefix + '.provider'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
-        minSdkVersion project.ext.getMinSdkVersion()
-        versionCode 1
-        versionName "1.0"
+        minSdk project.ext.getMinSdkVersion()
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     buildTypes {
@@ -78,11 +64,11 @@ android {
     }
 
     testOptions {
-        //unitTests.includeAndroidResources = true
         unitTests.returnDefaultValues = true
+        unitTests.includeAndroidResources = true
     }
 
-    lintOptions {
+    lint {
         abortOnError false
     }
 }
