@@ -106,6 +106,12 @@ jobs:
           disable-animations: true
           script: cd android && ./gradlew --no-daemon :common:connectedDebugAndroidTest :CDVBackgroundGeolocation:connectedDebugAndroidTest
 
+      # v5.0 — Gradle only prints "There were failing tests. See the report at: file:///...",
+      # which is useless in CI. Print each failure inline so the log is self-sufficient.
+      - name: Print failing instrumented tests
+        if: failure()
+        run: python3 scripts/print-failing-androidtests.py android
+
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -160,23 +166,32 @@ jobs:
       - name: Show available schemes and targets
         run: xcodebuild -list -project ios/common/BackgroundGeolocation.xcodeproj || true
 
+      # -derivedDataPath requires -scheme (or -xctestrun): with -target xcodebuild exits 64 with
+      # "The flag -scheme, -testProductsPath, or -xctestrun is required when specifying
+      # -derivedDataPath". The shared scheme committed above is exactly what makes -scheme usable
+      # on a fresh checkout, so use it here too.
+      - name: List simulators
+        run: xcrun simctl list devicetypes | grep -i iphone || true
+
       - name: Build test target
         run: |
-          xcodebuild build \
+          xcodebuild build-for-testing \
             -project ios/common/BackgroundGeolocation.xcodeproj \
-            -target BackgroundGeolocationTests \
-            -sdk iphonesimulator \
+            -scheme BackgroundGeolocationTests \
+            -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
             -derivedDataPath ios-derived-data \
             CODE_SIGNING_ALLOWED=NO
 
       # Uses the committed shared scheme; -destination picks the simulator runtime.
+      # OS=latest + a device name the runner image actually has. test-without-building reuses
+      # the artefacts from the step above instead of compiling twice.
       - name: Run test target
         run: |
-          xcodebuild test \
+          xcodebuild test-without-building \
             -project ios/common/BackgroundGeolocation.xcodeproj \
             -scheme BackgroundGeolocationTests \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16' \
             -derivedDataPath ios-derived-data \
             CODE_SIGNING_ALLOWED=NO
 

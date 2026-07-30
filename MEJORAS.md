@@ -92,9 +92,17 @@
 >    Ábrelo en Xcode antes de dar por buenos los 30 puntos D*.
 > 2. **Cero pruebas en dispositivo.** Ni Android ni iOS. Nada de lo de aquí se ha visto funcionar
 >    en un teléfono real: ni el tracking en background, ni el sync, ni los eventos de conducción.
-> 3. **Los 72 tests instrumentados compilan pero nadie los ha ejecutado todavía.** Aquí no hay
->    emulador; el job de CI los correrá en el primer push. Cubren justo la capa
->    DAO/BatchManager/servicio, que es la más modificada — espera fallos reales en el primer run.
+> 3. **Los 72 tests instrumentados fallan en su primer run** (CI #29, `connectedDebugAndroidTest`).
+>    Era lo esperado: nunca se habían ejecutado en la historia del repo. Gradle solo imprime
+>    "There were failing tests. See the report at: file:///...", así que se añadió
+>    `scripts/print-failing-androidtests.py`, invocado por el job cuando falla, que vuelca clase,
+>    test, mensaje y primeras líneas de stack de cada fallo directamente al log. **Falta
+>    identificar y arreglar los fallos concretos**; hasta entonces esta capa
+>    (DAO/BatchManager/servicio, la más modificada) sigue sin cobertura real.
+> 3b. **El job de iOS falló por un error del propio workflow, no del código** (CI #29):
+>    `xcodebuild` exige `-scheme` cuando se pasa `-derivedDataPath`, y el paso de build usaba
+>    `-target`. Corregido a `build-for-testing -scheme` + `test-without-building`. Sigue sin
+>    haberse compilado iOS.
 > 4. **D10 depende de la app anfitriona.** No hay forwarding de
 >    `application:handleEventsForBackgroundURLSession:` en todas las versiones de cordova-ios. El
 >    snippet para el `AppDelegate`, con cómo comprobar que quedó bien, está en
