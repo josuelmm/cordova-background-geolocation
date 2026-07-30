@@ -92,17 +92,34 @@
 >    Ábrelo en Xcode antes de dar por buenos los 30 puntos D*.
 > 2. **Cero pruebas en dispositivo.** Ni Android ni iOS. Nada de lo de aquí se ha visto funcionar
 >    en un teléfono real: ni el tracking en background, ni el sync, ni los eventos de conducción.
-> 3. **Los 72 tests instrumentados fallan en su primer run** (CI #29, `connectedDebugAndroidTest`).
->    Era lo esperado: nunca se habían ejecutado en la historia del repo. Gradle solo imprime
->    "There were failing tests. See the report at: file:///...", así que se añadió
->    `scripts/print-failing-androidtests.py`, invocado por el job cuando falla, que vuelca clase,
->    test, mensaje y primeras líneas de stack de cada fallo directamente al log. **Falta
->    identificar y arreglar los fallos concretos**; hasta entonces esta capa
->    (DAO/BatchManager/servicio, la más modificada) sigue sin cobertura real.
-> 3b. **El job de iOS falló por un error del propio workflow, no del código** (CI #29):
->    `xcodebuild` exige `-scheme` cuando se pasa `-derivedDataPath`, y el paso de build usaba
->    `-target`. Corregido a `build-for-testing -scheme` + `test-without-building`. Sigue sin
->    haberse compilado iOS.
+> 3. **Tests instrumentados: 60 ejecutados, 4 fallos en el primer run** (CI #29/#30), los cuatro
+>    diagnosticados y corregidos. Ninguno era un bug del plugin; los cuatro eran los tests
+>    quedándose atrás respecto a cambios de v5:
+>    - `LocationServiceTest.testStartStop`, `LocationServiceProxyTest.testStart` y `.testStop`
+>      (timeout de 5 s). `start()` ahora se niega a arrancar sin `ACCESS_FINE/COARSE_LOCATION`
+>      (antes levantaba un servicio incapaz de producir un fix, y en Android 8+ eso además es un
+>      crash inmediato del FGS). En el emulador la app de instrumentación no tiene el permiso en
+>      runtime, así que `start()` volvía temprano: `sIsRunning` se quedaba en false y
+>      `MSG_ON_SERVICE_STARTED/STOPPED` no se emitían nunca. Añadido `GrantPermissionRule`.
+>    - `LocationContentProviderTest.testShouldDeleteMultipleLocations` (`expected:<2> but
+>      was:<3>`). Efecto de B6: el provider toma la conexión de
+>      `SQLiteOpenHelper.getHelper()`, que llama a `getApplicationContext()` y por tanto desenvuelve
+>      el `RenamingDelegatingContext` con el que este harness aísla la BD. El provider escribía en
+>      `cordova_bg_geolocation.db` mientras `setUp()` borraba `test.cordova_bg_geolocation.db`, así
+>      que las filas sobrevivían entre tests. El `deleteDatabase()` del test usa ahora el mismo
+>      helper que el provider.
+>    Gradle solo imprime "There were failing tests. See the report at: file:///...", que en CI no
+>    sirve; se añadió `scripts/print-failing-androidtests.py`, invocado por el job cuando falla.
+>    **Los arreglos no se han podido ejecutar aquí** (no hay emulador): se validan en el próximo
+>    push.
+> 3b. **El job de iOS ha fallado dos veces por errores del propio workflow, no del código.**
+>    CI #29: `xcodebuild` exige `-scheme` cuando se pasa `-derivedDataPath`, y el paso de build
+>    usaba `-target` → corregido a `build-for-testing -scheme` + `test-without-building`.
+>    CI #30: el `.xcscheme` escrito a mano llevaba un `<TestPlans>` vacío; Xcode toma la sola
+>    presencia de ese nodo como "este scheme va por test plans" y aborta con "uses test plans but
+>    has no test plan(s) associated with it" → nodo eliminado (el proyecto no tiene `.xctestplan`;
+>    la acción de test la dirige `<Testables>`). **iOS sigue sin haberse compilado nunca**, así que
+>    cada fallo de esta cadena solo se descubre al empujar.
 > 4. **D10 depende de la app anfitriona.** No hay forwarding de
 >    `application:handleEventsForBackgroundURLSession:` en todas las versiones de cordova-ios. El
 >    snippet para el `AppDelegate`, con cómo comprobar que quedó bien, está en

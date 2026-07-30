@@ -1,5 +1,6 @@
 package com.marianhello.bgloc;
 
+import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -7,6 +8,7 @@ import android.content.IntentFilter;
 import android.os.Bundle;
 import android.os.IBinder;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.test.rule.GrantPermissionRule;
 import androidx.test.rule.ServiceTestRule;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
@@ -34,6 +36,19 @@ public class LocationServiceProxyTest {
 
     @Rule
     public final ServiceTestRule mServiceRule = new ServiceTestRule();
+
+    /**
+     * v5.0 — start() now refuses to run without ACCESS_FINE/COARSE_LOCATION (it used to start a
+     * service that could never produce a fix, and on Android 8+ that is also an instant FGS
+     * crash). On an emulator the instrumentation app has no runtime permission by default, so
+     * start() returned early: sIsRunning stayed false and MSG_ON_SERVICE_STARTED/STOPPED were
+     * never broadcast — which is what made these tests fail (assertion on isRunning, and the
+     * CountDownLatch timing out at 5 s). Grant them before the service is touched.
+     */
+    @Rule
+    public final GrantPermissionRule mPermissionRule = GrantPermissionRule.grant(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION);
 
     private LocationServiceProxy proxy;
 

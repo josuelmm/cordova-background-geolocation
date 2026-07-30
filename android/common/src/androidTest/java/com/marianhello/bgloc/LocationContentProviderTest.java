@@ -3,7 +3,6 @@ package com.marianhello.bgloc;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.net.Uri;
-import android.test.RenamingDelegatingContext;
 import android.test.mock.MockContentResolver;
 
 import com.marianhello.bgloc.data.BackgroundLocation;
@@ -19,6 +18,7 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 
+import static androidx.test.core.app.ApplicationProvider.getApplicationContext;
 import static com.marianhello.bgloc.data.sqlite.SQLiteLocationContract.LocationEntry.SQL_DROP_LOCATION_TABLE;
 
 public class LocationContentProviderTest extends LocationProviderTestCase {
@@ -32,10 +32,16 @@ public class LocationContentProviderTest extends LocationProviderTestCase {
     }
 
     public void deleteDatabase() {
-        // TODO: investigate why prefix is not automatically used when deleteDatabase
-        RenamingDelegatingContext context = ((RenamingDelegatingContext) getMockContext().getBaseContext());
-
-        SQLiteOpenHelper dbHelper = new SQLiteOpenHelper(context);
+        // v5.0 — B6: LocationContentProvider now takes its connection from
+        // SQLiteOpenHelper.getHelper(), which calls context.getApplicationContext() so the whole
+        // process shares ONE connection (the main process and ":sync" were opening two).
+        // getApplicationContext() unwraps the RenamingDelegatingContext this test harness uses
+        // for isolation, so the provider writes to the real "cordova_bg_geolocation.db" while
+        // this method was dropping the prefixed "test.cordova_bg_geolocation.db": rows survived
+        // setUp() and leaked between tests ("expected:<2> but was:<3>").
+        // Drop through the same helper the provider uses. ContentProviderLocationDAOTest already
+        // works against the unprefixed database for the same reason.
+        SQLiteOpenHelper dbHelper = SQLiteOpenHelper.getHelper(getApplicationContext());
         SQLiteDatabase db = dbHelper.getWritableDatabase();
         dbHelper.execAndLogSql(db, SQL_DROP_LOCATION_TABLE);
         dbHelper.onCreate(db);

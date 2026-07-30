@@ -35,8 +35,13 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
-      <TestPlans>
-      </TestPlans>
+      <!--
+        NO <TestPlans> element here, not even empty. Xcode treats the mere presence of the node as
+        "this scheme is driven by test plans", so an empty one makes xcodebuild fail with
+        "Unable to perform testing since the scheme uses test plans but has no test plan(s)
+        associated with it" (exit 64). This project has no .xctestplan; the classic
+        <Testables> list below is what drives the test action.
+      -->
       <Testables>
          <TestableReference
             skipped = "NO">
