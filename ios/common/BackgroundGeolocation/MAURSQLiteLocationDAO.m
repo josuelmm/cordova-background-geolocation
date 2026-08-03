@@ -270,74 +270,35 @@
         }
         [rs close];
 
-        if (rowCount < maxRows) {
-            locationId = [self persistLocation:location intoDatabase:database];
-            return;
-        } else if (rowCount > maxRows) {
-            sql = [NSString stringWithFormat:@"DELETE FROM %1$@ WHERE %2$@ IN (SELECT %2$@ FROM %1$@ ORDER BY %3$@ LIMIT %4$ld);VACUUM;",
-                   @LC_TABLE_NAME, @LC_COLUMN_NAME_ID, @LC_COLUMN_NAME_RECORDED_AT, (rowCount - maxRows)];
+        // v5.0.1 — paridad con ContentProviderLocationDAO de Android, que ya se corrigio.
+        //
+        // Habia dos problemas, los dos de PERDIDA DE DATOS y los dos por ordenar unicamente por
+        // `recorded_at`:
+        //   1. El DELETE sacrificaba las filas mas antiguas AUNQUE estuvieran SyncPending, es
+        //      decir sin haberse enviado nunca. Agravante: con el borrado LOGICO restaurado, las
+        //      lapidas (status = Deleted) consumen cupo de maxRows, asi que el recorte se dispara
+        //      antes y se lleva por delante datos utiles.
+        //   2. El UPDATE de reciclado apuntaba a MIN(id) con min(recorded_at) — otra vez la mas
+        //      antigua, sin mirar el estado — y ademas se ejecutaba sobre una fila que el DELETE
+        //      de arriba podia acabar de borrar.
+        //
+        // Ahora, igual que Android: se recorta a maxRows - 1 sacrificando PRIMERO las ya
+        // entregadas (Deleted) y solo despues las mas antiguas, y luego se INSERTA. Se pierde
+        // historico antes que datos sin enviar, y desaparece el reciclado con todos sus bordes.
+        if (rowCount >= maxRows) {
+            NSInteger toDelete = rowCount - maxRows + 1;
+            sql = [NSString stringWithFormat:
+                   @"DELETE FROM %1$@ WHERE %2$@ IN (SELECT %2$@ FROM %1$@ "
+                   @"ORDER BY CASE %5$@ WHEN %6$ld THEN 0 ELSE 1 END, %3$@ LIMIT %4$ld);",
+                   @LC_TABLE_NAME, @LC_COLUMN_NAME_ID, @LC_COLUMN_NAME_RECORDED_AT,
+                   (long)toDelete, @LC_COLUMN_NAME_STATUS, (long)MAURLocationDeleted];
             if (![database executeStatements:sql]) {
                 NSLog(@"%@ failed code: %d: message: %@", sql, [database lastErrorCode], [database lastErrorMessage]);
             }
         }
 
-        // get oldest location id to be overwritten
-        sql = @"SELECT MIN(" @LC_COLUMN_NAME_ID ") FROM " @LC_TABLE_NAME @" WHERE " @LC_COLUMN_NAME_RECORDED_AT
-        @" = (SELECT min(" @LC_COLUMN_NAME_RECORDED_AT @") FROM " @LC_TABLE_NAME @" )";
-        rs = [database executeQuery:sql];
-        if ([rs next]) {
-            locationId = [NSNumber numberWithLongLong:[rs longLongIntForColumnIndex:0]];
-        }
-        [rs close];
-
-        sql = @"UPDATE " @LC_TABLE_NAME @" SET "
-        @LC_COLUMN_NAME_TIME @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_ACCURACY @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_SPEED @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_BEARING @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_ALTITUDE @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_LATITUDE @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_LONGITUDE @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_PROVIDER @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_LOCATION_PROVIDER @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_STATUS @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_RECORDED_AT @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_EVENTS_JSON @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_BATTERY_LEVEL @EQ_BIND
-        @COMMA_SEP @LC_COLUMN_NAME_IS_CHARGING @EQ_BIND
-        @" WHERE " @LC_COLUMN_NAME_ID @EQ_BIND;
-
-        // v4.5.1: serialize events for UPDATE path so old values don't bleed onto new locations
-        NSString *eventsJsonForUpdate = nil;
-        if (location.drivingEvents != nil && [location.drivingEvents count] > 0) {
-            NSError *jerr = nil;
-            NSData *jd = [NSJSONSerialization dataWithJSONObject:location.drivingEvents options:0 error:&jerr];
-            if (jd != nil) eventsJsonForUpdate = [[NSString alloc] initWithData:jd encoding:NSUTF8StringEncoding];
-        }
-
-        BOOL success = [database executeUpdate:sql,
-            [NSNumber numberWithDouble:[location.time timeIntervalSince1970]],
-            location.accuracy,
-            location.speed,
-            location.heading,
-            location.altitude,
-            location.latitude,
-            location.longitude,
-            location.provider ?: [NSNull null],
-            location.locationProvider ?: [NSNull null],
-            location.isValid == YES ? @(1) : @(0),
-            recordedAt,
-            eventsJsonForUpdate ?: [NSNull null],
-            location.batteryLevel ?: [NSNull null],
-            location.isCharging ?: [NSNull null],
-            locationId
-        ];
-
-        if (!success) {
-            NSLog(@"Inserting location %@ failed code: %d: message: %@", location.time, [database lastErrorCode], [database lastErrorMessage]);
-            locationId = [NSNumber numberWithInt:-1];
-        }
-
+        locationId = [self persistLocation:location intoDatabase:database];
+        return;
     }];
 
     return locationId;

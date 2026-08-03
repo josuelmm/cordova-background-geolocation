@@ -98,7 +98,7 @@
 > |---|---|---|
 > | R1 | `getLocations()` vaciado por el borrado físico del lote | **Corregida** — vuelve el soft-delete; `maxLocations` acota |
 > | R2 | `mocked` añadido al template por defecto (ambas plataformas) | **Corregida** — revertido |
-> | R6 | `READ_TIMEOUT` 120 s → 30 s rompía lotes grandes | **Corregida** — 30 s por posición, 120 s por lote |
+> | R6 | `READ_TIMEOUT` 120 s → 30 s rompía los envíos | **Corregida (en dos intentos)** — el primero dejó 30 s por posición y 120 s por lote, pero la ruta form-urlencoded SIEMPRE va por posición, así que en la práctica todo seguía en 30 s y rompió un despliegue real. Ahora 120 s (valor de v4) en todas las rutas, y las peticiones por elemento heredan el timeout |
 > | R10 | `radio.js` descartaba `[fn, contextoB]` | **Corregida** — identidad = par (callback, contexto) |
 > | R11 | Android ignoraba `syncMode` | **Corregida, pero mal clasificada aquí** — v4 tampoco leía `getSyncMode()` (0 ocurrencias en `SyncAdapter` v4). No es regresión de v5.0.0: es *feature a medias desde v4* + paridad nueva con iOS. Ahora se honra `single` |
 > | R13 | `androidx` exige compileSdk 34 con `<engine>` en 12 | **Corregida** — motor mínimo 13 |
@@ -174,7 +174,7 @@
 >
 > ```
 > cd android && ./gradlew :common:testDebugUnitTest :CDVBackgroundGeolocation:testDebugUnitTest
-> → BUILD SUCCESSFUL — 82 tests, 0 fallos          (68 en v5.0.0; +14 de regresión en 5.0.1)
+> → BUILD SUCCESSFUL — 84 tests, 0 fallos          (68 en v5.0.0; +16 de regresión en 5.0.1)
 > cd android && ./gradlew :common:compileDebugAndroidTestJavaWithJavac \
 >                        :CDVBackgroundGeolocation:compileDebugAndroidTestJavaWithJavac
 > → BUILD SUCCESSFUL — los 72 tests instrumentados compilan (antes: 80 errores)

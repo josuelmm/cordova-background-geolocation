@@ -37,7 +37,7 @@
     locationProvider = [NSNumber numberWithInt:DISTANCE_FILTER_PROVIDER];
     httpMethod = @"POST";
     syncHttpMethod = @"POST";
-    httpMode = @"batch";
+    httpMode = @"single"; // v5.0.1 — forma de v4 en tiempo real; ver Config.getDefault() de Android
     syncMode = @"batch";
     heartbeatInterval = [NSNumber numberWithInt:0];
     mockLocationPolicy = @"allow";
@@ -99,9 +99,9 @@
         instance.httpMethod = [(NSString*)config[@"httpMethod"] uppercaseString];
     }
     if (isNotNull(config[@"syncHttpMethod"])) {
-        // v5.0.1 — R14: 'GET' se RECHAZA en -validate:, igual que en ConfigMapper de Android (la
-        // URL de sync se resuelve con location:nil, así que no se sustituye ningún placeholder por
-        // posición: un 200 borraría el lote con cero datos). Aquí solo se normaliza.
+        // v5.0.1 — R14: 'GET' se CORRIGE a POST en -validate:, igual que en ConfigMapper de
+        // Android (la URL de sync se resuelve con location:nil, así que no se sustituye ningún
+        // placeholder por posición: un 200 borraría el lote con cero datos). Aquí solo se normaliza.
         instance.syncHttpMethod = [(NSString*)config[@"syncHttpMethod"] uppercaseString];
     }
     if (isNotNull(config[@"httpMode"])) {
@@ -692,84 +692,80 @@
 
 #pragma mark - v5.0.1 (B1) validacion, paridad con ConfigMapper.validate() de Android
 
-static NSString * const MAURConfigErrorDomain = @"com.marianhello";
-
-static NSError * MAURConfigError(NSString *message)
-{
-    return [NSError errorWithDomain:MAURConfigErrorDomain
-                               code:1002 /* MAURBGConfigureError */
-                           userInfo:@{ NSLocalizedDescriptionKey: message }];
-}
-
 /** nil pasa (semantica de actualizacion parcial); un valor presente debe estar en la lista. */
-static BOOL MAURRequireOneOfString(NSString *name, NSString *value, NSArray *allowed, NSError * __autoreleasing *outError)
+static BOOL MAURRequireOneOfString(NSString *name, NSString *value, NSArray *allowed)
 {
     if (value == nil) return YES;
     for (NSString *candidate in allowed) {
         if ([candidate caseInsensitiveCompare:value] == NSOrderedSame) return YES;
     }
-    if (outError != NULL) {
-        *outError = MAURConfigError([NSString stringWithFormat:@"%@ must be one of %@, got '%@'",
-                                     name, [allowed componentsJoinedByString:@", "], value]);
-    }
+    DDLogError(@"Config invalida: %@ debe ser uno de %@, llego '%@'. Se usa el valor por defecto.",
+               name, [allowed componentsJoinedByString:@", "], value);
     return NO;
 }
 
-static BOOL MAURRequireNonNegative(NSString *name, NSNumber *value, NSError * __autoreleasing *outError)
+static BOOL MAURRequireNonNegative(NSString *name, NSNumber *value)
 {
     if (value == nil) return YES;
     if ([value doubleValue] >= 0) return YES;
-    if (outError != NULL) {
-        *outError = MAURConfigError([NSString stringWithFormat:@"%@ must be >= 0, got %@", name, value]);
-    }
+    DDLogError(@"Config invalida: %@ debe ser >= 0, llego %@. Se usa el valor por defecto.", name, value);
     return NO;
 }
 
-static BOOL MAURRequireRange(NSString *name, NSNumber *value, double min, double max, NSError * __autoreleasing *outError)
+static BOOL MAURRequireRange(NSString *name, NSNumber *value, double min, double max)
 {
     if (value == nil) return YES;
     double v = [value doubleValue];
     if (v >= min && v <= max) return YES;
-    if (outError != NULL) {
-        *outError = MAURConfigError([NSString stringWithFormat:@"%@ must be between %g and %g, got %@",
-                                     name, min, max, value]);
-    }
+    DDLogError(@"Config invalida: %@ debe estar entre %g y %g, llego %@. Se usa el valor por defecto.",
+               name, min, max, value);
     return NO;
 }
 
 @implementation MAURConfig (MAURValidation)
 
+/**
+ * v5.0.1 — mismo contrato que ConfigMapper.validate() de Android: NO rechaza, CORRIGE.
+ *
+ * La primera version devolvia NO y CDVBackgroundGeolocation rechazaba `configure()` entera, o sea
+ * que un solo campo raro dejaba la app SIN TRACKING. Peor aun: Android ya se habia pasado a
+ * corregir-con-log, asi que la MISMA configuracion arrancaba en Android y no en iOS — una flota
+ * mixta veia la mitad de los dispositivos muertos sin motivo visible.
+ *
+ * `outError` se conserva por compatibilidad de firma pero ya no se rellena: el metodo devuelve
+ * siempre YES y los valores invalidos se registran y se reponen al valor por defecto.
+ */
 - (BOOL) validate:(NSError * __autoreleasing *)outError
 {
+    MAURConfig *defaults = [[MAURConfig alloc] initWithDefaults];
+
     if (self.locationProvider != nil) {
         int p = [self.locationProvider intValue];
         if (p != 0 && p != 1 && p != 2) {
-            if (outError != NULL) {
-                *outError = MAURConfigError([NSString stringWithFormat:
-                        @"locationProvider must be one of 0, 1, 2, got %@", self.locationProvider]);
-            }
-            return NO;
+            DDLogError(@"Config invalida: locationProvider debe ser 0, 1 o 2, llego %@. "
+                       @"Se usa el valor por defecto.", self.locationProvider);
+            self.locationProvider = defaults.locationProvider;
         }
     }
 
-    if (!MAURRequireNonNegative(@"stationaryRadius", self.stationaryRadius, outError)) return NO;
-    if (!MAURRequireNonNegative(@"distanceFilter", self.distanceFilter, outError)) return NO;
-    if (!MAURRequireNonNegative(@"activitiesInterval", self.activitiesInterval, outError)) return NO;
-    if (!MAURRequireNonNegative(@"heartbeatInterval", self.heartbeatInterval, outError)) return NO;
+    if (!MAURRequireNonNegative(@"stationaryRadius", self.stationaryRadius)) self.stationaryRadius = defaults.stationaryRadius;
+    if (!MAURRequireNonNegative(@"distanceFilter", self.distanceFilter)) self.distanceFilter = defaults.distanceFilter;
+    if (!MAURRequireNonNegative(@"activitiesInterval", self.activitiesInterval)) self.activitiesInterval = defaults.activitiesInterval;
+    if (!MAURRequireNonNegative(@"heartbeatInterval", self.heartbeatInterval)) self.heartbeatInterval = defaults.heartbeatInterval;
     // 0 se acepta a proposito en ambos: syncThreshold 0 = sincronizar en cada posicion,
     // maxLocations 0 = no persistir. v4 los aceptaba y hay apps en produccion con esos valores.
-    if (!MAURRequireNonNegative(@"syncThreshold", self.syncThreshold, outError)) return NO;
-    if (!MAURRequireNonNegative(@"maxLocations", self.maxLocations, outError)) return NO;
-    if (!MAURRequireNonNegative(@"maxAcceptedAccuracy", self.maxAcceptedAccuracy, outError)) return NO;
-    if (!MAURRequireRange(@"activityConfidenceThreshold", self.activityConfidenceThreshold, 0, 100, outError)) return NO;
+    if (!MAURRequireNonNegative(@"syncThreshold", self.syncThreshold)) self.syncThreshold = defaults.syncThreshold;
+    if (!MAURRequireNonNegative(@"maxLocations", self.maxLocations)) self.maxLocations = defaults.maxLocations;
+    if (!MAURRequireNonNegative(@"maxAcceptedAccuracy", self.maxAcceptedAccuracy)) self.maxAcceptedAccuracy = nil;
+    if (!MAURRequireRange(@"activityConfidenceThreshold", self.activityConfidenceThreshold, 0, 100)) self.activityConfidenceThreshold = defaults.activityConfidenceThreshold;
 
-    if (!MAURRequireOneOfString(@"httpMethod", self.httpMethod, @[@"POST", @"GET", @"PUT", @"PATCH"], outError)) return NO;
+    if (!MAURRequireOneOfString(@"httpMethod", self.httpMethod, @[@"POST", @"GET", @"PUT", @"PATCH"])) self.httpMethod = defaults.httpMethod;
     // R14: GET fuera del sync — la URL se resuelve con location:nil, asi que no se sustituye
     // ningun placeholder por posicion y un 200 borraria el lote con cero datos.
-    if (!MAURRequireOneOfString(@"syncHttpMethod", self.syncHttpMethod, @[@"POST", @"PUT", @"PATCH"], outError)) return NO;
-    if (!MAURRequireOneOfString(@"httpMode", self.httpMode, @[@"batch", @"single"], outError)) return NO;
-    if (!MAURRequireOneOfString(@"syncMode", self.syncMode, @[@"batch", @"single"], outError)) return NO;
-    if (!MAURRequireOneOfString(@"mockLocationPolicy", self.mockLocationPolicy, @[@"allow", @"flag", @"drop"], outError)) return NO;
+    if (!MAURRequireOneOfString(@"syncHttpMethod", self.syncHttpMethod, @[@"POST", @"PUT", @"PATCH"])) self.syncHttpMethod = defaults.syncHttpMethod;
+    if (!MAURRequireOneOfString(@"httpMode", self.httpMode, @[@"batch", @"single"])) self.httpMode = defaults.httpMode;
+    if (!MAURRequireOneOfString(@"syncMode", self.syncMode, @[@"batch", @"single"])) self.syncMode = defaults.syncMode;
+    if (!MAURRequireOneOfString(@"mockLocationPolicy", self.mockLocationPolicy, @[@"allow", @"flag", @"drop"])) self.mockLocationPolicy = defaults.mockLocationPolicy;
 
     return YES;
 }

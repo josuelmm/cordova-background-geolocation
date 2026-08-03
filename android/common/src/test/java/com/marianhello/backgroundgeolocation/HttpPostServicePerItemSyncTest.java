@@ -44,6 +44,8 @@ public class HttpPostServicePerItemSyncTest {
     private final List<Integer> responses = Collections.synchronizedList(new ArrayList<Integer>());
     /** Cuerpos recibidos, en orden. */
     private final List<String> received = Collections.synchronizedList(new ArrayList<String>());
+    /** Retardo artificial de la respuesta, para reproducir un backend lento. */
+    private volatile int responseDelayMs = 0;
 
     // com.sun.net.httpserver no está en el classpath de los unit tests de Android, así que el
     // stub es un ServerSocket con el mínimo de HTTP/1.1 que HttpURLConnection necesita.
@@ -105,6 +107,9 @@ public class HttpPostServicePerItemSyncTest {
         if (code < 0) {
             // Simula un corte de red: cierra sin responder -> IOException en el cliente.
             return;
+        }
+        if (responseDelayMs > 0) {
+            try { Thread.sleep(responseDelayMs); } catch (InterruptedException ignored) { }
         }
         OutputStream out = socket.getOutputStream();
         out.write(("HTTP/1.1 " + code + " X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
@@ -236,5 +241,53 @@ public class HttpPostServicePerItemSyncTest {
             assertTrue("no debe ser JSON: " + body, !body.startsWith("[") && !body.startsWith("{"));
         }
         assertEquals(3, accepted[0]);
+    }
+
+    /**
+     * v5.0.1 — el timeout de lectura tiene que HEREDARSE en las peticiones por elemento.
+     *
+     * Caso real que lo destapó: un Traccar con el DeviceForwarder caído tarda ~2 min en responder.
+     * Las peticiones por elemento se creaban con `new HttpPostService(url, method)`, que arranca
+     * con el timeout por defecto, así que el margen de v4 (120 s) nunca llegaba a la única ruta
+     * que lo usa con form-urlencoded. Resultado: timeout a los 30 s, cero posiciones confirmadas,
+     * el mismo lote reintentado indefinidamente y duplicados en el servidor.
+     *
+     * El servidor de este test tarda 1,2 s en responder: con un timeout heredado de 120 s pasa; si
+     * alguien vuelve a dejar las hijas en 30 s este test sigue pasando, así que además se
+     * comprueba la propagación directamente sobre createPerItemService().
+     */
+    @Test
+    public void perItemRequestsInheritTheReadTimeout() throws Exception {
+        // createPerItemService() es package-private en com.marianhello.bgloc y este test vive en
+        // com.marianhello.backgroundgeolocation, asi que se invoca por reflexion.
+        HttpPostService parent = new HttpPostService(baseUrl, "POST");
+        java.lang.reflect.Method factory =
+                HttpPostService.class.getDeclaredMethod("createPerItemService");
+        factory.setAccessible(true);
+        HttpPostService child = (HttpPostService) factory.invoke(parent);
+        assertEquals("la peticion por elemento debe heredar el timeout del padre",
+                readTimeoutOf(parent), readTimeoutOf(child));
+        assertTrue("el timeout por defecto debe ser el de v4 (120 s), no los 30 s de v5.0.0",
+                readTimeoutOf(parent) >= 120_000);
+    }
+
+    /** Un backend lento (1,2 s) no debe hacer fallar el lote. */
+    @Test
+    public void slowServerDoesNotTimeOutThePerItemBatch() throws Exception {
+        responseDelayMs = 1200;
+        int[] accepted = new int[]{-1};
+
+        int code = HttpPostService.postJSONFile(baseUrl, batchFile(THREE_ITEMS), jsonHeaders(),
+                null, "POST", accepted, true);
+
+        assertEquals(200, code);
+        assertEquals(3, received.size());
+        assertEquals(3, accepted[0]);
+    }
+
+    private static int readTimeoutOf(HttpPostService service) throws Exception {
+        java.lang.reflect.Field f = HttpPostService.class.getDeclaredField("mReadTimeoutMs");
+        f.setAccessible(true);
+        return (Integer) f.get(service);
     }
 }

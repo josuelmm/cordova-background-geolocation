@@ -63,8 +63,8 @@ Configure options:
 | `enableWatchdog`          | `Boolean`         | Android      | If true, when no location update is received for ~60s the provider is restarted (helps on some devices).                                                                                                                                                                                                                                          | all         | false                      |
 | `postTemplate`            | `Object\|Array`   | all          | Customization post template **@see** [Custom post template](#custom-post-template)                                                                                                                                                                                                                                                                 | all         |                            |
 | `httpMethod`              | `String`          | Android, iOS | **Since 3.3.0.** HTTP method for `url`. One of `POST`, `GET`, `PUT`, `PATCH`. Use `GET` together with URL templating to deliver positions through the query string. **@see** [HTTP transport](#http-transport).                                                                                                                                       | all         | `POST`                     |
-| `syncHttpMethod`          | `String`          | Android, iOS | **Since 3.3.0.** HTTP method for `syncUrl` (the offline queue). `POST`, `PUT` or `PATCH`. **`GET` is rejected since 5.0.1** — the batch URL is resolved once with no location, so per-location placeholders stay unsubstituted and a 200 would delete the batch with zero real data.                                                                                                                                                                                                                                                       | all         | `POST`                     |
-| `httpMode`                | `String`          | Android, iOS | **Since 3.3.0.** `batch` (one HTTP request with an array of locations) or `single` (one request per location). `single` is required when `httpMethod` is `GET`.                                                                                                                                                                                    | all         | `batch`                    |
+| `syncHttpMethod`          | `String`          | Android, iOS | **Since 3.3.0.** HTTP method for `syncUrl` (the offline queue). `POST`, `PUT` or `PATCH`. **`GET` is coerced to `POST` since 5.0.1** (logged, `configure()` still succeeds): the batch URL is resolved once with no location, so per-location placeholders stay unsubstituted and a 200 would delete the batch with zero real data.                                                                                                                                                                                                                                                       | all         | `POST`                     |
+| `httpMode`                | `String`          | Android, iOS | **Since 3.3.0.** `single` (one request per location, body `{...}`) or `batch` (body `[{...}]`). Real-time always posts exactly one location, so `batch` only makes sense if your backend asks for an array. **Default changed to `single` in 5.0.1** to restore the v4 payload shape: v5.0.0 defaulted to `batch`, so REST backends that had received an object for years started getting `[{...}]` and answering 400 on every fix. Required to be `single` when `httpMethod` is `GET`. | all         | `single`                   |
 | `syncMode`                | `String`          | Android, iOS | **Since 3.3.0.** Same values as `httpMode` but for the sync queue.                                                                                                                                                                                                                                                                                 | all         | `batch`                    |
 | `headers`                 | `Object`          | Android, iOS | **Since 3.3.0.** Alias of `httpHeaders`. If both are present, `headers` takes precedence.                                                                                                                                                                                                                                                          | all         |                            |
 | `bodyTemplate`            | `Object\|Array`   | Android, iOS | **Since 3.3.0.** Alias of `postTemplate`. Same syntax (`@latitude`, `@longitude`, ...) and the new placeholder syntax (`{latitude}`, `{lon}`, ...) is supported on string values.                                                                                                                                                                  | all         |                            |
@@ -609,8 +609,9 @@ The plugin is **backend-agnostic**. There is no `traccarMode`, `osmandMode` or s
 ### Options
 
 - `httpMethod`: `POST` (default) `| GET | PUT | PATCH`.
-- `syncHttpMethod`: `POST` (default) `| PUT | PATCH`. **`GET` is not valid** (rejected in `configure()` since 5.0.1): the sync URL is resolved once for the whole batch, so `{latitude}` & co. cannot be substituted. Use the real-time `url` for GET backends, or put a gateway that accepts a body in front.
-- `httpMode`: `batch` (default) or `single`. `single` is required when `httpMethod` is `GET`. Same for `syncMode`.
+- `syncHttpMethod`: `POST` (default) `| PUT | PATCH`. **`GET` is not valid** (coerced to `POST` in `configure()` since 5.0.1, with a log — tracking is not aborted): the sync URL is resolved once for the whole batch, so `{latitude}` & co. cannot be substituted. Use the real-time `url` for GET backends, or put a gateway that accepts a body in front.
+- `httpMode`: `single` (default since 5.0.1, = v4 payload shape `{...}`) or `batch` (`[{...}]`). Required to be `single` when `httpMethod` is `GET`.
+- `syncMode`: `batch` (default) or `single`. Independent of `httpMode`; with `Content-Type: application/x-www-form-urlencoded` the sync route always goes per location regardless, because an array cannot be flattened to `key=value`.
 - `url`, `syncUrl`: support placeholders.
 - `headers`: alias of `httpHeaders`.
 - `bodyTemplate`: alias of `postTemplate`. Supports both the legacy `@latitude` syntax and the new `{latitude}` placeholder syntax on string values.
@@ -626,7 +627,7 @@ Unknown placeholders are left as-is, so partial templates keep working (e.g. onl
 
 ### Examples
 
-**REST JSON batch (default):**
+**REST JSON, body as an array (`httpMode: 'batch'` — no longer the default):**
 
 ```javascript
 BackgroundGeolocation.configure({
@@ -662,7 +663,7 @@ BackgroundGeolocation.configure({
 
 ### Backward compatibility
 
-Apps that only set `url` + `httpHeaders` + `postTemplate` continue to work without changes. Defaults are `httpMethod: 'POST'` and `httpMode: 'batch'`.
+Apps that only set `url` + `httpHeaders` + `postTemplate` continue to work without changes. Defaults are `httpMethod: 'POST'` and `httpMode: 'single'` (i.e. the real-time body is a plain object, exactly as in v4).
 
 For more examples (Firebase, n8n, GraphQL, Traccar) see [http-transport.md](http-transport.md) and [traccar.md](traccar.md).
 

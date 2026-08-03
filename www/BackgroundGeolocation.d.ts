@@ -424,26 +424,27 @@ export interface ConfigureOptions {
   httpMethod?: 'POST' | 'GET' | 'PUT' | 'PATCH';
 
   /**
-   * HTTP method used by the sync queue when posting failed locations to `syncUrl`. Default `POST`.
+   * HTTP method for `syncUrl` (the offline queue). Default `POST`.
+   *
+   * `GET` is not valid: the sync URL is resolved once for the whole batch, so per-location
+   * placeholders such as `{latitude}` are never substituted. Since 5.0.1 an invalid value
+   * (including `GET`) is **coerced to `POST`** and logged; `configure()` still succeeds so
+   * tracking is not aborted.
    *
    * Platform: Android, iOS
    * @since 3.3.0
    */
-  /**
-   * HTTP method for `syncUrl` (the offline queue).
-   *
-   * `GET` is NOT valid here and is rejected by `configure()` since 5.0.1: the sync URL is
-   * resolved once for the whole batch (no single location), so per-location placeholders such
-   * as `{latitude}` are never substituted — the request would go out literally as
-   * `?lat={latitude}` and a 200 would delete the batch with zero real data.
-   */
   syncHttpMethod?: 'POST' | 'PUT' | 'PATCH';
 
   /**
-   * How real-time locations are delivered to `url`.
-   *  - `batch` (default): one HTTP request with an array of locations.
-   *  - `single`: one HTTP request per location.
-   * `single` is required when `httpMethod` is `GET` (no body).
+   * Shape of the real-time request body.
+   *
+   * - `'single'` (**default since 5.0.1**): one request per location, body `{...}` (v4 shape).
+   *   Required when `httpMethod` is `'GET'`.
+   * - `'batch'`: body `[{...}]`. Only if your backend expects an array.
+   *
+   * v5.0.0 defaulted to `'batch'`, which silently changed the payload for apps that had not
+   * set this option. Restored to `'single'` in 5.0.1 / 5.0.2.
    *
    * Platform: Android, iOS
    * @since 3.3.0

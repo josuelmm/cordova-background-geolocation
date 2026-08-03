@@ -635,6 +635,10 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         // the provider every 60s and the sensors sampling.
         if (mDrivingDetector != null) {
             mDrivingDetector.setConfig(c);
+        // v5.0.1 — el tope de hueco entre segmentos de distancia depende del intervalo real.
+        mDrivingDetector.setLocationIntervalMs(mConfig != null && mConfig.getInterval() != null ? mConfig.getInterval() : 0);
+            // v5.0.1 — el tope de hueco entre segmentos de distancia depende del intervalo real.
+            mDrivingDetector.setLocationIntervalMs(mConfig != null && mConfig.getInterval() != null ? mConfig.getInterval() : 0);
             return;
         }
 
@@ -749,6 +753,8 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             c.crashWindowMs     = optsRef.crashWindowMs;
         }
         mDrivingDetector.setConfig(c);
+        // v5.0.1 — el tope de hueco entre segmentos de distancia depende del intervalo real.
+        mDrivingDetector.setLocationIntervalMs(mConfig != null && mConfig.getInterval() != null ? mConfig.getInterval() : 0);
         configureSensorFusion();
     }
 

@@ -33,7 +33,7 @@ BackgroundGeolocation.configure({
   // ===== Endpoint principal =====
   url: string,                                          // soporta URL templating
   httpMethod?: 'GET' | 'POST' | 'PUT' | 'PATCH',       // default 'POST'
-  httpMode?: 'single' | 'batch',                       // default 'batch'
+  httpMode?: 'single' | 'batch',                       // default 'single' (since 5.0.1)
 
   // Headers (alias retrocompatible: httpHeaders)
   headers?: { [key: string]: string },
@@ -46,7 +46,7 @@ BackgroundGeolocation.configure({
 
   // ===== Endpoint de la cola (locations fallidas) =====
   syncUrl?: string,
-  syncHttpMethod?: 'GET' | 'POST' | 'PUT' | 'PATCH',
+  syncHttpMethod?: 'POST' | 'PUT' | 'PATCH',           // GET no válido: se coerge a POST desde 5.0.1
   syncMode?: 'single' | 'batch',
 });
 ```
@@ -190,7 +190,7 @@ configure({
 
 ## Compatibilidad
 
-- Apps existentes con solo `url` + `httpHeaders` + `postTemplate` siguen funcionando idénticas. Defaults: `httpMethod: 'POST'`, `httpMode: 'batch'`.
+- Apps existentes con solo `url` + `httpHeaders` + `postTemplate` siguen funcionando idénticas. Defaults: `httpMethod: 'POST'`, `httpMode: 'single'` (desde 5.0.1; forma de payload de v4).
 - `headers` es alias nuevo de `httpHeaders`. Si ambos vienen, gana `headers`.
 - `bodyTemplate` es alias nuevo de `postTemplate`. Si ambos vienen, gana `bodyTemplate`.
 - Cambio totalmente aditivo, no breaking.

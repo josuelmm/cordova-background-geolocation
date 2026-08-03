@@ -18,6 +18,9 @@ import java.util.Map;
  */
 
 public class ConfigMapper {
+    private static final org.slf4j.Logger logger =
+            com.marianhello.logging.LoggerManager.getLogger(ConfigMapper.class);
+
     public static Config fromJSONObject (JSONObject jObject) throws JSONException {
         Config config = new Config();
 
@@ -219,80 +222,123 @@ public class ConfigMapper {
     }
 
     /**
-     * Rejects values that the native layer cannot honour, at the JS→native boundary.
+     * Corrige, con log, los valores que la capa nativa no puede honrar.
      *
-     * <p>There was no validation at all before. An out-of-range value went straight through,
-     * got persisted to SQLite by configure(), and then threw deep inside the service — e.g.
-     * {@code locationProvider: 3} makes LocationProviderFactory raise
-     * "Provider not found" so tracking never starts, and because the bad value is now stored,
-     * the same crash repeats on every launch and on startOnBoot. Failing loudly here turns a
-     * permanent silent breakage into an immediate, actionable JS rejection.
+     * <p><b>NO LANZA.</b> v5.0.0 introdujo esta validación lanzando {@code JSONException}, y el
+     * llamante ({@code BackgroundGeolocationPlugin}) la convierte en {@code CONFIGURE_ERROR}: la
+     * llamada a {@code configure()} entera se rechaza, no se persiste nada y {@code start()} no
+     * llega a arrancar. Es decir, un solo campo con un valor inesperado deja la app SIN TRACKING.
+     *
+     * <p>Eso rompe despliegues que funcionaban: hasta 5.0.0 la propia {@code docs/traccar.md}
+     * recomendaba {@code syncHttpMethod: 'GET'}, así que cualquier flota que copió el ejemplo
+     * oficial dejaría de trackear al actualizar. Lo mismo con {@code httpMode: 'batched'} (un
+     * typo), {@code locationProvider: 3} o un {@code wakeLockMode} desconocido: v4 los aceptaba.
+     *
+     * <p>Contrato actual: valor inválido → se registra un ERROR con el nombre del campo y el valor
+     * recibido, y se cae al valor por defecto. Se conserva el objetivo de v5.0.0 (que un valor malo
+     * no llegue en silencio al servicio) sin el modo de fallo de v5.0.0 (matar la configuración).
      */
-    private static void validate(Config config) throws JSONException {
-        requireOneOf("locationProvider", config.getLocationProvider(), 0, 1, 2);
-        requireNonNegative("interval", config.getInterval());
-        requireNonNegative("fastestInterval", config.getFastestInterval());
-        requireNonNegative("activitiesInterval", config.getActivitiesInterval());
-        requireNonNegative("heartbeatInterval", config.getHeartbeatInterval());
-        requireNonNegative("distanceFilter", config.getDistanceFilter());
-        // v5.0.1 — v4 aceptaba 0 con semantica propia ("sincroniza en cada posicion":
-        // syncLocationsCount >= 0 siempre cierto). Rechazarlo hacia que configure() fallara al
-        // arrancar en apps que ya estaban en produccion con ese valor.
-        requireNonNegative("syncThreshold", config.getSyncThreshold());
-        // v5.0.1 — v4 aceptaba 0 ("no persistir": persistLocation(loc, 0) devolvia -1).
-        requireNonNegative("maxLocations", config.getMaxLocations());
-        requireRange("activityConfidenceThreshold", config.getActivityConfidenceThreshold(), 0, 100);
+    private static void validate(Config config) {
+        Config defaults = Config.getDefault();
+
+        if (!requireOneOf("locationProvider", config.getLocationProvider(), 0, 1, 2)) {
+            config.setLocationProvider(defaults.getLocationProvider());
+        }
+        if (!requireNonNegative("interval", config.getInterval())) {
+            config.setInterval(defaults.getInterval());
+        }
+        if (!requireNonNegative("fastestInterval", config.getFastestInterval())) {
+            config.setFastestInterval(defaults.getFastestInterval());
+        }
+        if (!requireNonNegative("activitiesInterval", config.getActivitiesInterval())) {
+            config.setActivitiesInterval(defaults.getActivitiesInterval());
+        }
+        if (!requireNonNegative("heartbeatInterval", config.getHeartbeatInterval())) {
+            config.setHeartbeatInterval(defaults.getHeartbeatInterval());
+        }
+        if (!requireNonNegative("distanceFilter", config.getDistanceFilter())) {
+            config.setDistanceFilter(defaults.getDistanceFilter());
+        }
+        // v4 aceptaba 0 con semantica propia ("sincroniza en cada posicion") — sigue siendo valido.
+        if (!requireNonNegative("syncThreshold", config.getSyncThreshold())) {
+            config.setSyncThreshold(defaults.getSyncThreshold());
+        }
+        // v4 aceptaba 0 ("no persistir") — sigue siendo valido.
+        if (!requireNonNegative("maxLocations", config.getMaxLocations())) {
+            config.setMaxLocations(defaults.getMaxLocations());
+        }
+        if (!requireRange("activityConfidenceThreshold", config.getActivityConfidenceThreshold(), 0, 100)) {
+            config.setActivityConfidenceThreshold(defaults.getActivityConfidenceThreshold());
+        }
 
         if (config.getStationaryRadius() != null && config.getStationaryRadius() < 0) {
-            throw new JSONException("stationaryRadius must be >= 0, got " + config.getStationaryRadius());
+            logger.error("Config invalida: stationaryRadius debe ser >= 0, llego {}. Se usa el valor por defecto.",
+                    config.getStationaryRadius());
+            config.setStationaryRadius(defaults.getStationaryRadius());
         }
         if (config.getMaxAcceptedAccuracy() != null && config.getMaxAcceptedAccuracy() < 0) {
-            throw new JSONException("maxAcceptedAccuracy must be >= 0, got " + config.getMaxAcceptedAccuracy());
+            logger.error("Config invalida: maxAcceptedAccuracy debe ser >= 0, llego {}. Se desactiva el filtro.",
+                    config.getMaxAcceptedAccuracy());
+            config.setMaxAcceptedAccuracy(null);
         }
 
-        requireOneOfString("httpMethod", config.getHttpMethod(), "POST", "GET", "PUT", "PATCH");
-        // v5.0.1 — R14: GET fuera. La URL de sync se resuelve con location = null, así que ningún
-        // placeholder por posición se sustituye: salía un GET sin cuerpo y sin datos, el 200 hacía
-        // setBatchCompleted() y el lote entero se perdía en silencio.
-        requireOneOfString("syncHttpMethod", config.getSyncHttpMethod(), "POST", "PUT", "PATCH");
-        requireOneOfString("httpMode", config.getHttpMode(), "batch", "single");
-        requireOneOfString("syncMode", config.getSyncMode(), "batch", "single");
-        requireOneOfString("mockLocationPolicy", config.getMockLocationPolicy(), "allow", "flag", "drop");
-        requireOneOfString("wakeLockMode", config.getWakeLockMode(), "none", "posting", "always");
+        if (!requireOneOfString("httpMethod", config.getHttpMethod(), "POST", "GET", "PUT", "PATCH")) {
+            config.setHttpMethod(defaults.getHttpMethod());
+        }
+        // R14: GET fuera del sync. La URL del lote se resuelve con location = null, asi que ningun
+        // placeholder por posicion se sustituye: saldria un GET sin datos y un 200 borraria el lote.
+        // Se cae a POST (con log) en vez de rechazar la configuracion entera: hasta 5.0.0 la propia
+        // docs/traccar.md recomendaba syncHttpMethod:'GET', asi que rechazar dejaba sin tracking a
+        // quien copio el ejemplo oficial.
+        if (!requireOneOfString("syncHttpMethod", config.getSyncHttpMethod(), "POST", "PUT", "PATCH")) {
+            config.setSyncHttpMethod(defaults.getSyncHttpMethod());
+        }
+        if (!requireOneOfString("httpMode", config.getHttpMode(), "batch", "single")) {
+            config.setHttpMode(defaults.getHttpMode());
+        }
+        if (!requireOneOfString("syncMode", config.getSyncMode(), "batch", "single")) {
+            config.setSyncMode(defaults.getSyncMode());
+        }
+        if (!requireOneOfString("mockLocationPolicy", config.getMockLocationPolicy(), "allow", "flag", "drop")) {
+            config.setMockLocationPolicy(defaults.getMockLocationPolicy());
+        }
+        if (!requireOneOfString("wakeLockMode", config.getWakeLockMode(), "none", "posting", "always")) {
+            config.setWakeLockMode(defaults.getWakeLockMode());
+        }
     }
 
-    private static void requireOneOf(String name, Integer value, int... allowed) throws JSONException {
-        if (value == null) return;
+    /** true si el valor es válido; si no, loguea y devuelve false para que el llamante lo reponga. */
+    private static boolean requireOneOf(String name, Integer value, int... allowed) {
+        if (value == null) return true;
         for (int a : allowed) {
-            if (value == a) return;
+            if (value == a) return true;
         }
-        throw new JSONException(name + " must be one of " + java.util.Arrays.toString(allowed) + ", got " + value);
+        logger.error("Config invalida: {} debe ser uno de {}, llego {}. Se usa el valor por defecto.",
+                name, java.util.Arrays.toString(allowed), value);
+        return false;
     }
 
-    private static void requireOneOfString(String name, String value, String... allowed) throws JSONException {
-        if (value == null) return;
+    private static boolean requireOneOfString(String name, String value, String... allowed) {
+        if (value == null) return true;
         for (String a : allowed) {
-            if (a.equalsIgnoreCase(value)) return;
+            if (a.equalsIgnoreCase(value)) return true;
         }
-        throw new JSONException(name + " must be one of " + java.util.Arrays.toString(allowed) + ", got " + value);
+        logger.error("Config invalida: {} debe ser uno de {}, llego '{}'. Se usa el valor por defecto.",
+                name, java.util.Arrays.toString(allowed), value);
+        return false;
     }
 
-    private static void requireNonNegative(String name, Integer value) throws JSONException {
-        if (value != null && value < 0) {
-            throw new JSONException(name + " must be >= 0, got " + value);
-        }
+    private static boolean requireNonNegative(String name, Integer value) {
+        if (value == null || value >= 0) return true;
+        logger.error("Config invalida: {} debe ser >= 0, llego {}. Se usa el valor por defecto.", name, value);
+        return false;
     }
 
-    private static void requireAtLeast(String name, Integer value, int min) throws JSONException {
-        if (value != null && value < min) {
-            throw new JSONException(name + " must be >= " + min + ", got " + value);
-        }
-    }
-
-    private static void requireRange(String name, Integer value, int min, int max) throws JSONException {
-        if (value != null && (value < min || value > max)) {
-            throw new JSONException(name + " must be between " + min + " and " + max + ", got " + value);
-        }
+    private static boolean requireRange(String name, Integer value, int min, int max) {
+        if (value == null || (value >= min && value <= max)) return true;
+        logger.error("Config invalida: {} debe estar entre {} y {}, llego {}. Se usa el valor por defecto.",
+                name, min, max, value);
+        return false;
     }
 
     public static JSONObject toJSONObject(Config config) throws JSONException {

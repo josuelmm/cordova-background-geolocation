@@ -87,8 +87,9 @@ public class Config implements Parcelable
     private Boolean showDistance;
     // v3.3 (Phase 2): backend-agnostic HTTP transport
     private String httpMethod;       // POST | GET | PUT | PATCH (default POST)
-    private String syncHttpMethod;   // POST | GET | PUT | PATCH (default POST)
-    private String httpMode;         // batch | single (default batch)
+    /** syncHttpMethod: GET no es valido (la URL del lote no resuelve placeholders por posicion). */
+    private String syncHttpMethod;   // POST | PUT | PATCH (default POST)
+    private String httpMode;         // batch | single (default single = forma de v4)
     private String syncMode;         // batch | single (default batch)
     private HashMap queryParams;     // static placeholder values for URL templating
     // v3.5 (Phase 4): diagnostics
@@ -343,7 +344,13 @@ public class Config implements Parcelable
         config.showDistance = false;
         config.httpMethod = "POST";
         config.syncHttpMethod = "POST";
-        config.httpMode = "batch";
+        // v5.0.1 — el default vuelve a "single", que es la FORMA de v4 en tiempo real.
+        // v4 desenrollaba los arrays de un elemento, asi que un POST en tiempo real salia como
+        // `{...}`. v5.0.0 quito el desenrollado y dejo el default en "batch", asi que el mismo
+        // backend REST que llevaba anios recibiendo un objeto empezo a recibir `[{...}]` y a
+        // responder 400 en CADA posicion. En tiempo real siempre se envia exactamente una
+        // posicion, asi que "batch" solo tiene sentido si el backend lo pide explicitamente.
+        config.httpMode = "single";
         config.syncMode = "batch";
         config.queryParams = null;
         config.heartbeatInterval = 0;
@@ -936,10 +943,10 @@ public class Config implements Parcelable
         this.syncHttpMethod = (syncHttpMethod == null || syncHttpMethod.isEmpty()) ? null : syncHttpMethod.toUpperCase(Locale.US);
     }
 
-    /** Real-time post mode. "batch" (default) or "single". */
+    /** Real-time post mode. "single" (default since 5.0.1) or "batch". */
     @Nullable
     public String getHttpMode() {
-        return httpMode != null ? httpMode : "batch";
+        return httpMode != null ? httpMode : "single"; // v5.0.1 — ver getDefault()
     }
 
     public void setHttpMode(@Nullable String httpMode) {

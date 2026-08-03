@@ -1,5 +1,32 @@
 # Changelog
 
+## [5.0.2](https://github.com/josuelmm/cordova-background-geolocation/tree/5.0.2) (2026-08-03)
+
+> **Parche sobre 5.0.1 publicado.** Lo que salió a npm como 5.0.1 (`7b0f7b7`) dejó a medias
+> tres arreglos que volvieron a romper producción o a desviar el payload de v4. Actualiza a
+> 5.0.2 cuanto antes si usas form-urlencoded, backends lentos, o no fijaste `httpMode`.
+
+### Fixed — crítico (lo que 5.0.1 publicó a medias)
+
+- **Timeout de lectura 30 s en la ruta por-ítem.** 5.0.1 subió a 120 s solo el POST de lote
+  JSON; form-urlencoded y `syncMode:'single'` abren una conexión por posición y seguían en
+  30 s. Restaurado el valor de v4 (**120 s**) en todas las rutas; `createPerItemService()`
+  hereda el timeout. iOS: `NSURLRequest` / semáforo a 120 s.
+- **Default `httpMode` volvió a la forma de v4 (`single` → body `{...}`).** 5.0.0/5.0.1
+  dejaban `'batch'`, así que un POST en tiempo real salía como `[{...}]` y backends REST
+  históricos respondían 400. Default: `'single'` en Android e iOS.
+- **`configure()` ya no muere por un campo inválido.** Soft-coerce + log (Android e iOS),
+  incluida la doc antigua con `syncHttpMethod:'GET'` → se corrige a `POST`.
+- **`maxLocations` ya no sacrifica primero lo nunca enviado.** Prune prioriza lápidas
+  `DELETED` (Android + iOS).
+
+### Fixed — otros
+
+- Hueco de distancia en `tripEnd` acotado por `interval` (no fijo).
+- Fallback OEM batería si falta el permiso en el manifest.
+- Sensor fusion: no tumba el evento solo por falta de velocidad GPS.
+- Docs / `.d.ts` alineados con default `single` y coerce (no reject) de `syncHttpMethod`.
+
 ## [5.0.1](https://github.com/josuelmm/cordova-background-geolocation/tree/5.0.1) (2026-08-01)
 
 > **Correccion de regresiones de v5.0.0.** Un despliegue real destapo que varias de las ~132
@@ -58,11 +85,11 @@
 
 ```
 ./gradlew :common:testDebugUnitTest :CDVBackgroundGeolocation:testDebugUnitTest
--> BUILD SUCCESSFUL — 82 tests, 0 fallos   (68 en v5.0.0; +14 de regresion para lo de abajo)
+-> BUILD SUCCESSFUL — 84 tests, 0 fallos   (68 en v5.0.0; +16 de regresion para lo de abajo)
 clang -fsyntax-only con stubs sobre los .m modificados -> sin errores
 ```
 
-Los 5 tests de `HttpPostServicePerItemSyncTest` levantan un servidor HTTP real en localhost y
+Los 7 tests de `HttpPostServicePerItemSyncTest` levantan un servidor HTTP real en localhost y
 ejercitan la ruta POR-ELEMENTO completa (285, corte de red a mitad de lote, aplanado
 form-urlencoded con `charset`). Es la combinacion que nunca se habia probado y por la que rompio
 produccion: el mock de `HttpURLConnection` no la alcanza porque esa ruta abre una conexion por item.
@@ -98,10 +125,10 @@ detecta sintaxis y selectores inexistentes; no es un build ni una prueba de comp
   Javadoc de `PostLocationTask`. Ahora `url` actua de destino de reserva.
   *Precision:* tampoco es regresion de v5.0.0 — v4 ya tenia `if (mConfig.hasValidSyncUrl())` en
   `PostLocationTask.java:157`. Es un agujero heredado que el Javadoc contradecia desde v4.
-- **R6 — `READ_TIMEOUT` 120s -> 30s rompia los lotes grandes.** 30 s es correcto para un POST de una
-  posicion (un servidor colgado retenia el wake lock dos minutos por intento), pero un backend que
-  importa 100 filas de forma sincrona tardaba mas y fallaba donde v4 funcionaba. El envio por lote
-  conserva los 120 s; el de una posicion se queda en 30 s.
+- **R6 — `READ_TIMEOUT` 120s -> 30s rompia los envios.** Restaurado el valor de v4 (120 s) en TODAS
+  las rutas. *Esta entrada decia antes que "el envio por lote conserva los 120 s y el de una
+  posicion se queda en 30 s": ese arreglo estaba a medias y volvio a romper produccion.* Ver la
+  entrada de la auditoria del 03-08 mas abajo.
 - **R10 — `radio.js` descartaba `[fn, contextoB]`** si ya existia `[fn, contextoA]`: el dedupe
   comparaba solo la funcion. La identidad es el par (callback, contexto).
 
@@ -347,6 +374,60 @@ detecta sintaxis y selectores inexistentes; no es un build ni una prueba de comp
   lote — el objeto más caro de Foundation, en el hot path).
 - El servidor stub del test nuevo moría ante una `RuntimeException`, dejando colgados 30 s los
   tests siguientes.
+
+### Fixed — regresiones destapadas por un despliegue real (03-08)
+
+> Un log de producción (Traccar/OsmAnd, Android, form-urlencoded) mostró el sync fallando en bucle.
+> El diagnóstico llevó a un patrón que ninguna de las cinco auditorías anteriores buscaba: **un
+> VALOR o una POLÍTICA que v5 cambió con una justificación razonable y que rompe despliegues que
+> antes funcionaban.** Se auditó entonces el diff completo v4.5.5 → 5.0.1 buscando solo eso.
+
+- **El timeout de lectura seguía en 30 s en la única ruta que importa.** v4.5.5 usaba 120 s en todo.
+  v5.0.0 (item A4) lo bajó a 30 s razonando que un servidor colgado retiene el wake lock dos
+  minutos. v5.0.1 (R6) restauró 120 s **solo** para el cuerpo único del lote — que con
+  form-urlencoded NUNCA se usa, porque esa ruta siempre va por elemento. Y las peticiones por
+  elemento se creaban con `new HttpPostService(url, method)`, que arranca con el valor por defecto,
+  así que ni siquiera heredaban el ajuste. Caso real: un Traccar con el `DeviceForwarder` caído
+  tarda ~2 min en responder; recibe y registra la posición, pero contesta tarde. Con 30 s el plugin
+  la da por fallida, **no confirma nada, reintenta el mismo lote indefinidamente y el servidor
+  acumula duplicados** mientras la cola local no baja nunca. Ahora 120 s (v4) en ambas rutas, y las
+  peticiones por elemento se crean con `createPerItemService()`, que propaga el timeout. iOS
+  alineado a 120 s (estaba en 30 s por copiar el valor equivocado).
+- **Una config inválida ya no deja la app sin tracking.** v5.0.0 añadió validación que lanza
+  `JSONException`, y el llamante la convierte en `CONFIGURE_ERROR`: **la llamada a `configure()`
+  entera se rechaza**, no se persiste nada y `start()` no llega a arrancar. Hasta 5.0.0 la propia
+  `docs/traccar.md` recomendaba `syncHttpMethod: 'GET'`, así que cualquier flota que copió el
+  ejemplo oficial dejaba de trackear al actualizar. Lo mismo con un typo (`httpMode: 'batched'`),
+  `locationProvider: 3` o un `wakeLockMode` desconocido: v4 los aceptaba todos. Ahora un valor
+  inválido se registra como ERROR con el campo y el valor recibido, y se cae al valor por defecto.
+  Se conserva el objetivo (que un valor malo no llegue en silencio al servicio) sin el modo de
+  fallo. Aplicado en Android e iOS.
+- **`maxLocations` expulsaba posiciones NUNCA ENVIADAS.** El recorte ordenaba solo por tiempo, así
+  que sacrificaba las filas más antiguas aunque estuvieran `SYNC_PENDING`. En v4 esta sobrecarga no
+  la llamaba nadie, así que el problema nace justo al empezar a honrar el límite; y con el borrado
+  lógico restaurado, las lápidas `DELETED` consumen cupo. Caso real: dos días sin cobertura a ~8600
+  fixes/día con el límite por defecto de 10000 → el tramo inicial del viaje se borra **antes** de
+  recuperar la conexión. Ahora se sacrifican primero las ya entregadas y solo después, si aún
+  sobran, las más antiguas.
+- **El POST en tiempo real vuelve a la forma de v4.** v4 desenrollaba los arrays de un elemento, así
+  que salía `{...}`. v5.0.0 quitó el desenrollado y dejó el default `httpMode: 'batch'`, de modo que
+  un backend REST que llevaba años recibiendo un objeto empezó a recibir `[{...}]` y a responder 400
+  en **cada** posición. En tiempo real siempre se envía exactamente una posición, así que `'batch'`
+  solo tiene sentido si el backend lo pide: el default pasa a `'single'` en ambas plataformas.
+- **`possibleCrash` por sensor ya no se veta cuando no hay GPS.** v5.0.0 exigió corroboración por
+  velocidad, y `gpsCorroboratesImpact` empieza con `if (speed < 0) return false`. Es decir: sin fix
+  GPS —parking subterráneo, túnel, o los primeros segundos tras arrancar— la alerta **nunca** se
+  emite. Es justo donde más falta hace. Ahora, sin velocidad disponible, no se veta: un falso
+  positivo de SOS es molesto; un choque real no notificado, no.
+- **`tripEnd.distance` ya no sale 0 con intervalos de flota.** El tope de hueco entre segmentos era
+  fijo en 120 s. Con `interval: 300000` (5 min) o `distanceFilter` alto en tráfico lento, **todos**
+  los segmentos legítimos lo superaban y la distancia acumulada quedaba en cero — facturación por km
+  a cero. El tope pasa a ser el mayor entre 120 s y 3× el intervalo configurado.
+- **`requestIgnoreBatteryOptimizations()` deja de ser un no-op silencioso** cuando el publicador
+  quita el permiso restringido del manifest (Google Play exige justificación aprobada y hay fichas
+  que no pueden usarlo; `plugin.xml` ya lo documenta). Sin el permiso, la Activity del sistema se
+  cierra sin diálogo **y sin excepción**, así que el `catch` no saltaba. Ahora se comprueba el
+  permiso y se abre la pantalla de ajustes, que no requiere ninguno.
 
 ### Conocido, sin corregir
 

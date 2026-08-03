@@ -310,8 +310,8 @@ BackgroundGeolocation.configure({
 | `sync` | When `true` (default), automatic sync and `forceSync()` run. When `false`, sync is disabled (locations are still stored). |
 | `httpHeaders` / `headers` | Headers for every request (e.g. `{ 'Content-Type': 'application/json', 'Authorization': 'Bearer TOKEN' }`). `headers` is the alias added in 3.3.0; both are supported. |
 | `httpMethod` | **Since 3.3.0.** HTTP method for `url`. `POST` (default) `| GET | PUT | PATCH`. Use `GET` together with URL templating to deliver positions through the query string. |
-| `syncHttpMethod` | **Since 3.3.0.** HTTP method for `syncUrl`: `POST`, `PUT` or `PATCH`. **`GET` rejected since 5.0.1** (the batch URL cannot resolve per-location placeholders). |
-| `httpMode` / `syncMode` | **Since 3.3.0.** `batch` (default) or `single` (one HTTP request per location). `single` is required when the corresponding method is `GET`. |
+| `syncHttpMethod` | **Since 3.3.0.** HTTP method for `syncUrl`: `POST`, `PUT` or `PATCH`. **`GET` coerced to `POST` since 5.0.1** (logged; `configure()` still succeeds — the batch URL cannot resolve per-location placeholders). |
+| `httpMode` / `syncMode` | **Since 3.3.0.** `httpMode` defaults to `single` since 5.0.1 (one request per location, body `{...}` — the v4 shape); `syncMode` defaults to `batch`. `single` is required when the corresponding method is `GET`. |
 | `queryParams` | **Since 3.3.0.** Static placeholder values for URL/body templating (e.g. `{ device_id: 'USER_123' }`). See [HTTP transport](https://github.com/josuelmm/cordova-background-geolocation/blob/main/docs/api.md#http-transport-since-330). |
 | `postTemplate` / `bodyTemplate` | Object or array of properties to send. Supports `@latitude`, `@longitude`, ... and the new `{latitude}`, `{lon}`, `{timestamp_iso}`, ... placeholders on string values. `bodyTemplate` is the alias added in 3.3.0. |
 | `maxLocations` | Max locations kept in DB (default 10000). Should be &gt; `syncThreshold`. |

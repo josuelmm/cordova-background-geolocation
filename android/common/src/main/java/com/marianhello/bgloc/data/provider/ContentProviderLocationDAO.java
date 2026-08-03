@@ -377,11 +377,23 @@ public class ContentProviderLocationDAO implements LocationDAO {
         // queda exactamente en maxRows) sin depender de reciclar una fila concreta.
         long toDelete = rowCount - maxRows + 1;
         if (toDelete > 0) {
+            // v5.0.1 — el recorte ordenaba SOLO por tiempo, asi que expulsaba las filas mas
+            // antiguas AUNQUE estuvieran SYNC_PENDING, es decir sin haberse enviado nunca. En v4
+            // esta sobrecarga no la llamaba nadie (siempre se usaba la version sin limite), asi
+            // que el problema aparece justo al empezar a honrar maxLocations. Caso real: dos dias
+            // sin cobertura a ~8600 fixes/dia con maxLocations 10000 -> el tramo inicial del viaje
+            // se borra ANTES de recuperar la conexion y no llega nunca al servidor. Agravante: con
+            // el borrado logico restaurado, las lapidas DELETED tambien consumen el cupo.
+            //
+            // Orden de sacrificio: primero las ya entregadas (DELETED) y solo despues, si aun
+            // sobran, las mas antiguas. Se pierde historico antes que datos sin enviar.
             String selection = new StringBuilder()
                     .append(LocationEntry._ID)
                     .append(" IN (SELECT ").append(LocationEntry._ID)
                     .append(" FROM ").append(LocationEntry.TABLE_NAME)
-                    .append(" ORDER BY ").append(LocationEntry.COLUMN_NAME_TIME)
+                    .append(" ORDER BY CASE ").append(LocationEntry.COLUMN_NAME_STATUS)
+                    .append(" WHEN ").append(BackgroundLocation.DELETED).append(" THEN 0 ELSE 1 END, ")
+                    .append(LocationEntry.COLUMN_NAME_TIME)
                     .append(" LIMIT ?)")
                     .toString();
 

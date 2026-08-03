@@ -101,6 +101,21 @@ public class DrivingEventsDetector {
 
     private final Listener listener;
     private Config cfg = new Config();
+    /**
+     * v5.0.1 — intervalo de localización configurado (ms). Lo fija LocationServiceImpl junto con
+     * setConfig(). Solo se usa para dimensionar el tope de hueco entre segmentos de distancia:
+     * un tope fijo de 120 s anulaba la distancia entera con intervalos de flota (5 min).
+     * 0 = desconocido, se usa solo el tope fijo.
+     */
+    private volatile int locationIntervalMs = 0;
+
+    public void setLocationIntervalMs(int intervalMs) {
+        this.locationIntervalMs = Math.max(0, intervalMs);
+    }
+
+    private long configuredIntervalMs() {
+        return locationIntervalMs;
+    }
 
     // State
     private boolean isMoving = false;
@@ -236,7 +251,13 @@ public class DrivingEventsDetector {
         boolean accurate = acc < 0 || acc <= MAX_DISTANCE_ACCURACY_M;
         if (hasPrev && tripActive && accurate && prevPosAccurate) {
             long segDt = tMs - prevPosAt;
-            if (segDt >= 0 && segDt <= MAX_SEGMENT_GAP_MS) {
+            // v5.0.1 — el tope de hueco NO puede ser fijo: es un filtro contra el "teletransporte"
+            // tras perder señal, pero con un `interval` configurado de 5 min (flota) o con
+            // `distanceFilter` alto en tráfico lento, TODOS los segmentos legítimos superan los
+            // 120 s y `tripEnd.distance` salía siempre 0 — facturación por km a cero. El tope pasa
+            // a ser el mayor entre los 120 s y 3 veces el intervalo configurado.
+            long maxGapMs = Math.max(MAX_SEGMENT_GAP_MS, 3L * configuredIntervalMs());
+            if (segDt >= 0 && segDt <= maxGapMs) {
                 double seg = haversineMeters(prevLat, prevLon, curLat, curLon);
                 double minDisp = Math.max(MIN_SEGMENT_METERS, acc > 0 ? acc : 0);
                 if (seg >= minDisp) {

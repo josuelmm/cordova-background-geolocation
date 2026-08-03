@@ -84,7 +84,7 @@ configure({
   // Endpoint principal
   url: string,                                        // soporta URL templating
   httpMethod?: 'GET' | 'POST' | 'PUT' | 'PATCH',     // default 'POST'
-  httpMode?: 'single' | 'batch',                     // default 'batch'
+  httpMode?: 'single' | 'batch',                     // default 'single' (since 5.0.1)
   headers?: { [key: string]: string },               // alias de httpHeaders, dinámico
   queryParams?: { [key: string]: string | number },  // valores estáticos para placeholders en URL
   bodyTemplate?: object,                             // alias de postTemplate, plantilla de body

@@ -356,19 +356,15 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
     [self.commandDelegate runInBackground:^{
         MAURConfig *incoming = [MAURConfig fromDictionary:[command.arguments objectAtIndex:0]];
 
-        // v5.0.1 — B1: paridad con ConfigMapper.validate() de Android. Antes un valor fuera de
-        // rango (locationProvider: 3, httpMode: 'batched') se aceptaba, se PERSISTÍA en SQLite y
-        // reventaba mucho más tarde — o caía a un default sin avisar — repitiéndose en cada
-        // arranque porque el valor malo ya estaba guardado. Rechazar aquí convierte una rotura
-        // permanente y silenciosa en un rechazo inmediato y accionable desde JS.
-        NSError *validationError = nil;
-        if (![incoming validate:&validationError]) {
-            [self.commandDelegate
-                sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                                          messageAsDictionary:[self errorToDictionary:validationError]]
-                      callbackId:command.callbackId];
-            return;
-        }
+        // v5.0.1 — B1: paridad con ConfigMapper.validate() de Android. Un valor fuera de rango
+        // (locationProvider: 3, httpMode: 'batched') se aceptaba, se PERSISTÍA en SQLite y
+        // reventaba mucho más tarde, repitiéndose en cada arranque. -validate: lo detecta, lo
+        // registra y lo repone al valor por defecto.
+        //
+        // NO rechaza la configuración: la primera versión de esto devolvía un error y mataba
+        // `configure()` entera, así que un solo campo raro dejaba la app SIN TRACKING — y como
+        // Android ya corregía en vez de rechazar, la misma config arrancaba allí y aquí no.
+        [incoming validate:NULL];
         config = incoming;
 
         NSError *error = nil;
@@ -650,7 +646,7 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 - (void) getPluginVersion:(CDVInvokedUrlCommand*)command
 {
     NSLog(@"%@ #%@", TAG, @"getPluginVersion");
-    NSString *version = @"5.0.1"; // keep in sync with plugin.xml and Android PLUGIN_VERSION
+    NSString *version = @"5.0.2"; // keep in sync with plugin.xml and Android PLUGIN_VERSION
     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:version];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }

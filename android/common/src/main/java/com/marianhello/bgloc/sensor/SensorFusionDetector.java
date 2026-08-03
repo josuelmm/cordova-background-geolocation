@@ -272,7 +272,12 @@ public class SensorFusionDetector implements SensorEventListener {
      */
     private boolean gpsCorroboratesImpact(long now) {
         double speed = lastSpeedMps;
-        if (speed < 0) return false; // no GPS speed at all → not corroborated
+        // v5.0.1 — sin velocidad GPS NO se puede corroborar, pero vetar el evento por eso deja el
+        // detector de choque MUERTO justo donde mas hace falta: parking subterraneo, tunel, o
+        // cualquier arranque en el que aun no ha llegado un fix. `lastSpeedMps` vale -1 y v4
+        // emitia el evento sin mirar el GPS. Ante la duda se emite: un falso positivo de SOS es
+        // molesto; un choque real no notificado, no.
+        if (speed < 0) return true;
         if (speed <= CRASH_CORROBORATION_SPEED_MPS) return true;
         double peak = recentPeakSpeedMps;
         return peak >= 0

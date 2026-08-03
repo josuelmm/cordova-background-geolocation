@@ -274,7 +274,7 @@ static MAURLocationTransform s_locationTransform = nil;
     NSString *resolvedUrl = [MAURUrlTemplateResolver resolve:url location:location queryParams:self.config.queryParams];
 
     NSString *method = self.config.httpMethod ?: @"POST";
-    NSString *mode = self.config.httpMode ?: @"batch";
+    NSString *mode = self.config.httpMode ?: @"single"; // v5.0.1 — forma de v4 en tiempo real
     BOOL isBodyless = [@"GET" isEqualToString:method];
     BOOL singleMode = isBodyless || [@"single" isEqualToString:mode];
 
@@ -317,11 +317,12 @@ static MAURLocationTransform s_locationTransform = nil;
 
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:resolvedUrl]];
     [request setHTTPMethod:method];
-    // v5.0.1 — B5: paridad con HttpPostService de Android (CONNECT/READ_TIMEOUT_MS = 30 s). Sin
-    // esto regia el default de NSURLSession (60 s), asi que ante un backend que tarda 45 s en
-    // responder Android daba la posicion por fallida y la encolaba mientras iOS la daba por
-    // entregada y la borraba: mismo servidor, resultados distintos por plataforma.
-    [request setTimeoutInterval:30];
+    // v5.0.1 — B5: paridad con READ_TIMEOUT_MS de Android, que vuelve al valor de v4 (120 s).
+    // Sin fijarlo regia el default de NSURLSession (60 s). Se puso 30 s en una revision anterior
+    // de 5.0.1 copiando el valor equivocado: ese recorte es justo el que rompe con backends lentos
+    // (un Traccar con el DeviceForwarder caido tarda ~2 min en contestar) — nada se confirma, todo
+    // se reintenta y el servidor acumula duplicados. Ver el javadoc de READ_TIMEOUT_MS.
+    [request setTimeoutInterval:120];
     if (!isBodyless) {
         [request setValue:contentType forHTTPHeaderField:@"Content-Type"];
     }
@@ -462,7 +463,7 @@ static MAURLocationTransform s_locationTransform = nil;
             : (self.config.syncHttpMethod ?: @"POST");
     // v4.5.6 — D26: honour syncMode ("single" => one request per location, "batch" => array).
     NSString *syncMode = usingRealtimeUrlAsFallback
-            ? (self.config.httpMode ?: @"batch")
+            ? (self.config.httpMode ?: @"single")
             : (self.config.syncMode ?: @"batch");
 
     if (usingRealtimeUrlAsFallback) {

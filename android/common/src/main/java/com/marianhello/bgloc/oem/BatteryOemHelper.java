@@ -45,6 +45,16 @@ public final class BatteryOemHelper {
      */
     public static void requestIgnoreBatteryOptimizations(Activity activity) {
         if (activity == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        // v5.0.1 — sin REQUEST_IGNORE_BATTERY_OPTIMIZATIONS declarado, la Activity del sistema se
+        // cierra SIN dialogo y SIN excepcion, asi que el catch de abajo no salta y la llamada no
+        // hacia absolutamente nada. Ese permiso es "restringido": Google Play exige justificacion
+        // aprobada, y hay publicadores que TIENEN que quitarlo del manifest (plugin.xml lo
+        // documenta). Para ellos esto caia en un no-op silencioso; ahora se detecta y se abre la
+        // pantalla de ajustes, que no requiere permiso alguno.
+        if (!hasIgnoreBatteryOptimizationsPermission(activity)) {
+            openBatterySettings(activity);
+            return;
+        }
         try {
             Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
             intent.setData(Uri.parse("package:" + activity.getPackageName()));
@@ -52,6 +62,17 @@ public final class BatteryOemHelper {
             activity.startActivity(intent);
         } catch (Exception ignored) {
             openBatterySettings(activity);
+        }
+    }
+
+    /** true si la app declara REQUEST_IGNORE_BATTERY_OPTIMIZATIONS en su manifest fusionado. */
+    private static boolean hasIgnoreBatteryOptimizationsPermission(Context ctx) {
+        try {
+            return ctx.getPackageManager().checkPermission(
+                    android.Manifest.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    ctx.getPackageName()) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        } catch (Exception e) {
+            return false;
         }
     }
 

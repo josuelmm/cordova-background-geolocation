@@ -190,7 +190,14 @@ funciona; si sigue llena hasta que abres la app a mano, no está llegando.
 > Dicho con honestidad: esa frase ya fue falsa dos veces. La diferencia ahora es que cada auditoría
 > está listada con su alcance, y el alcance dice explícitamente qué NO se ha probado. La 5ª existe
 > precisamente porque las cuatro anteriores revisaban el código *existente* y ninguna revisaba
-> *los cambios*, que es de donde salieron los últimos 9 defectos.
+> *los cambios*, que es de donde salieron 9 defectos más.
+>
+> La 6ª la disparó un despliegue real, no una auditoría: el sync fallaba en bucle contra un Traccar
+> lento. Ninguna de las cinco anteriores la habría encontrado, porque todas buscaban lógica
+> incorrecta y esta clase de fallo es **lógica correcta con un valor mal elegido** — un timeout de
+> 30 s, un default de `'batch'`, una validación que lanza en vez de avisar. Lección: cuando v5
+> cambie un VALOR que v4 tenía distinto, la pregunta no es "¿es más razonable?" sino "¿qué
+> despliegue que hoy funciona deja de funcionar?".
 
 | # | Qué | Por qué sigue abierto |
 |---|---|---|
@@ -211,6 +218,7 @@ funciona; si sigue llena hasta que abres la app a mano, no está llegando.
 | 3ª (02-08) | Árbol completo + paridad Android/iOS campo a campo | 15 fallos nuevos, ninguno visible desde el diff |
 | 4ª (02-08) | Las 14 deudas que la 3ª dejó catalogadas | 14 cerradas + `@timestamp_iso`, documentado desde 3.3.0 y nunca implementado |
 | 5ª (02-08) | **Adversarial sobre el diff de 5.0.1**, asumiendo que las correcciones habían roto cosas | 9 defectos **introducidos por esta misma versión**, incluidos 2 de pérdida de datos y 1 crash |
+| 6ª (03-08) | **Valores y políticas** cambiados entre v4.5.5 y 5.0.1, disparada por un log de producción real | 7 regresiones: timeout, validación fatal, recorte de la cola, forma del POST, veto del crash, distancia del viaje, permiso restringido |
 
 > La 5ª es la que faltaba en v5.0.0 y por la que se llegó al incidente: **revisar los propios
 > cambios**, no el código que estaba antes. Encontró que el arreglo del HTTP 285 borraba el resto

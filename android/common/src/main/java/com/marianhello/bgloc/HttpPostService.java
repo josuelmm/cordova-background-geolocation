@@ -31,29 +31,34 @@ public class HttpPostService {
     /** Timeout to establish connection (ms). Prevents sync notification from staying stuck. */
     private static final int CONNECT_TIMEOUT_MS = 30_000;
     /**
-     * Timeout to read response (ms). v5.0 — A4: was 120_000, i.e. two minutes per attempt.
-     * The upload runs on the sync thread while the service holds a wake lock, so a server that
-     * accepts the connection and then wedges used to pin that thread (and the CPU) for two
-     * minutes per attempt, and again on every retry. Matched to CONNECT_TIMEOUT_MS: no legitimate
-     * batch POST needs longer to start answering, and failing fast leaves the queue on disk for
-     * the next sync anyway.
+     * Timeout to read response (ms). **Vuelve al valor de v4 (120 s) en TODAS las rutas.**
+     *
+     * <p>Historia, porque este valor ya ha roto producción dos veces:
+     * <ul>
+     *   <li>v4.5.5: 120 s en tiempo real y en sync.</li>
+     *   <li>v5.0.0 (item A4): bajado a 30 s con el argumento de que un servidor colgado retenía el
+     *       hilo de sync y el wake lock dos minutos por intento. Cierto, pero el coste real es
+     *       peor: un backend LENTO (no colgado) deja de confirmarse.</li>
+     *   <li>v5.0.1 (R6): se restauró 120 s <em>solo</em> para el cuerpo único del lote... que con
+     *       {@code Content-Type: application/x-www-form-urlencoded} NUNCA se usa, porque esa ruta
+     *       siempre va por elemento. En la práctica todo seguía en 30 s.</li>
+     * </ul>
+     *
+     * <p>Caso real que lo destapó: un Traccar con un {@code DeviceForwarder} caído tarda ~2 min en
+     * responder. Recibe la posición y la registra, pero la respuesta llega tarde. Con 30 s el
+     * plugin la da por fallida, no confirma nada, reintenta el mismo lote indefinidamente y el
+     * servidor acumula duplicados mientras la cola local no baja nunca. Con los 120 s de v4
+     * funcionaba. Un timeout agresivo no evita el problema del wake lock: lo cambia por pérdida de
+     * datos y por más tráfico.
      */
-    private static final int READ_TIMEOUT_MS = 30_000;
-
-    /**
-     * v5.0.1 — R6: bajar el timeout de 120 s a 30 s (petición A4) es correcto para un POST de UNA
-     * posición: un servidor colgado retenía el hilo de sync y el wake lock dos minutos por intento.
-     * Pero la subida por lote puede legítimamente tardar más (un backend que importa 100 filas de
-     * forma síncrona), y 30 s la hacía fallar donde v4 funcionaba. El lote conserva el margen de v4.
-     */
-    private static final int BATCH_READ_TIMEOUT_MS = 120_000;
+    private static final int READ_TIMEOUT_MS = 120_000;
 
     private static final org.slf4j.Logger logger = LoggerManager.getLogger(HttpPostService.class);
 
     /** v5.0.1 — R11: true cuando syncMode == 'single'. Lo fija SyncAdapter antes de subir. */
     private boolean mPerItemSync = false;
 
-    /** v5.0.1 — R6: 30 s por defecto; la ruta de lote lo sube a BATCH_READ_TIMEOUT_MS. */
+    /** Timeout de lectura efectivo; se propaga a las peticiones por elemento (ver createPerItemService). */
     private int mReadTimeoutMs = READ_TIMEOUT_MS;
 
     private String mUrl;
@@ -132,12 +137,17 @@ public class HttpPostService {
     }
 
     /**
-     * v5.0.1 — H5: `Content-Type` admite parametros (`application/x-www-form-urlencoded;
-     * charset=UTF-8`, escritura muy habitual). Comparar la cabecera completa por igualdad hacia
-     * que TODO el manejo form-urlencoded se desactivara y se enviara JSON crudo declarado como
-     * formulario: HTTP 400 en todas las posiciones — el mismo fallo de produccion que este
-     * fichero acaba de corregir, pero por otra puerta.
+     * v5.0.1 — las peticiones por elemento se creaban con {@code new HttpPostService(mUrl, mMethod)},
+     * que arranca con el timeout POR DEFECTO. Cualquier ajuste del timeout en la instancia padre
+     * (la ruta de sync) se perdía, así que el margen de v4 no llegaba nunca a donde hace falta.
+     * Toda instancia hija tiene que salir de aquí.
      */
+    HttpPostService createPerItemService() {
+        HttpPostService service = new HttpPostService(mUrl, mMethod);
+        service.mReadTimeoutMs = mReadTimeoutMs;
+        return service;
+    }
+
     /** Busca la cabecera Content-Type sin distinguir mayusculas (HTTP no las distingue). */
     private static String contentTypeFromHeaders(Map headers) {
         if (headers == null) {
@@ -152,6 +162,13 @@ public class HttpPostService {
         return null;
     }
 
+    /**
+     * v5.0.1 — H5: `Content-Type` admite parametros (`application/x-www-form-urlencoded;
+     * charset=UTF-8`, escritura muy habitual). Comparar la cabecera completa por igualdad hacia
+     * que TODO el manejo form-urlencoded se desactivara y se enviara JSON crudo declarado como
+     * formulario: HTTP 400 en todas las posiciones — el mismo fallo de produccion que este
+     * fichero acaba de corregir, pero por otra puerta.
+     */
     private static boolean isFormUrlEncoded(String contentType) {
         if (contentType == null) {
             return false;
@@ -272,7 +289,7 @@ public class HttpPostService {
             try {
                 // Instancia nueva por peticion: HttpURLConnection no se reutiliza.
                 // Se preserva mMethod (POST/PUT/PATCH configurado por la app).
-                code = new HttpPostService(mUrl, mMethod).postJSONStringInternal(
+                code = createPerItemService().postJSONStringInternal(
                         item.toString(), formContentType, headers);
             } catch (IOException e) {
                 mAcceptedItemCount = i;
@@ -460,7 +477,6 @@ public class HttpPostService {
         if (headers == null) {
             headers = new HashMap();
         }
-        mReadTimeoutMs = BATCH_READ_TIMEOUT_MS; // v5.0.1 — R6: margen de v4 para lotes grandes
         String contentType = getContentTypeFromHeaders(headers);
         if (contentType == null) {
             contentType = "application/json";
@@ -525,7 +541,7 @@ public class HttpPostService {
                         // Preserve the configured method: the 1-arg constructor silently forced
                         // POST, so a backend configured with syncHttpMethod PUT/PATCH answered
                         // 405 and the batch was retried forever.
-                        HttpPostService perRequest = new HttpPostService(mUrl, mMethod);
+                        HttpPostService perRequest = createPerItemService();
                         int code;
                         try {
                             // postJSON(JSONObject) respeta el Content-Type de headers: plano si es
