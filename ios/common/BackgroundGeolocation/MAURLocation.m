@@ -218,6 +218,30 @@ enum {
         if (time == nil) return [NSNull null];
         return [NSNumber numberWithLongLong:(long long)[time timeIntervalSince1970]];
     }
+    // v5.0.1 — documentado en docs/api.md y README pero sin implementar en ninguna plataforma.
+    // Mismo formato que MAURUrlTemplateResolver +isoUtc:, que si lo tenia para las URLs.
+    // v5.0.1 — `@mocked` es la clave documentada y multiplataforma; iOS solo entendia
+    // `@simulated`, asi que tras revertir R2 (quitar `mocked` del template por defecto) el
+    // CHANGELOG decia "`@mocked` sigue resolviendose" y en iOS era falso: quien lo pusiera en su
+    // postTemplate recibia el campo en Android y nada en iOS.
+    if ([key isEqualToString:@"@mocked"]) {
+        return [self getValueForKey:@"@simulated"];
+    }
+    if ([key isEqualToString:@"@timestamp_iso"]) {
+        if (time == nil) return [NSNull null];
+        // Cacheado con dispatch_once: NSDateFormatter es el objeto mas caro de Foundation y esto
+        // corre por cada posicion y por cada elemento de cada lote de sync (500 posiciones =
+        // 500 formatters). Mismo patron que MAURUrlTemplateResolver +isoUtc:.
+        static NSDateFormatter *iso = nil;
+        static dispatch_once_t isoOnce;
+        dispatch_once(&isoOnce, ^{
+            iso = [[NSDateFormatter alloc] init];
+            iso.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+            iso.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss'Z'";
+            iso.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+        });
+        return [iso stringFromDate:time];
+    }
     if ([key isEqualToString:@"@accuracy"]) {
         return accuracy;
     }

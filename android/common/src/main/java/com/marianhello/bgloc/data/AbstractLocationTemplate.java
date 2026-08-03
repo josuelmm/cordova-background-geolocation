@@ -24,8 +24,21 @@ abstract public class AbstractLocationTemplate implements LocationTemplate, Seri
 
         private Object mapValue(Object value) throws JSONException {
             if (value instanceof String) {
-                Object locationValue = location.getValueForKey((String) value);
-                return locationValue != null ? locationValue : value;
+                String s = (String) value;
+                Object locationValue = location.getValueForKey(s);
+                if (locationValue != null) {
+                    return locationValue;
+                }
+                // v5.0.1 — un placeholder sin valor salía como el literal "@heading" en el POST en
+                // tiempo real, mientras que la ruta de sync (BatchManager.resolveTemplateValue) y
+                // iOS (MAURLocation) ya emitían null, que es lo que documenta docs/api.md.
+                // Traccar/OsmAnd responden 400 con NumberFormatException ante "speed=@speed": el
+                // mismo tipo de 400 del incidente, y la MISMA posición reintentada por sync salía
+                // bien. Solo aplica a claves con "@": una cadena normal del template se conserva.
+                if (s.startsWith("@")) {
+                    return JSONObject.NULL;
+                }
+                return value;
             } else if (value instanceof Map) {
                 return withMap((Map) value);
             } else if (value instanceof List) {

@@ -1281,8 +1281,18 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
     // v4.5.1 — enrichment moved into MAURPostLocationTask.add: so pending events / battery
     // land on the post-transform instance (and survive transforms that return new instances).
 
-    [postLocationTask add:location];
-    
+    // v5.0.1 — B2: el evento a JS se emite desde onReady, con la posicion YA enriquecida (eventos
+    // de conduccion + snapshot de bateria). Antes se llamaba al delegado sincronamente aqui abajo,
+    // en carrera con el enriquecimiento que corre dentro del dispatch_async de -add:.
+    __weak typeof(self) weakSelfStationary = self;
+    [postLocationTask add:location onReady:^(MAURLocation *enriched) {
+        __strong typeof(weakSelfStationary) strongSelf = weakSelfStationary;
+        if (strongSelf == nil) return;
+        if (strongSelf.delegate && [strongSelf.delegate respondsToSelector:@selector(onStationaryChanged:)]) {
+            [strongSelf.delegate onStationaryChanged:enriched];
+        }
+    }];
+
     MAURConfig *config = [self getConfig];
     if ([config isDebugging]) {
         double distanceFilter = [MAURLocationManager sharedInstance].distanceFilter;
@@ -1297,10 +1307,7 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
         AudioServicesPlaySystemSound (locationSyncSound);
     }
     
-    // Any javascript stationaryRegion event-listeners?
-    if (self.delegate && [self.delegate respondsToSelector:@selector(onStationaryChanged:)]) {
-        [self.delegate onStationaryChanged:location];
-    }
+    // v5.0.1 — B2: el listener de stationaryRegion ahora se dispara desde el onReady de arriba.
 }
 
 - (void) onLocationChanged:(MAURLocation *)location
@@ -1327,8 +1334,17 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
     // so they run AFTER any user-supplied locationTransform. The previous order lost them
     // whenever the transform returned nil.
 
-    [postLocationTask add:location];
-    
+    // v5.0.1 — B2: ver la nota en -onStationaryChanged:. `battery`, `isCharging` y `events`
+    // llegaban nil a JS porque el delegado se invocaba antes de que el enriquecimiento terminara.
+    __weak typeof(self) weakSelfLocation = self;
+    [postLocationTask add:location onReady:^(MAURLocation *enriched) {
+        __strong typeof(weakSelfLocation) strongSelf = weakSelfLocation;
+        if (strongSelf == nil) return;
+        if (strongSelf.delegate && [strongSelf.delegate respondsToSelector:@selector(onLocationChanged:)]) {
+            [strongSelf.delegate onLocationChanged:enriched];
+        }
+    }];
+
     MAURConfig *config = [self getConfig];
     if ([config isDebugging]) {
         double distanceFilter = [MAURLocationManager sharedInstance].distanceFilter;
@@ -1342,10 +1358,7 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
         AudioServicesPlaySystemSound (locationSyncSound);
     }
     
-    // Delegate to main module
-    if (self.delegate && [self.delegate respondsToSelector:@selector(onLocationChanged:)]) {
-        [self.delegate onLocationChanged:location];
-    }
+    // v5.0.1 — B2: el delegado se invoca desde el onReady de arriba, ya enriquecido.
 }
 
 - (void) onAuthorizationChanged:(MAURLocationAuthorizationStatus)authStatus

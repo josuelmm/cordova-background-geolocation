@@ -70,7 +70,13 @@
             ctx[@"timestamp"] = [NSString stringWithFormat:@"%lld", ms];
             ctx[@"timestamp_iso"] = [self isoUtc:loc.time];
         }
-        if (loc.speed != nil) ctx[@"speed"] = [loc.speed stringValue];
+        if (loc.speed != nil) {
+            ctx[@"speed"] = [loc.speed stringValue];
+            // v5.0.1 — paridad con UrlTemplateResolver de Android: {is_moving} está documentado
+            // en docs/api.md y en iOS salía literal (`moving={is_moving}`) porque nadie lo
+            // ponía en el contexto. Mismo umbral que Android: 0.5 m/s ~ paso de peatón.
+            ctx[@"is_moving"] = ([loc.speed doubleValue] > 0.5) ? @"true" : @"false";
+        }
         if (loc.altitude != nil) ctx[@"altitude"] = [loc.altitude stringValue];
         if (loc.heading != nil) ctx[@"bearing"] = [loc.heading stringValue];
         if (loc.accuracy != nil) ctx[@"accuracy"] = [loc.accuracy stringValue];
@@ -83,11 +89,23 @@
 + (NSString *)urlEncode:(NSString *)s
 {
     if (s == nil) return @"";
-    NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
+    // v5.0.1 — B6: paridad con UrlTemplateResolver de Android, que usa URLEncoder y por tanto
+    // escapa TODO lo que no sea `[A-Za-z0-9-_.*]`. URLQueryAllowedCharacterSet dejaba pasar
+    // `/ = ; : ? @ , $`, así que `queryParams: {id: 'flota/AB-12'}` viajaba como `id=flota/AB-12`
+    // y algunos proxies lo interpretaban como un cambio de ruta.
+    //
+    // El conjunto se declara CARÁCTER A CARÁCTER a propósito. `+alphanumericCharacterSet` NO es
+    // `[A-Za-z0-9]`: son las categorías Unicode L*, M* y N*, así que dejaba pasar sin escapar
+    // `é ñ á 中`… El `NSURL URLWithString:` resultante es **nil**, y `requestWithURL:nil` lanza
+    // NSInvalidArgumentException en cada posición. Java sí los codifica en UTF-8, que es lo que
+    // hace ahora este conjunto explícito.
+    static NSCharacterSet *allowed = nil;
+    static dispatch_once_t allowedOnce;
+    dispatch_once(&allowedOnce, ^{
+        allowed = [NSCharacterSet characterSetWithCharactersInString:
+                   @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.*"];
+    });
     NSString *enc = [s stringByAddingPercentEncodingWithAllowedCharacters:allowed];
-    // URLQueryAllowedCharacterSet leaves "+" and "&" unescaped which is unsafe in values.
-    enc = [enc stringByReplacingOccurrencesOfString:@"&" withString:@"%26"];
-    enc = [enc stringByReplacingOccurrencesOfString:@"+" withString:@"%2B"];
     return enc != nil ? enc : s;
 }
 

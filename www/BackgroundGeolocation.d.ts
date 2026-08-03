@@ -429,7 +429,15 @@ export interface ConfigureOptions {
    * Platform: Android, iOS
    * @since 3.3.0
    */
-  syncHttpMethod?: 'POST' | 'GET' | 'PUT' | 'PATCH';
+  /**
+   * HTTP method for `syncUrl` (the offline queue).
+   *
+   * `GET` is NOT valid here and is rejected by `configure()` since 5.0.1: the sync URL is
+   * resolved once for the whole batch (no single location), so per-location placeholders such
+   * as `{latitude}` are never substituted — the request would go out literally as
+   * `?lat={latitude}` and a 200 would delete the batch with zero real data.
+   */
+  syncHttpMethod?: 'POST' | 'PUT' | 'PATCH';
 
   /**
    * How real-time locations are delivered to `url`.

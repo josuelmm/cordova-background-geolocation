@@ -189,13 +189,25 @@ public class BatchManager {
 
         // Subselect instead of DELETE ... LIMIT: Android's SQLite is not guaranteed to be built
         // with SQLITE_ENABLE_UPDATE_DELETE_LIMIT.
+        // El filtro por estado es necesario ahora que el borrado es lógico: sin él, una segunda
+        // llamada sobre el mismo lote volvería a contar filas ya marcadas DELETED.
         String whereClause = LocationEntry._ID + " IN (SELECT " + LocationEntry._ID
                 + " FROM " + LocationEntry.TABLE_NAME
                 + " WHERE " + LocationEntry.COLUMN_NAME_BATCH_START_MILLIS + " = ?"
+                + " AND " + LocationEntry.COLUMN_NAME_STATUS + " <> " + BackgroundLocation.DELETED
                 + " ORDER BY " + LocationEntry.COLUMN_NAME_TIME + " ASC LIMIT " + count + ")";
 
-        int removed = resolver.delete(contentUri, whereClause, new String[]{ String.valueOf(batchId) });
-        logger.info("Batch {} partially completed: {} of {} locations accepted and removed",
+        // v5.0.1 — R1 (segunda mitad): este camino seguía en borrado FÍSICO mientras
+        // setBatchCompleted() ya había vuelto al soft-delete. Un lote form-urlencoded que falla a
+        // mitad borraba de verdad las filas ya aceptadas, así que getLocations() se vaciaba
+        // exactamente igual que con el bug original — solo que únicamente en el camino de fallo
+        // parcial, que es el más difícil de reproducir. Mismo tratamiento que el éxito completo:
+        // marcar DELETED (las excluye del próximo lote) y dejar que `maxLocations` acote la tabla.
+        ContentValues values = new ContentValues();
+        values.put(LocationEntry.COLUMN_NAME_STATUS, BackgroundLocation.DELETED);
+        int removed = resolver.update(contentUri, values, whereClause,
+                new String[]{ String.valueOf(batchId) });
+        logger.info("Batch {} partially completed: {} of {} locations accepted and flagged as deleted",
                 batchId, removed, count);
     }
 
@@ -233,13 +245,16 @@ public class BatchManager {
         String whereClause = LocationEntry.COLUMN_NAME_BATCH_START_MILLIS + " = ?";
         String[] whereArgs = { String.valueOf(batchId) };
 
-        // Physically remove the rows instead of flagging them DELETED. The soft delete meant
-        // every successfully synced location stayed in the table forever: at one fix per 10s a
-        // single vehicle accumulated ~8600 dead rows a day, which nothing ever reclaimed, and
-        // every status query degraded with it. These rows reached the server, so there is
-        // nothing left to keep.
-        int removed = resolver.delete(contentUri, whereClause, whereArgs);
-        logger.debug("Batch {} completed, {} locations removed", batchId, removed);
+        // v5.0.1 — R1: vuelve el soft-delete de v4. v5.0.0 pasó a borrado físico argumentando que
+        // las filas sincronizadas se acumulaban para siempre (~8600/día por vehículo), pero eso ya
+        // lo acota `maxLocations` (10000 por defecto), que es exactamente para lo que existe.
+        // El borrado físico rompía el contrato público: getLocations() no filtra por estado
+        // (SQLiteLocationDAO.getAllLocations), así que una app que pinta la ruta del día la veía
+        // vaciarse tras cada sync.
+        ContentValues values = new ContentValues();
+        values.put(LocationEntry.COLUMN_NAME_STATUS, BackgroundLocation.DELETED);
+        int removed = resolver.update(contentUri, values, whereClause, whereArgs);
+        logger.debug("Batch {} completed, {} locations flagged as deleted", batchId, removed);
     }
 
     private static class LocationTemplateWriter {

@@ -128,9 +128,13 @@ cuya firma `on(eventName: string, callback?)` no cambió.
   siempre aceptó.
 - **Orden de claves del `postTemplate`** ahora es determinista (el que declaras). GPSWox parsea por
   nombre, así que es indiferente, pero los logs del servidor se ven distintos.
-- **Sin impacto:** los cambios de driving events (la app no activa `drivingEvents`), el borrado
-  físico del lote de sync (`getPendingSyncCount` cuenta `SYNC_PENDING`, no las borradas) y la
-  validación de `ConfigMapper` (todos los valores que manda la app son válidos).
+- **Sin impacto:** los cambios de driving events (la app no activa `drivingEvents`) y la validación
+  de `ConfigMapper` (todos los valores que manda la app son válidos).
+- **Corregido en 5.0.1 — este punto decía otra cosa.** Aquí se listaba "el borrado físico del lote
+  de sync" como cambio sin impacto. Sí lo tenía: `getLocations()` se vaciaba tras cada sync porque
+  `getAllLocations()` no filtra por estado. Revertido al borrado lógico de v4 en las tres rutas
+  (lote completo, lote parcial y `ContentProviderLocationDAO`). `maxLocations` es lo que acota la
+  tabla. `getPendingSyncCount` sigue contando `SYNC_PENDING`, eso no cambia.
 
 ---
 
@@ -176,16 +180,44 @@ funciona; si sigue llena hasta que abres la app a mano, no está llegando.
 
 ## 6. Qué falta en el plugin
 
-Ninguno de los ~132 hallazgos de `MEJORAS.md` queda abierto a nivel de código. Lo que queda son
-gates de release, no bugs:
+> **Actualizado el 2026-08-02.** Este apartado dijo dos veces algo que no era cierto: primero
+> "ningún hallazgo abierto" (falso en cuanto un despliegue real destapó las regresiones v4→v5), y
+> luego "no queda ningún bug de código abierto" (falso, se escribió mirando solo la tabla R1–R15).
+> Tras cinco auditorías —la última, adversarial sobre el propio diff de 5.0.1— **no queda ningún
+> hallazgo de código abierto**. Lo que sigue son gates de release: cosas que no se pueden cerrar
+> desde aquí porque requieren un Mac, un teléfono o un servidor real.
+>
+> Dicho con honestidad: esa frase ya fue falsa dos veces. La diferencia ahora es que cada auditoría
+> está listada con su alcance, y el alcance dice explícitamente qué NO se ha probado. La 5ª existe
+> precisamente porque las cuatro anteriores revisaban el código *existente* y ninguna revisaba
+> *los cambios*, que es de donde salieron los últimos 9 defectos.
 
 | # | Qué | Por qué sigue abierto |
 |---|---|---|
-| 1 | Build de Xcode | No hay macOS ni Xcode donde se hicieron los cambios |
-| 2 | QA en dispositivo (Android + iOS) | Ni un solo minuto de tracking real |
-| 3 | Tests instrumentados Android | Compilan y hay job de CI, pero nadie los ha ejecutado todavía |
+| 1 | Build de Xcode | No hay macOS ni Xcode donde se hicieron los cambios. **Ni una sola línea de iOS se ha compilado**: solo `clang -fsyntax-only` contra stubs de Linux, que detecta sintaxis y selectores inexistentes, no comportamiento |
+| 2 | QA en dispositivo (Android + iOS) | Ni un minuto de tracking real: foreground service, Doze, revocación de permisos en caliente, sync con red intermitente |
+| 3 | Tests instrumentados Android | Compilan y hay job de CI, pero nadie los ha ejecutado |
 | 4 | D10 (sección 5) | Depende del `AppDelegate` de tu app |
 | 5 | Job de iOS en CI | Sigue en `continue-on-error` hasta su primer run verde |
+| 6 | Matriz `httpMode` × `syncMode` × Content-Type × método × ruta × plataforma | Los 5 tests con servidor HTTP real cubren las celdas del incidente y la ruta per-item entera, no la matriz completa |
+| 7 | R12 y la cadena secuencial de sync `single` en iOS | Escritos y verificados con clang+stubs; nunca se ha ejecutado un sync desde iOS contra un servidor |
+
+### Cómo llegó a cerrarse todo
+
+| Auditoría | Alcance | Hallazgos |
+|---|---|---|
+| 1ª (v5.0.0) | Revisión por áreas | ~132, todos cerrados — pero validados **en aislamiento**, nunca en combinación |
+| 2ª (01-08) | Diff v4 → v5, buscando lo **eliminado** | R1–R15: 9 corregidos, 6 mantenidos con justificación |
+| 3ª (02-08) | Árbol completo + paridad Android/iOS campo a campo | 15 fallos nuevos, ninguno visible desde el diff |
+| 4ª (02-08) | Las 14 deudas que la 3ª dejó catalogadas | 14 cerradas + `@timestamp_iso`, documentado desde 3.3.0 y nunca implementado |
+| 5ª (02-08) | **Adversarial sobre el diff de 5.0.1**, asumiendo que las correcciones habían roto cosas | 9 defectos **introducidos por esta misma versión**, incluidos 2 de pérdida de datos y 1 crash |
+
+> La 5ª es la que faltaba en v5.0.0 y por la que se llegó al incidente: **revisar los propios
+> cambios**, no el código que estaba antes. Encontró que el arreglo del HTTP 285 borraba el resto
+> del lote, que `GET` volvía a colarse en la ruta de sync por el fallback de R15, y que el nuevo
+> escapado de URL en iOS reventaba el proceso con cualquier acento. Todos eran nuevos de 5.0.1.
+
+Detalle de cada uno en `CHANGELOG.md`; la tabla R1–R15 y el resumen de la 3ª, en `MEJORAS.md`.
 
 ---
 

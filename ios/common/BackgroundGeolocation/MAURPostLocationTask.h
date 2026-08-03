@@ -42,7 +42,19 @@
  *  fresh instance, battery/charging fields land on what actually gets POSTed. */
 @property (nonatomic, copy) void (^ _Nullable attachBatterySnapshot)(MAURLocation * _Nonnull);
 
+
 - (void) add:(MAURLocation * _Nonnull)location;
+
+/**
+ * v5.0.1 — B2. `onReady` se invoca en el hilo principal con la posición YA enriquecida (transform
+ * aplicado, eventos de conducción volcados y snapshot de batería puesto), antes de la política de
+ * mock y de persistir. El facade emitía el evento `location` a JS de forma síncrona justo tras
+ * llamar a -add:, o sea en carrera con el enriquecimiento que ocurre dentro del dispatch_async:
+ * `battery`, `isCharging` y `events` llegaban a JS como nil casi siempre, mientras que en Android
+ * sí venían. Reproduce el orden de Android (`LocationServiceImpl.onLocation`): enriquecer, emitir,
+ * y luego persistir/postear. Un transform que devuelve nil no invoca `onReady`, igual que Android.
+ */
+- (void) add:(MAURLocation * _Nonnull)location onReady:(void (^ _Nullable)(MAURLocation * _Nonnull))onReady;
 - (void) start;
 - (void) stop;
 - (void) sync;

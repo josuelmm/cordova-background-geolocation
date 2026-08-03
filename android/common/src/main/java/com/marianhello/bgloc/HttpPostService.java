@@ -2,7 +2,10 @@ package com.marianhello.bgloc;
 
 import android.os.Build;
 
+import com.marianhello.logging.LoggerManager;
+
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
@@ -36,6 +39,22 @@ public class HttpPostService {
      * the next sync anyway.
      */
     private static final int READ_TIMEOUT_MS = 30_000;
+
+    /**
+     * v5.0.1 — R6: bajar el timeout de 120 s a 30 s (petición A4) es correcto para un POST de UNA
+     * posición: un servidor colgado retenía el hilo de sync y el wake lock dos minutos por intento.
+     * Pero la subida por lote puede legítimamente tardar más (un backend que importa 100 filas de
+     * forma síncrona), y 30 s la hacía fallar donde v4 funcionaba. El lote conserva el margen de v4.
+     */
+    private static final int BATCH_READ_TIMEOUT_MS = 120_000;
+
+    private static final org.slf4j.Logger logger = LoggerManager.getLogger(HttpPostService.class);
+
+    /** v5.0.1 — R11: true cuando syncMode == 'single'. Lo fija SyncAdapter antes de subir. */
+    private boolean mPerItemSync = false;
+
+    /** v5.0.1 — R6: 30 s por defecto; la ruta de lote lo sube a BATCH_READ_TIMEOUT_MS. */
+    private int mReadTimeoutMs = READ_TIMEOUT_MS;
 
     private String mUrl;
     private String mMethod = "POST";
@@ -84,7 +103,7 @@ public class HttpPostService {
         if (mHttpURLConnection == null) {
             mHttpURLConnection = (HttpURLConnection) new URL(mUrl).openConnection();
             mHttpURLConnection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            mHttpURLConnection.setReadTimeout(READ_TIMEOUT_MS);
+            mHttpURLConnection.setReadTimeout(mReadTimeoutMs);
             // Follow 3xx. Common when a backend starts forcing HTTPS or moves domain; without it
             // the redirect surfaced as a plain failure and every location was queued forever.
             mHttpURLConnection.setInstanceFollowRedirects(true);
@@ -112,19 +131,174 @@ public class HttpPostService {
         return postJSONString(jsonString, headers);
     }
 
+    /**
+     * v5.0.1 — H5: `Content-Type` admite parametros (`application/x-www-form-urlencoded;
+     * charset=UTF-8`, escritura muy habitual). Comparar la cabecera completa por igualdad hacia
+     * que TODO el manejo form-urlencoded se desactivara y se enviara JSON crudo declarado como
+     * formulario: HTTP 400 en todas las posiciones — el mismo fallo de produccion que este
+     * fichero acaba de corregir, pero por otra puerta.
+     */
+    /** Busca la cabecera Content-Type sin distinguir mayusculas (HTTP no las distingue). */
+    private static String contentTypeFromHeaders(Map headers) {
+        if (headers == null) {
+            return null;
+        }
+        for (Object keyObj : headers.keySet()) {
+            if (keyObj instanceof String && ((String) keyObj).equalsIgnoreCase("Content-Type")) {
+                Object value = headers.get(keyObj);
+                return value != null ? String.valueOf(value) : null;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isFormUrlEncoded(String contentType) {
+        if (contentType == null) {
+            return false;
+        }
+        int paramIdx = contentType.indexOf(';');
+        String mediaType = (paramIdx >= 0 ? contentType.substring(0, paramIdx) : contentType).trim();
+        return mediaType.equalsIgnoreCase("application/x-www-form-urlencoded");
+    }
+
     public int postJSONString(String body, Map headers) throws IOException {
         if (headers == null) {
             headers = new HashMap();
         }
 
         String contentType = null;
-        for (Object keyObj : headers.keySet()) {
-            String key = (String) keyObj;
-            if (key.equalsIgnoreCase("Content-Type")) {
-                contentType = (String) headers.get(key);
-                break;
+        {
+            for (Object keyObj : headers.keySet()) {
+                String key = (String) keyObj;
+                if (key.equalsIgnoreCase("Content-Type")) {
+                    contentType = (String) headers.get(key);
+                    break;
+                }
             }
         }
+
+        // v5.0.1 — form-urlencoded + JSON array: NO existe forma de expresar un array como
+        // parametros planos, asi que se envia UNA peticion por elemento, exactamente igual que
+        // hace postJSONFile() en la ruta de sync. Sin esto:
+        //   - v4 desenrollaba los arrays de 1 elemento a objeto (httpMode 'batch' + form
+        //     acababa plano) y funcionaba con OsmAnd/Traccar;
+        //   - v5 quito ese desenrollado (correcto para servidores de batch JSON real) y
+        //     jsonToUrlEncoded emitia `locations=<json>`, que ningun decoder OsmAnd entiende
+        //     → HTTP 400 en TODAS las posiciones con httpMode 'batch' + form-urlencoded.
+        // iOS ya desenrollaba el caso de 1 elemento (MAURPostLocationTask.m), asi que ademas
+        // se habia roto la paridad entre plataformas.
+        if (contentType != null
+                && isFormUrlEncoded(contentType)
+                && !isBodyless()) {
+            JSONArray asArray = null;
+            try {
+                Object parsed = new JSONTokener(body).nextValue();
+                if (parsed instanceof JSONArray) {
+                    asArray = (JSONArray) parsed;
+                }
+            } catch (Exception ignored) {
+                // no es JSON: se envia tal cual mas abajo
+            }
+            if (asArray != null) {
+                return postFormUrlEncodedArray(asArray, headers);
+            }
+        }
+
+        return postJSONStringInternal(body, contentType, headers);
+    }
+
+    /**
+     * v5.0.1 — form-urlencoded + array. Un array NO se puede expresar como parametros planos.
+     *
+     * <p>1 elemento (el caso de httpMode 'batch' en tiempo real, y el que iOS ya cubria en
+     * MAURPostLocationTask.m): se desenrolla y se envia por ESTA conexion — mismo formato de
+     * cable que v4, y compatible con la conexion inyectada en tests.
+     *
+     * <p>N elementos: una peticion por elemento, como ya hace postJSONFile() en la ruta de sync.
+     * Requiere mUrl (constructor con URL); con una conexion inyectada y N>1 no hay forma de abrir
+     * peticiones adicionales, asi que se cae al comportamiento anterior (`locations=<json>`).
+     */
+    private int postFormUrlEncodedArray(JSONArray arr, Map headers) throws IOException {
+        // v5.0.1 — se conserva el Content-Type TAL CUAL lo configuro la app. Estaba fijado al
+        // literal sin parametros, asi que un `...; charset=UTF-8` desaparecia justo en la ruta
+        // que se acaba de arreglar para reconocerlo.
+        String formContentType = contentTypeFromHeaders(headers);
+        if (!isFormUrlEncoded(formContentType)) {
+            formContentType = "application/x-www-form-urlencoded";
+        }
+        int len = arr.length();
+        if (len == 0) {
+            mAcceptedItemCount = 0;
+            return 200;
+        }
+        if (len == 1) {
+            JSONObject only = arr.optJSONObject(0);
+            if (only == null) {
+                logger.error("form-urlencoded requires an object postTemplate; the single element "
+                        + "is not a JSON object and cannot be flattened to key=value. Sending "
+                        + "unflattened body; expect the server to reject it.");
+                return postJSONStringInternal(arr.toString(),
+                        formContentType, headers);
+            }
+            {
+                int code = postJSONStringInternal(only.toString(),
+                        formContentType, headers);
+                mAcceptedItemCount = (code >= 200 && code < 300) ? 1 : 0;
+                return code;
+            }
+        }
+        if (mUrl == null) {
+            // Conexion inyectada: sin URL no se pueden abrir peticiones adicionales.
+            return postJSONStringInternal(arr.toString(),
+                    formContentType, headers);
+        }
+        // H1: un template de tipo array (postTemplate: ["@latitude","@longitude"]) produce
+        // elementos que NO son objetos y por tanto no se pueden aplanar a `clave=valor`. Saltarlos
+        // en silencio significaba 0 peticiones + return 200 + la posicion borrada del disco:
+        // perdida total sin ni un log. Se detecta antes de enviar nada y se cae al cuerpo sin
+        // aplanar, que al menos produce un error visible del servidor.
+        for (int i = 0; i < len; i++) {
+            if (arr.optJSONObject(i) == null) {
+                logger.error("form-urlencoded requires an object postTemplate; element {} is not "
+                        + "a JSON object and cannot be flattened to key=value. Sending unflattened "
+                        + "body; expect the server to reject it.", i);
+                return postJSONStringInternal(arr.toString(),
+                        formContentType, headers);
+            }
+        }
+        for (int i = 0; i < len; i++) {
+            JSONObject item = arr.optJSONObject(i);
+            int code;
+            try {
+                // Instancia nueva por peticion: HttpURLConnection no se reutiliza.
+                // Se preserva mMethod (POST/PUT/PATCH configurado por la app).
+                code = new HttpPostService(mUrl, mMethod).postJSONStringInternal(
+                        item.toString(), formContentType, headers);
+            } catch (IOException e) {
+                mAcceptedItemCount = i;
+                throw e;
+            }
+            if (code < 200 || code >= 300) {
+                mAcceptedItemCount = i;
+                return code;
+            }
+            // H8: 285 ("Updates Not Required") es 2xx, asi que el bucle lo tragaba y devolvia 200
+            // -> onRequestedAbortUpdates nunca se emitia y el tracking seguia pese a que el
+            // servidor pedia parar. Este item SI se acepto, de ahi el i + 1.
+            if (code == 285) {
+                mAcceptedItemCount = i + 1;
+                return code;
+            }
+        }
+        mAcceptedItemCount = len;
+        return 200;
+    }
+
+    private int postJSONStringInternal(String body, String contentType, Map headers) throws IOException {
+        if (headers == null) {
+            headers = new HashMap();
+        }
+
         if (contentType == null) {
             contentType = "application/json";
         }
@@ -152,7 +326,7 @@ public class HttpPostService {
 
         // Prepare body according to Content-Type so header and body always match.
         String finalBody = body;
-        if (contentType.equalsIgnoreCase("application/x-www-form-urlencoded")) {
+        if (isFormUrlEncoded(contentType)) {
             try {
                 finalBody = jsonToUrlEncoded(body);
             } catch (Exception e) {
@@ -286,11 +460,19 @@ public class HttpPostService {
         if (headers == null) {
             headers = new HashMap();
         }
+        mReadTimeoutMs = BATCH_READ_TIMEOUT_MS; // v5.0.1 — R6: margen de v4 para lotes grandes
         String contentType = getContentTypeFromHeaders(headers);
         if (contentType == null) {
             contentType = "application/json";
         }
-        final boolean isFormUrlEncoded = contentType.equalsIgnoreCase("application/x-www-form-urlencoded");
+        final boolean isFormUrlEncoded = isFormUrlEncoded(contentType);
+        // v5.0.1 — R11: `syncMode` se parseaba, validaba y persistia, pero SyncAdapter no lo leia
+        // NUNCA: el cuerpo lo fijaba BatchManager, que siempre escribe un array. En Android el modo
+        // real lo decidia el Content-Type, no la opcion. iOS si lo respetaba, asi que
+        // `syncMode:'single'` funcionaba en iOS y no hacia nada en Android.
+        // Ahora una peticion por posicion se dispara si el Content-Type lo exige (form-urlencoded,
+        // que no puede expresar un array) o si el usuario pidio 'single'.
+        final boolean perItem = isFormUrlEncoded || mPerItemSync;
         // Prepare body according to Content-Type (same as post to url): form body when form-urlencoded, else JSON
         // Read full body so we can convert when needed
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -314,9 +496,9 @@ public class HttpPostService {
         byte[] bodyBytes = baos.toByteArray();
         String jsonString = new String(bodyBytes, StandardCharsets.UTF_8);
 
-        // When form-urlencoded and body is a JSON array, send one POST per location (same flat
-        // format as real-time posting) so the same server endpoint accepts both.
-        if (isFormUrlEncoded) {
+        // Una peticion por posicion: obligatorio con form-urlencoded (un array no se puede
+        // aplanar) y opcional con syncMode 'single'.
+        if (perItem) {
             try {
                 Object parsed = new JSONTokener(jsonString).nextValue();
                 if (parsed instanceof JSONArray) {
@@ -326,6 +508,18 @@ public class HttpPostService {
                         if (listener != null) listener.onProgress(100);
                         return 200;
                     }
+                    // v5.0.1 — misma guarda que postFormUrlEncodedArray (H1): con un postTemplate
+                    // de tipo array los elementos no son objetos, y getJSONObject(i) lanzaba
+                    // JSONException a MITAD del bucle, con parte del lote ya enviado; el catch
+                    // caía al POST unico y reenviaba todo (duplicados). Se detecta antes de
+                    // enviar nada y se cae limpiamente al POST unico.
+                    for (int i = 0; i < len; i++) {
+                        if (arr.optJSONObject(i) == null) {
+                            logger.error("perItem sync requiere un postTemplate de tipo objeto; el "
+                                    + "elemento {} no lo es. Se envia el lote en una sola peticion.", i);
+                            throw new JSONException("perItem: element " + i + " is not an object");
+                        }
+                    }
                     for (int i = 0; i < len; i++) {
                         JSONObject item = arr.getJSONObject(i);
                         // Preserve the configured method: the 1-arg constructor silently forced
@@ -334,6 +528,8 @@ public class HttpPostService {
                         HttpPostService perRequest = new HttpPostService(mUrl, mMethod);
                         int code;
                         try {
+                            // postJSON(JSONObject) respeta el Content-Type de headers: plano si es
+                            // form-urlencoded, {...} si es JSON. Ambos modos quedan cubiertos.
                             code = perRequest.postJSON(item, headers);
                         } catch (IOException e) {
                             // Network died mid-batch: items 0..i-1 are already on the server.
@@ -342,6 +538,15 @@ public class HttpPostService {
                         }
                         if (listener != null && len > 0) {
                             listener.onProgress((i + 1) * 100 / len);
+                        }
+                        // v5.0.1 — 285 ("abort updates") es 2xx, así que este bucle lo trataba
+                        // como éxito, seguía iterando y devolvía 200: onRequestedAbortUpdates no
+                        // se emitía nunca y el dispositivo seguía trackeando pese a que el
+                        // servidor pedía parar. Mismo fix que ya lleva postFormUrlEncodedArray.
+                        // El item i SÍ fue aceptado, por eso el contador es i + 1.
+                        if (code == 285) {
+                            mAcceptedItemCount = i + 1;
+                            return code;
                         }
                         if (code < 200 || code >= 300) {
                             mAcceptedItemCount = i;
@@ -354,7 +559,13 @@ public class HttpPostService {
                     }
                     return 200;
                 }
-            } catch (Exception e) {
+            } catch (JSONException e) {
+                // H2: era catch (Exception), que tragaba la IOException relanzada arriba cuando la
+                // red se cortaba a mitad del lote. En vez de propagar a SyncAdapter (que haria
+                // setBatchPartiallyCompleted y reintentaria solo el resto), caia al POST unico con
+                // `locations=<json>`: reenviaba los items ya aceptados (duplicados) y, si ese POST
+                // devolvia 2xx, marcaba el lote entero como completado -> perdida. Solo el parseo
+                // JSON debe caer aqui; IOException tiene que subir.
                 // Fall through to single-POST with jsonToUrlEncoded (e.g. array wrap)
             }
         }
@@ -437,6 +648,25 @@ public class HttpPostService {
     public static int postJSON(String url, JSONArray json, Map headers, String method) throws IOException {
         HttpPostService service = new HttpPostService(url, method);
         return service.postJSON(json, headers);
+    }
+
+    /** v5.0.1 — R11: sobrecarga que propaga syncMode ('single' => una peticion por posicion). */
+    public static int postJSONFile(String url, File file, Map headers, UploadingProgressListener listener, String method, int[] acceptedOut, boolean perItemSync) throws IOException {
+        HttpPostService service = new HttpPostService(url, method);
+        service.mPerItemSync = perItemSync;
+        // v5.0.1 — el try/finally NO es opcional: al cortarse la red a mitad de lote,
+        // postJSONFile guarda mAcceptedItemCount y RELANZA la IOException. Sin finally, la
+        // asignación se saltaba, acceptedOut[0] quedaba en -1, SyncAdapter no llamaba a
+        // setBatchPartiallyCompleted y las posiciones ya aceptadas por el servidor se reenviaban
+        // en el siguiente lote -> duplicados en cada corte de red. Es el mismo motivo por el que
+        // la sobrecarga de 6 argumentos lo lleva.
+        try {
+            return service.postJSONFile(file, headers, listener);
+        } finally {
+            if (acceptedOut != null && acceptedOut.length > 0) {
+                acceptedOut[0] = service.mAcceptedItemCount;
+            }
+        }
     }
 
     public static int postJSONFile(String url, File file, Map headers, UploadingProgressListener listener, String method) throws IOException {

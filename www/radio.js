@@ -131,10 +131,13 @@
           p = (typeof(ai) === "function") ? [ai] : ai;
           if ((typeof(p) === 'object') && (p.length)) {
             //do not subscribe the same callback twice to the same channel,
-            //otherwise repeated subscribe/unsubscribe cycles leak listeners
+            //otherwise repeated subscribe/unsubscribe cycles leak listeners.
+            //v5.0.1 — the pair (callback, context) is the identity, NOT the callback alone:
+            //comparing only c[j][0] silently discarded [fn, ctxB] when [fn, ctxA] already
+            //existed, so the same handler could not be registered for two contexts.
             duplicate = false;
             for (j = 0; j < c.length; j++) {
-              if (c[j][0] === p[0]) {
+              if (c[j][0] === p[0] && c[j][1] === p[1]) {
                 duplicate = true;
                 break;
               }
@@ -160,14 +163,29 @@
       unsubscribe: function() {
         var a = arguments,
           i, j, c = this.channels[this.channelName],
-          l = a.length;
+          l = a.length, ai, fn, ctx, hasCtx;
         //loop through each argument
         for (i = 0; i < l; i++) {
+          //v5.0.1 — la identidad de un suscriptor es el par (callback, contexto), igual que en
+          //subscribe(). Comparar solo c[j][0] hacía que unsubscribe([fn, ctxB]) quitara
+          //[fn, ctxA] — el primero que encontrara — dejando vivo el que se quería quitar.
+          //unsubscribe(fn) a secas sigue quitando la primera entrada de ese callback sea cual sea
+          //su contexto, que es lo que documenta el ejemplo subscribe([cb, ctx]).unsubscribe(cb).
+          ai = a[i];
+          if (typeof(ai) === 'object' && ai && ai.length) {
+            fn = ai[0];
+            ctx = ai[1];
+            hasCtx = true;
+          } else {
+            fn = ai;
+            ctx = undefined;
+            hasCtx = false;
+          }
           //loop through the channel and remove ONLY the first match, so one
           //unsubscribe() call undoes exactly one subscribe() call
           for (j = 0; j < c.length; j++) {
             //if there is a match with the argument and the channel function, unsubscribe it from the channel array
-            if (c[j][0] === a[i]) {
+            if (c[j][0] === fn && (!hasCtx || c[j][1] === ctx)) {
               //unsubscribe matched item from the channel array
               c.splice(j, 1);
               break;

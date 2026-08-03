@@ -35,6 +35,13 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
 
     private static final int NOTIFICATION_ID = 666;
 
+    /**
+     * v5.0.1 — extra que marca las ejecuciones del sync periódico de 15 min. Estas ignoran
+     * {@code syncThreshold} (usan 0) porque su razón de ser es drenar la cola que se quedó por
+     * debajo del umbral; con el umbral normal no subían nada nunca.
+     */
+    public static final String EXTRA_PERIODIC_DRAIN = "com.marianhello.bgloc.PERIODIC_DRAIN";
+
     ContentResolver contentResolver;
     private ConfigurationDAO configDAO;
     private NotificationManager notificationManager;
@@ -99,7 +106,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
             return;
         }
 
-        if (config == null || !config.hasValidSyncUrl() || !Boolean.TRUE.equals(config.getSyncEnabled())) {
+        if (config == null || !config.hasEffectiveSyncUrl() || !Boolean.TRUE.equals(config.getSyncEnabled())) {
             if (config == null) {
                 logger.warn("Sync skipped: no config");
             } else if (!Boolean.TRUE.equals(config.getSyncEnabled())) {
@@ -114,15 +121,28 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
 
         Long batchStartMillis = System.currentTimeMillis();
         boolean isForced = (extras != null) && extras.getBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, false);
+        // v5.0.1 — el sync periódico existe justo para subir lo que quedó por debajo del umbral
+        // al final de un turno; aplicarle el umbral normal lo dejaba inerte (ver
+        // LocationServiceImpl, registro del addPeriodicSync).
+        boolean isPeriodicDrain = (extras != null) && extras.getBoolean(EXTRA_PERIODIC_DRAIN, false);
         Integer configThreshold = config.getSyncThreshold();
-        int syncThreshold = isForced ? 0 : (configThreshold != null ? configThreshold : 100);
-        logger.debug("Sync request isForced: {}, batchId: {}, syncThreshold: {}, config: {}", isForced, batchStartMillis, syncThreshold, config.toString());
+        int syncThreshold = (isForced || isPeriodicDrain) ? 0 : (configThreshold != null ? configThreshold : 100);
+        logger.debug("Sync request isForced: {}, isPeriodicDrain: {}, batchId: {}, syncThreshold: {}, config: {}", isForced, isPeriodicDrain, batchStartMillis, syncThreshold, config.toString());
 
         File file = null;
         try {
             file = batchManager.createBatch(batchStartMillis, syncThreshold, config.getTemplate());
         } catch (IOException e) {
             logger.error("Failed to create batch: {}", e.getMessage());
+            syncResult.stats.numIoExceptions++;
+            return;
+        } catch (RuntimeException e) {
+            // v5.0.1 — createBatch habla con el ContentResolver, que lanza RuntimeException sin
+            // avisar ("database is locked", provider muerto, SQLiteFullException). Solo se
+            // capturaba IOException, así que cualquiera de esas tumbaba el proceso :sync entero:
+            // el usuario ve un crash y el framework deja de programar sincronizaciones un rato.
+            // Se contabiliza como error de I/O para que el SyncManager reintente con backoff.
+            logger.error("Unexpected error creating batch: {}", e.getMessage());
             syncResult.stats.numIoExceptions++;
             return;
         }
@@ -133,7 +153,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         }
 
         logger.info("Syncing startAt: {}", batchStartMillis);
-        String url = config.getSyncUrl();
+        String url = config.getEffectiveSyncUrl(); // v5.0.1 — R15: cae a `url` si no hay syncUrl
         HashMap<String, String> httpHeaders = new HashMap<String, String>();
         if (config.getHttpHeaders() != null) {
             httpHeaders.putAll(config.getHttpHeaders());
@@ -144,11 +164,50 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         // placeholders (like {lat}) cannot apply to a multi-location batch. If the user wants per-location
         // URL substitution they should use httpMode="single" + url= ... (real-time) or syncMode="single".
         String resolvedUrl = com.marianhello.bgloc.http.UrlTemplateResolver.resolve(url, null, config.getQueryParams());
-        String syncMethod = config.getSyncHttpMethod();
+
+        // v5.0.1 — cuando el destino efectivo es `url` (fallback de R15, sin syncUrl configurada),
+        // el contrato que espera ese endpoint es el de TIEMPO REAL: httpMethod y httpMode, no
+        // syncHttpMethod y syncMode. Usar los de sync mandaba un array JSON por POST a un endpoint
+        // que espera un objeto -> 400 permanente y reintento en bucle sobre el mismo payload.
+        boolean usingRealtimeUrlAsFallback =
+                (config.getSyncUrl() == null || config.getSyncUrl().isEmpty());
+        String syncMethod = usingRealtimeUrlAsFallback
+                ? config.getHttpMethod()
+                : config.getSyncHttpMethod();
+        String effectiveMode = usingRealtimeUrlAsFallback
+                ? config.getHttpMode()
+                : config.getSyncMode();
+        if (usingRealtimeUrlAsFallback) {
+            // v5.0.1 — GET NO puede usarse aqui, y por el mismo motivo por el que R14 lo prohibe en
+            // syncHttpMethod: la URL del lote se resuelve con location = null, asi que los
+            // placeholders por posicion se quedan sin sustituir (`?lat={latitude}`). Un endpoint
+            // OsmAnd que respondiera 2xx a esa basura provocaria setBatchCompleted() y el lote
+            // entero se perderia — exactamente R14 por la puerta de atras.
+            //
+            // Se aborta el sync en vez de enviar: las filas siguen SYNC_PENDING y el envio en
+            // TIEMPO REAL (que si resuelve los placeholders por posicion) las sigue cubriendo.
+            // Para reintentar lo acumulado sin conexion hay que configurar `syncUrl` con un
+            // endpoint que acepte cuerpo (POST/PUT/PATCH).
+            if ("GET".equalsIgnoreCase(syncMethod)) {
+                logger.warn("Sync omitido: sin `syncUrl` y con httpMethod GET no hay forma de "
+                        + "resolver los placeholders por posicion en la URL del lote. Las {} "
+                        + "posiciones siguen en cola. Configura `syncUrl` con POST/PUT/PATCH para "
+                        + "poder reintentar lo acumulado sin conexion.", countLocationsStreaming(file));
+                if (file.exists() && !file.delete()) {
+                    logger.warn("Batch file has not been deleted: {}", file.getAbsolutePath());
+                }
+                return;
+            }
+            logger.info("Sync sin syncUrl: se reintenta contra `url` con httpMethod={} y httpMode={}",
+                    syncMethod, effectiveMode);
+        }
+
         // Receives the number of locations the server accepted before a mid-batch failure.
         int[] accepted = new int[]{ -1 };
         try {
-            if (uploadLocations(file, resolvedUrl, httpHeaders, syncMethod, accepted)) {
+            // v5.0.1 — R11: syncMode por fin se lee (antes se ignoraba en Android).
+            boolean perItemSync = "single".equals(effectiveMode);
+            if (uploadLocations(file, resolvedUrl, httpHeaders, syncMethod, accepted, perItemSync)) {
                 logger.info("Batch sync successful");
                 batchManager.setBatchCompleted(batchStartMillis);
             } else {
@@ -170,7 +229,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         }
     }
 
-    private boolean uploadLocations(File file, String url, HashMap httpHeaders, String method, int[] acceptedOut) {
+    private boolean uploadLocations(File file, String url, HashMap httpHeaders, String method, int[] acceptedOut, boolean perItemSync) {
         NotificationCompat.Builder builder = null;
 
         if (notificationsEnabled) {
@@ -198,10 +257,24 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements HttpPost
         int locationsAttempted = countLocationsStreaming(file);
 
         try {
-            int responseCode = HttpPostService.postJSONFile(url, file, httpHeaders, this, method, acceptedOut);
+            int responseCode = HttpPostService.postJSONFile(url, file, httpHeaders, this, method, acceptedOut, perItemSync);
 
             // All 2xx statuses are okay
             boolean isStatusOkay = responseCode >= 200 && responseCode < 300;
+
+            // v5.0.1 — un 2xx NO significa "todo el lote entregado" cuando el envio fue por
+            // elemento y se corto a mitad. Es exactamente lo que pasaba con el 285: el bucle
+            // per-item lo trata como "para de enviar" y devuelve 285, que es 2xx, asi que
+            // onPerformSync llamaba a setBatchCompleted() y marcaba DELETED tambien las
+            // posiciones que NUNCA se enviaron. Con acceptedOut < 0 (cuerpo unico, todo o nada)
+            // esto no aplica y se conserva el comportamiento de siempre.
+            if (isStatusOkay && acceptedOut != null && acceptedOut.length > 0
+                    && acceptedOut[0] >= 0 && acceptedOut[0] < locationsAttempted) {
+                logger.warn("Servidor acepto {} de {} posiciones (HTTP {}). Se confirma solo el "
+                        + "prefijo aceptado; el resto se reintenta en el proximo lote.",
+                        acceptedOut[0], locationsAttempted, responseCode);
+                isStatusOkay = false;
+            }
 
             if (responseCode == 285) {
                 // Okay, but we don't need to continue sending these

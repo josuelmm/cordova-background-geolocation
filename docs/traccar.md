@@ -81,10 +81,7 @@ BackgroundGeolocation.configure({
   httpMode: 'single',
   queryParams: { uid: 'USER_DEVICE_123' },
 
-  // Cola offline al mismo endpoint
-  syncUrl: 'https://gps.midominio.com:5055/?id={uid}&lat={latitude}&lon={longitude}&timestamp={timestamp_iso}&speed={speed}&altitude={altitude}&bearing={bearing}&accuracy={accuracy}',
-  syncHttpMethod: 'GET',
-  syncMode: 'single',
+  // NO configures syncUrl con GET. Ver la nota de abajo.
 
   // Comportamiento de tracking
   locationProvider: BackgroundGeolocation.DISTANCE_FILTER_PROVIDER,
@@ -107,6 +104,28 @@ BackgroundGeolocation.start();
 ```
 
 **Importante:** el `id` debe coincidir con el `Unique ID` del dispositivo creado en Traccar. Si no existe, Traccar descarta la posición.
+
+### Por qué aquí no se configura `syncUrl` (corregido en 5.0.1)
+
+Hasta 5.0.0 este ejemplo incluía `syncUrl` + `syncHttpMethod: 'GET'`. **Esa configuración perdía
+datos en silencio** y ya no se acepta: `configure()` la rechaza.
+
+El motivo es que la URL de la cola offline se resuelve **una sola vez para todo el lote**, con
+`location = null`. Los placeholders por posición (`{latitude}`, `{longitude}`, `{timestamp_iso}`…)
+no se pueden sustituir — no hay *una* posición — así que el GET salía literalmente con
+`?lat={latitude}&lon={longitude}`. Traccar responde 200 a esa petición (no reconoce el dispositivo,
+descarta y contesta OK), el plugin lo interpreta como "lote entregado" y **borraba el lote entero
+sin haber enviado una sola coordenada real**.
+
+Qué usar en su lugar:
+
+- **Si te basta con el envío en tiempo real** (el caso normal en Traccar): no configures `syncUrl`.
+  El POST/GET por posición sí resuelve los placeholders correctamente. Las posiciones que fallen
+  quedan en cola local y se reintentan cuando vuelve la conexión.
+- **Si necesitas subir de golpe lo acumulado sin cobertura** (túneles, rutas largas sin señal):
+  necesitas un endpoint que acepte **cuerpo** — `syncHttpMethod` admite `POST`, `PUT` o `PATCH`.
+  Un gateway mínimo delante de Traccar que reciba el array JSON y lo reemita al puerto 5055
+  posición a posición es la forma recomendada (ver *Opción A: gateway intermedio*, más abajo).
 
 ---
 

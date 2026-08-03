@@ -181,7 +181,11 @@
             // caller when no row exists at all.
             config = [[MAURConfig alloc] init];
             if ([self isNonNull:rs columnIndex:1]) {
-                config.stationaryRadius = [NSNumber numberWithInt:[rs intForColumnIndex:1]];
+                // v5.0.1 — la columna es REAL y Android guarda stationaryRadius como float;
+                // leerlo con intForColumnIndex lo truncaba al reiniciar la app (12.5 -> 12), así
+                // que getConfig() devolvía otro valor del configurado y la región monitorizada
+                // encogía. Paridad con Config.setStationaryRadius(double) de Android.
+                config.stationaryRadius = [NSNumber numberWithDouble:[rs doubleForColumnIndex:1]];
             }
             if ([self isNonNull:rs columnIndex:2]) {
                 config.distanceFilter = [NSNumber numberWithInt:[rs intForColumnIndex:2]];
@@ -238,6 +242,11 @@
                 if (templateAsString != nil) {
                     NSData *jsonTemplate = [templateAsString dataUsingEncoding:NSUTF8StringEncoding];
                     config._template = [NSJSONSerialization JSONObjectWithData:jsonTemplate options:0 error:nil];
+                    // v5.0.1 — B7: solo se persiste la columna si el usuario configuró un template
+                    // (`hasTemplate` mira el ivar), así que leerla implica que lo hizo. Sin esta
+                    // línea el flag se perdía al reiniciar la app y `getConfig().postTemplate`
+                    // volvía a decir `null` sobre un template que sí estaba configurado.
+                    config.hasUserTemplate = (config._template != nil);
                 }
             }
             // v4.5: rehydrate post-3.2 keys from config_json blob (paridad Android).

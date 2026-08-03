@@ -202,8 +202,16 @@ public class ConfigMapper {
         if (jObject.has("activityConfidenceThreshold") && !jObject.isNull("activityConfidenceThreshold")) {
             config.setActivityConfidenceThreshold(jObject.getInt("activityConfidenceThreshold"));
         }
-        if (jObject.has("maxAcceptedAccuracy") && !jObject.isNull("maxAcceptedAccuracy")) {
-            config.setMaxAcceptedAccuracy((float) jObject.getDouble("maxAcceptedAccuracy"));
+        // v5.0.1 — paridad con iOS (MAURConfig.resetMaxAcceptedAccuracy). Un `null` explícito
+        // significa "quita el filtro", y aquí se descartaba: quien configuraba
+        // maxAcceptedAccuracy y luego intentaba desactivarlo (túnel, urbano denso) seguía
+        // perdiendo TODOS los fixes, sin forma de recuperarse salvo reinstalando.
+        if (jObject.has("maxAcceptedAccuracy")) {
+            if (jObject.isNull("maxAcceptedAccuracy")) {
+                config.setResetMaxAcceptedAccuracy(true);
+            } else {
+                config.setMaxAcceptedAccuracy((float) jObject.getDouble("maxAcceptedAccuracy"));
+            }
         }
 
         validate(config);
@@ -227,8 +235,12 @@ public class ConfigMapper {
         requireNonNegative("activitiesInterval", config.getActivitiesInterval());
         requireNonNegative("heartbeatInterval", config.getHeartbeatInterval());
         requireNonNegative("distanceFilter", config.getDistanceFilter());
-        requireAtLeast("syncThreshold", config.getSyncThreshold(), 1);
-        requireAtLeast("maxLocations", config.getMaxLocations(), 1);
+        // v5.0.1 — v4 aceptaba 0 con semantica propia ("sincroniza en cada posicion":
+        // syncLocationsCount >= 0 siempre cierto). Rechazarlo hacia que configure() fallara al
+        // arrancar en apps que ya estaban en produccion con ese valor.
+        requireNonNegative("syncThreshold", config.getSyncThreshold());
+        // v5.0.1 — v4 aceptaba 0 ("no persistir": persistLocation(loc, 0) devolvia -1).
+        requireNonNegative("maxLocations", config.getMaxLocations());
         requireRange("activityConfidenceThreshold", config.getActivityConfidenceThreshold(), 0, 100);
 
         if (config.getStationaryRadius() != null && config.getStationaryRadius() < 0) {
@@ -239,7 +251,10 @@ public class ConfigMapper {
         }
 
         requireOneOfString("httpMethod", config.getHttpMethod(), "POST", "GET", "PUT", "PATCH");
-        requireOneOfString("syncHttpMethod", config.getSyncHttpMethod(), "POST", "GET", "PUT", "PATCH");
+        // v5.0.1 — R14: GET fuera. La URL de sync se resuelve con location = null, así que ningún
+        // placeholder por posición se sustituye: salía un GET sin cuerpo y sin datos, el 200 hacía
+        // setBatchCompleted() y el lote entero se perdía en silencio.
+        requireOneOfString("syncHttpMethod", config.getSyncHttpMethod(), "POST", "PUT", "PATCH");
         requireOneOfString("httpMode", config.getHttpMode(), "batch", "single");
         requireOneOfString("syncMode", config.getSyncMode(), "batch", "single");
         requireOneOfString("mockLocationPolicy", config.getMockLocationPolicy(), "allow", "flag", "drop");

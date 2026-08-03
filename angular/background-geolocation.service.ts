@@ -308,10 +308,17 @@ export class BackgroundGeolocationService {
       const zoned = (value: any) => zone.run(() => callback(value));
       const sub = plugin.on(eventName, zoned) as { remove?: () => void };
       const subscription = {
-        // subscribe() must NOT register a second listener: the callback passed to
-        // on() is already subscribed. Return the very same subscription instead.
-        subscribe(_cb?: (value: any) => void) {
-          return { unsubscribe() { sub.remove?.(); } };
+        // v5.0.1 — el argumento de subscribe() se estaba IGNORANDO: `on(evt, a).subscribe(b)`
+        // registraba `a` y descartaba `b` en silencio (compilaba, no llamaba nunca a b).
+        // v4 sí lo registraba. Se restaura: si llegan callbacks extra, se suscriben de verdad,
+        // envueltos en NgZone igual que el primero, y su unsubscribe libera solo el suyo.
+        subscribe(cb?: (value: any) => void) {
+          if (cb === undefined) {
+            return { unsubscribe() { sub.remove?.(); } };
+          }
+          const extraZoned = (value: any) => zone.run(() => cb(value));
+          const extra = plugin.on(eventName, extraZoned) as { remove?: () => void };
+          return { unsubscribe() { extra.remove?.(); } };
         },
         unsubscribe() { sub.remove?.(); }
       };

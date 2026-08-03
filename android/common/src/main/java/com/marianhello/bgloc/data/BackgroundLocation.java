@@ -1056,6 +1056,16 @@ public class BackgroundLocation implements Parcelable {
         if ("@time_seconds".equals(key)) {
             return time > 0 ? (time / 1000L) : JSONObject.NULL;
         }
+        // v5.0.1 — `@timestamp_iso` estaba documentado en docs/api.md y README pero no existia en
+        // ninguna de las dos plataformas: se posteaba el literal "@timestamp_iso" (Android) o null
+        // (iOS). Mismo formato que UrlTemplateResolver.isoUtc, que si lo implementaba para URLs.
+        if ("@timestamp_iso".equals(key)) {
+            if (time <= 0) return JSONObject.NULL;
+            java.text.SimpleDateFormat sdf =
+                    new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US);
+            sdf.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            return sdf.format(new java.util.Date(time));
+        }
         if ("@latitude".equals(key)) {
             return latitude;
         }

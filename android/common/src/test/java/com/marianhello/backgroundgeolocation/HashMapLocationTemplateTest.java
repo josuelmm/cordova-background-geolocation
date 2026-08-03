@@ -213,4 +213,40 @@ public class HashMapLocationTemplateTest {
 
     }
 
+    /**
+     * v5.0.1 — un placeholder que la posición no puede resolver debe salir como JSON null, no
+     * como el literal "@heading". La ruta de sync (BatchManager) e iOS ya lo hacían así y es lo
+     * que documenta docs/api.md; en el POST en tiempo real salía el literal, y Traccar/OsmAnd
+     * responden 400 (NumberFormatException) ante "speed=@speed".
+     */
+    @Test
+    public void testUnresolvedPlaceholderBecomesNull() throws JSONException {
+        BackgroundLocation location = new BackgroundLocation();
+        location.setLatitude(40.21);
+        location.setLongitude(-3.7);
+
+        JSONObject template = new JSONObject(
+                "{\"lat\":\"@latitude\",\"nope\":\"@thisKeyDoesNotExist\",\"lit\":\"plain\"}"
+        );
+        LocationTemplate tpl = LocationTemplateFactory.fromJSON(template);
+        JSONObject json = (JSONObject) tpl.locationToJson(location);
+
+        Assert.assertEquals(location.getLatitude(), json.get("lat"));
+        Assert.assertTrue("el placeholder sin valor debe ser null", json.isNull("nope"));
+        Assert.assertEquals("una cadena normal del template se conserva", "plain", json.get("lit"));
+    }
+
+    /** v5.0.1 — `@timestamp_iso` estaba documentado pero no implementado en ninguna plataforma. */
+    @Test
+    public void testTimestampIsoPlaceholder() throws JSONException {
+        BackgroundLocation location = new BackgroundLocation();
+        location.setTime(1000000000000L); // 2001-09-09T01:46:40Z
+
+        JSONObject template = new JSONObject("{\"t\":\"@timestamp_iso\",\"s\":\"@time_seconds\"}");
+        LocationTemplate tpl = LocationTemplateFactory.fromJSON(template);
+        JSONObject json = (JSONObject) tpl.locationToJson(location);
+
+        Assert.assertEquals("2001-09-09T01:46:40Z", json.get("t"));
+        Assert.assertEquals(1000000000L, json.get("s"));
+    }
 }

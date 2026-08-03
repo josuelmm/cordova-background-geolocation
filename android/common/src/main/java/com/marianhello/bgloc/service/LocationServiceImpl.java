@@ -64,6 +64,7 @@ import com.marianhello.bgloc.provider.LocationProvider;
 import com.marianhello.bgloc.provider.LocationProviderFactory;
 import com.marianhello.bgloc.provider.ProviderDelegate;
 import com.marianhello.bgloc.sync.AccountHelper;
+import com.marianhello.bgloc.sync.SyncAdapter;
 import com.marianhello.bgloc.sync.SyncService;
 import com.marianhello.logging.LoggerManager;
 import com.marianhello.logging.UncaughtExceptionLogger;
@@ -141,8 +142,12 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     private static int NOTIFICATION_ID = 1;
 
     private ResourceResolver mResolver;
-    private Config mConfig;
-    private LocationProvider mProvider;
+    // v5.0.1 — `volatile`: los runnables del watchdog y del heartbeat corren en el main looper y
+    // leen ambos campos mientras configure()/start()/stop() los escriben desde el hilo del binder.
+    // Sin barrera de memoria un hilo podía seguir viendo la config anterior (o un mProvider ya
+    // sustituido) indefinidamente.
+    private volatile Config mConfig;
+    private volatile LocationProvider mProvider;
     private Account mSyncAccount;
 
     private org.slf4j.Logger logger;
@@ -348,7 +353,19 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         // explicit forceSync(), so a driver who ended a shift with syncThreshold-1 locations
         // pending never uploaded them — they sat in SQLite until the vehicle moved again, and
         // were lost outright if the app was reinstalled or its data cleared.
-        ContentResolver.addPeriodicSync(mSyncAccount, authority, new Bundle(),
+        // v5.0.1 — el Bundle iba vacío, así que SyncAdapter aplicaba el syncThreshold normal
+        // (100 por defecto) y createBatch devolvía null: el sync periódico NUNCA drenaba la cola
+        // por debajo del umbral, que es exactamente el caso para el que se añadió. Con este extra
+        // el SyncAdapter usa umbral 0 solo en las ejecuciones periódicas (no se usa
+        // SYNC_EXTRAS_MANUAL para no saltarse además las restricciones del framework).
+        Bundle periodicExtras = new Bundle();
+        periodicExtras.putBoolean(SyncAdapter.EXTRA_PERIODIC_DRAIN, true);
+        // El framework identifica un sync periódico por (cuenta, autoridad, EXTRAS): al cambiar el
+        // Bundle de vacío a este, addPeriodicSync AÑADE uno nuevo en vez de sustituir el que dejó
+        // 5.0.0, y el dispositivo se queda con DOS despertando el proceso :sync cada 15 min.
+        // Se retira explícitamente el registro con Bundle vacío antes de añadir el nuevo.
+        ContentResolver.removePeriodicSync(mSyncAccount, authority, new Bundle());
+        ContentResolver.addPeriodicSync(mSyncAccount, authority, periodicExtras,
                 PERIODIC_SYNC_INTERVAL_SECONDS);
 
         mLocationDAO = DAOFactory.createLocationDAO(this);

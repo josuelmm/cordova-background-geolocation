@@ -354,7 +354,22 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 {
     NSLog(@"%@ #%@", TAG, @"configure");
     [self.commandDelegate runInBackground:^{
-        config = [MAURConfig fromDictionary:[command.arguments objectAtIndex:0]];
+        MAURConfig *incoming = [MAURConfig fromDictionary:[command.arguments objectAtIndex:0]];
+
+        // v5.0.1 — B1: paridad con ConfigMapper.validate() de Android. Antes un valor fuera de
+        // rango (locationProvider: 3, httpMode: 'batched') se aceptaba, se PERSISTÍA en SQLite y
+        // reventaba mucho más tarde — o caía a un default sin avisar — repitiéndose en cada
+        // arranque porque el valor malo ya estaba guardado. Rechazar aquí convierte una rotura
+        // permanente y silenciosa en un rechazo inmediato y accionable desde JS.
+        NSError *validationError = nil;
+        if (![incoming validate:&validationError]) {
+            [self.commandDelegate
+                sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                          messageAsDictionary:[self errorToDictionary:validationError]]
+                      callbackId:command.callbackId];
+            return;
+        }
+        config = incoming;
 
         NSError *error = nil;
         CDVPluginResult* result = nil;
@@ -635,7 +650,7 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 - (void) getPluginVersion:(CDVInvokedUrlCommand*)command
 {
     NSLog(@"%@ #%@", TAG, @"getPluginVersion");
-    NSString *version = @"5.0.0"; // keep in sync with plugin.xml and Android PLUGIN_VERSION
+    NSString *version = @"5.0.1"; // keep in sync with plugin.xml and Android PLUGIN_VERSION
     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:version];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
@@ -770,6 +785,20 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
     [[MAURBackgroundTaskManager sharedTasks] endTaskWithKey:taskKey];
     // v4.5.5 — resolve the JS promise; without this the caller hung forever.
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK] callbackId:command.callbackId];
+}
+
+/**
+ * v5.0.1 — B4. `headlessTask()` no tenia selector en iOS, asi que Cordova rechazaba la promesa con
+ * su error generico ("Invalid action"), sin mensaje util — aunque `BackgroundGeolocation.d.ts` ya
+ * documenta que en iOS es un no-op (Apple no permite ejecutar JS con la app matada). Ahora se
+ * cumple ese contrato: resuelve OK y deja rastro en el log en vez de fallar de forma opaca.
+ */
+- (void) registerHeadlessTask:(CDVInvokedUrlCommand*)command
+{
+    NSLog(@"%@ %@", TAG, @"registerHeadlessTask: no-op en iOS (ver BackgroundGeolocation.d.ts). "
+                          @"Usa los listeners normales con el modo de localizacion en background.");
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK]
+                                callbackId:command.callbackId];
 }
 
 - (void) forceSync:(CDVInvokedUrlCommand*)command
@@ -959,12 +988,18 @@ static NSString * const TAG = @"CDVBackgroundGeolocation";
 {
     NSLog(@"%@ %@", TAG, @"resumed");
     [facade switchMode:MAURForegroundMode];
+    // v5.0.1 — `foreground` y `background` están declarados en la API pública
+    // (www/BackgroundGeolocation.js y .d.ts) y solo los emitía Android
+    // (BackgroundGeolocationPlugin.onResume/onPause). Un on('background', ...) para bajar la
+    // precisión al salir de la app no disparaba jamás en iOS.
+    [self sendEvent:@"foreground"];
 }
 
 -(void) onAppPause:(NSNotification *)notification
 {
     NSLog(@"%@ %@", TAG, @"paused");
     [facade switchMode:MAURBackgroundMode];
+    [self sendEvent:@"background"];
 }
 
 -(void) onAbortRequested

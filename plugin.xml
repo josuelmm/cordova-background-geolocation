@@ -2,7 +2,7 @@
 <plugin xmlns="http://www.phonegap.com/ns/plugins/1.0"
     xmlns:android="http://schemas.android.com/apk/res/android"
     id="cordova-background-geolocation"
-    version="5.0.0">
+    version="5.0.1">
     <name>cordova-background-geolocation</name>
     <description>Cordova Background Geolocation Plugin</description>
     <license>Apache-2.0</license>
@@ -10,8 +10,12 @@
 
     <engines>
         <engine name="cordova" version=">=10.0.0"/>
-        <engine name="cordova-android" version=">=12.0.0"/>
-        <engine name="cordova-ios" version=">=6.2.0"/>
+        <!-- v5.0.1 — R13: androidx.core 1.13.1 / appcompat 1.7.0 exigen compilar contra API 34+.
+             cordova-android 12.x compila con SDK 33, así que el build fallaba con
+             "requires ... to compile against version 34 or later". El motor mínimo sube a 13. -->
+        <engine name="cordova-android" version=">=13.0.0"/>
+        <!-- v5.0.1 — el CHANGELOG de 5.0.0 ya prometia >=7; plugin.xml se habia quedado en 6.2.0. -->
+        <engine name="cordova-ios" version=">=7.0.0"/>
     </engines>
 
     <js-module src="www/BackgroundGeolocation.js" name="BackgroundGeolocation">

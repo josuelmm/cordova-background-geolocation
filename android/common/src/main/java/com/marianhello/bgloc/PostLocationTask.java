@@ -111,10 +111,19 @@ public class PostLocationTask {
 
         // Honour maxLocations. The unbounded overload was the only one ever called, so every
         // synced location stayed as a dead row forever and the table grew without limit.
+        // v5.0.1 — `maxLocations: 0` significa NO PERSISTIR ("the total count never exceeds
+        // maxLocations", docs/api.md). Antes caía en la rama sin límite, es decir justo lo
+        // contrario de lo pedido: quien lo configuraba para no almacenar obtenía crecimiento
+        // ilimitado. Sin fila en la tabla el id es -1 y post() no intenta borrarla ni encolarla.
         Integer maxLocations = mConfig.getMaxLocations();
-        long locationId = (maxLocations != null && maxLocations > 0)
-                ? mLocationDAO.persistLocation(location, maxLocations)
-                : mLocationDAO.persistLocation(location);
+        long locationId;
+        if (maxLocations != null && maxLocations == 0) {
+            locationId = -1;
+        } else if (maxLocations != null && maxLocations > 0) {
+            locationId = mLocationDAO.persistLocation(location, maxLocations);
+        } else {
+            locationId = mLocationDAO.persistLocation(location);
+        }
         location.setLocationId(locationId);
 
         if (mSessionDAO != null && mSessionDAO.isSessionActive()) {
@@ -129,7 +138,9 @@ public class PostLocationTask {
                 }
             });
         } catch (RejectedExecutionException ex) {
-            mLocationDAO.updateLocationForSync(locationId);
+            if (locationId >= 0) {
+                mLocationDAO.updateLocationForSync(locationId);
+            }
         }
     }
 
@@ -151,24 +162,36 @@ public class PostLocationTask {
 
     private void post(final BackgroundLocation location) {
         long locationId = location.getLocationId();
+        // v5.0.1 — persistLocation devuelve -1 cuando la fila no se guardó (insert fallido, o
+        // maxLocations: 0). Sin esta guarda, deleteLocationById(-1) construye una URI que el
+        // UriMatcher del ContentProvider no reconoce -> IllegalArgumentException en el hilo del
+        // executor, y updateLocationForSync(-1) marcaba SYNC_PENDING una fila inexistente.
+        final boolean isPersisted = locationId >= 0;
 
         if (mHasConnectivity && mConfig.hasValidUrl()) {
             if (postLocation(location)) {
-                mLocationDAO.deleteLocationById(locationId);
+                if (isPersisted) {
+                    mLocationDAO.deleteLocationById(locationId);
+                }
 
                 return; // if posted successfully do nothing more
-            } else {
+            } else if (isPersisted) {
                 mLocationDAO.updateLocationForSync(locationId);
             }
-        } else {
+        } else if (isPersisted) {
             mLocationDAO.updateLocationForSync(locationId);
         }
 
-        if (mConfig.hasValidSyncUrl()) {
+        // v5.0.1 — R15: antes exigía syncUrl; con solo `url` los fallos no se reintentaban nunca.
+        if (mConfig.hasEffectiveSyncUrl()) {
             Integer configThreshold = mConfig.getSyncThreshold();
             int threshold = (configThreshold != null) ? configThreshold : 100;
             long syncLocationsCount = mLocationDAO.getLocationsForSyncCount(System.currentTimeMillis());
-            if (syncLocationsCount >= threshold) {
+            // v5.0.1 — `> 0` ademas del umbral: con `syncThreshold: 0` (que v4 aceptaba y 5.0.1
+            // vuelve a aceptar) la condicion `>= 0` es siempre cierta, asi que se pedia un sync al
+            // framework en CADA posicion aunque no hubiera nada pendiente — ~8600 arranques del
+            // proceso :sync al dia sin enviar nada.
+            if (syncLocationsCount > 0 && syncLocationsCount >= threshold) {
                 logger.debug("Attempt to sync locations: {} threshold: {}", syncLocationsCount, threshold);
                 mTaskListener.onSyncRequested();
             }
@@ -239,16 +262,23 @@ public class PostLocationTask {
         boolean isStatusOkay = responseCode >= 200 && responseCode < 300;
 
         if (!isStatusOkay) {
-            // Distinguish permanent from transient. A 4xx (other than 401/408/429) means the
-            // payload itself is unacceptable, so retrying it forever can never succeed — it just
-            // grows the queue without bound and blocks everything behind it. Treat those as
-            // "consumed" so the location leaves the queue, and log loudly enough to diagnose.
+            // v5.0.1 — CORRECCION DE REGRESION. v5.0.0 devolvia `true` en los 4xx "permanentes"
+            // para que la posicion saliera de la cola, con el argumento de que reintentar un
+            // payload invalido no puede tener exito. El efecto real en produccion fue mucho peor:
+            // `post()` interpreta `true` como "entregada" y hace deleteLocationById(), asi que un
+            // backend devolviendo 400 durante un despliegue —o un bug de serializacion del propio
+            // plugin— BORRABA cada posicion del turno sin dejar rastro ni cola.
+            //
+            // v4 devolvia false para cualquier no-2xx y la posicion caia a updateLocationForSync(),
+            // esperando al syncUrl. Se restaura ese comportamiento: perder datos del cliente nunca
+            // es preferible a una cola que crece, y `maxLocations` ya acota la tabla.
+            // El log distingue permanente de transitorio para poder diagnosticar sin borrar nada.
             if (isPermanentHttpFailure(responseCode)) {
-                logger.error("Server rejected location permanently (HTTP {}). Dropping it instead "
-                        + "of retrying forever; check url/postTemplate/httpHeaders.", responseCode);
-                return true;
+                logger.error("Server rejected location (HTTP {}). Queued for sync instead of "
+                        + "dropping; check url/postTemplate/httpHeaders.", responseCode);
+            } else {
+                logger.warn("Server error while posting locations responseCode: {}", responseCode);
             }
-            logger.warn("Server error while posting locations responseCode: {}", responseCode);
             return false;
         }
 

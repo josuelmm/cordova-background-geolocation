@@ -188,4 +188,31 @@ public class ConfigTest {
         Assert.assertEquals(Config.getDefault().getUrl(), Config.merge(config1, config2).getUrl());
         Assert.assertEquals(Config.getDefault().getSyncUrl(), Config.merge(config1, config2).getSyncUrl());
     }
+
+    /**
+     * v5.0.1 — un `maxAcceptedAccuracy: null` explícito debe APAGAR el filtro. Sin el flag de
+     * reset, merge() lo ignoraba (semántica de actualización parcial) y quien había configurado
+     * el filtro no podía volver a desactivarlo: seguía descartando todos los fixes para siempre.
+     */
+    @Test
+    public void testMaxAcceptedAccuracyCanBeResetToNull() {
+        Config stored = new Config();
+        stored.setMaxAcceptedAccuracy(50f);
+
+        Config update = new Config();
+        update.setResetMaxAcceptedAccuracy(true);
+
+        Assert.assertNull(Config.merge(stored, update).getMaxAcceptedAccuracy());
+    }
+
+    /** Sin el flag, un null sigue significando "no tocar" (actualización parcial). */
+    @Test
+    public void testMaxAcceptedAccuracyNullWithoutResetKeepsStoredValue() {
+        Config stored = new Config();
+        stored.setMaxAcceptedAccuracy(50f);
+
+        Config update = new Config();
+
+        Assert.assertEquals(Float.valueOf(50f), Config.merge(stored, update).getMaxAcceptedAccuracy());
+    }
 }

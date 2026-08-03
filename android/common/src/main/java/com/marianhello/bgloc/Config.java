@@ -112,6 +112,8 @@ public class Config implements Parcelable
     private Integer activityConfidenceThreshold;
     /** Discard fixes whose `accuracy` (m) is worse than this. `null` (default) disables the filter. */
     private Float maxAcceptedAccuracy;
+    /** v5.0.1 — ver {@link #isResetMaxAcceptedAccuracy()}. Transitorio, no se parcela. */
+    private transient boolean resetMaxAcceptedAccuracy = false;
 
     /** v4.0 Phase 6 + v4.1: driver-insights configuration. Plain holder; no Parcelable to keep this class diff small. */
     public static class DrivingEventsOptions {
@@ -732,6 +734,28 @@ public class Config implements Parcelable
         return syncUrl;
     }
 
+    /**
+     * v5.0.1 — R15: destino efectivo del sync por lote.
+     *
+     * <p>Con `url` configurada y `syncUrl` vacía, los POST fallidos se marcaban SYNC_PENDING y
+     * ahí se quedaban: el único lector de esas filas es el SyncAdapter, que abortaba por no haber
+     * syncUrl. Se acumulaban hasta que `maxLocations` las reciclaba — justo lo contrario de lo que
+     * promete el Javadoc de PostLocationTask ("all failed to post locations are coalesced and
+     * send in some time later in one single batch"). Si no hay syncUrl, se reintenta contra `url`.
+     */
+    public String getEffectiveSyncUrl() {
+        if (syncUrl != null && !syncUrl.isEmpty()) {
+            return syncUrl;
+        }
+        return url;
+    }
+
+    /** v5.0.1 — R15: true si hay algún destino al que reintentar (syncUrl o, en su defecto, url). */
+    public boolean hasEffectiveSyncUrl() {
+        String effective = getEffectiveSyncUrl();
+        return effective != null && !effective.isEmpty();
+    }
+
     public void setSyncUrl(String syncUrl) {
         this.syncUrl = syncUrl;
     }
@@ -853,6 +877,18 @@ public class Config implements Parcelable
     public void setActivityConfidenceThreshold(Integer v) { this.activityConfidenceThreshold = v; }
     @Nullable public Float getMaxAcceptedAccuracy() { return maxAcceptedAccuracy; }
     public void setMaxAcceptedAccuracy(Float v) { this.maxAcceptedAccuracy = v; }
+
+    /**
+     * v5.0.1 — paridad con {@code MAURConfig.resetMaxAcceptedAccuracy}. Marca un
+     * {@code maxAcceptedAccuracy: null} EXPLÍCITO en el JSON de configure(), que significa
+     * "desactiva el filtro". Sin esto, merge() ignora los null (semántica de actualización
+     * parcial) y el filtro no se podía apagar nunca.
+     *
+     * <p>Transitorio a propósito: solo vive entre ConfigMapper.fromJSONObject() y Config.merge(),
+     * ambos en el mismo proceso y sin viaje por Parcel. No se persiste ni se serializa.
+     */
+    public boolean isResetMaxAcceptedAccuracy() { return resetMaxAcceptedAccuracy; }
+    public void setResetMaxAcceptedAccuracy(boolean v) { this.resetMaxAcceptedAccuracy = v; }
 
     public boolean hasShowTime() {
         return showTime != null;
@@ -1170,7 +1206,12 @@ public class Config implements Parcelable
         if (config2.stationaryPollFast != null) merger.setStationaryPollFast(config2.stationaryPollFast);
         // v4.5.4
         if (config2.activityConfidenceThreshold != null) merger.setActivityConfidenceThreshold(config2.activityConfidenceThreshold);
-        if (config2.maxAcceptedAccuracy != null) merger.setMaxAcceptedAccuracy(config2.maxAcceptedAccuracy);
+        // v5.0.1 — el reset explícito gana sobre la semántica de "null = no tocar".
+        if (config2.resetMaxAcceptedAccuracy) {
+            merger.setMaxAcceptedAccuracy(null);
+        } else if (config2.maxAcceptedAccuracy != null) {
+            merger.setMaxAcceptedAccuracy(config2.maxAcceptedAccuracy);
+        }
 
         return merger;
     }

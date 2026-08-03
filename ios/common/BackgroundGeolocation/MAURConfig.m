@@ -6,6 +6,7 @@
 //
 
 #import "MAURConfig.h"
+#import "MAURLogging.h"
 
 #define isNull(value) (value == nil || value == (id)[NSNull null])
 #define isNotNull(value) (value != nil && value != (id)[NSNull null])
@@ -98,6 +99,9 @@
         instance.httpMethod = [(NSString*)config[@"httpMethod"] uppercaseString];
     }
     if (isNotNull(config[@"syncHttpMethod"])) {
+        // v5.0.1 — R14: 'GET' se RECHAZA en -validate:, igual que en ConfigMapper de Android (la
+        // URL de sync se resuelve con location:nil, así que no se sustituye ningún placeholder por
+        // posición: un 200 borraría el lote con cero datos). Aquí solo se normaliza.
         instance.syncHttpMethod = [(NSString*)config[@"syncHttpMethod"] uppercaseString];
     }
     if (isNotNull(config[@"httpMode"])) {
@@ -153,10 +157,12 @@
     }
     if (config[@"postTemplate"] != nil) {
         instance._template = config[@"postTemplate"];
+        instance.hasUserTemplate = YES;
     }
     // bodyTemplate (alias of postTemplate)
     if (config[@"bodyTemplate"] != nil) {
         instance._template = config[@"bodyTemplate"];
+        instance.hasUserTemplate = YES;
     }
 
     return instance;
@@ -263,6 +269,10 @@
     }
     if ([newConfig hasTemplate]) {
         merger._template = newConfig._template;
+        // v5.0.1 — B7: el flag viaja con el template.
+        if (newConfig.hasUserTemplate) {
+            merger.hasUserTemplate = YES;
+        }
     }
 
     return merger;
@@ -301,6 +311,9 @@
         copy._pauseLocationUpdates = _pauseLocationUpdates;
         copy.locationProvider = locationProvider;
         copy._template = _template;
+        // v5.0.1 — B7: sin esto, el `[config copy]` de +merge: perdia el flag y getConfig()
+        // volvia a devolver `null` en un postTemplate que el usuario si habia configurado.
+        copy.hasUserTemplate = self.hasUserTemplate;
     }
     
     return copy;
@@ -376,6 +389,26 @@
 - (BOOL) hasValidSyncUrl
 {
     return syncUrl != nil && syncUrl.length > 0;
+}
+
+/**
+ * v5.0.1 — R15 (paridad con Config.getEffectiveSyncUrl() de Android). Sin syncUrl, los POST
+ * fallidos se marcaban SyncPending y ahí se quedaban para siempre: el único lector es -sync, que
+ * abortaba justo por no haber syncUrl. Se acumulaban hasta que maxLocations los reciclaba, que es
+ * lo contrario de lo que promete la documentación. `url` actúa de destino de reserva.
+ */
+- (NSString*) effectiveSyncUrl
+{
+    if (syncUrl != nil && syncUrl.length > 0) {
+        return syncUrl;
+    }
+    return self.url;
+}
+
+- (BOOL) hasEffectiveSyncUrl
+{
+    NSString *effective = [self effectiveSyncUrl];
+    return effective != nil && effective.length > 0;
 }
 
 - (void) setSyncUrl:(NSString*)newSyncUrl
@@ -558,9 +591,6 @@
              @"events": @"@events",
              @"battery": @"@battery",
              @"isCharging": @"@isCharging",
-             // v4.5.6 — D24: expose the mock/simulated flag so `mockLocationPolicy: 'flag'`
-             // actually marks the payload. Android sends the equivalent isFromMockProvider.
-             @"mocked": @"@simulated",
              };
 }
 
@@ -622,7 +652,11 @@
     if (self.heartbeatInterval != nil) [dict setObject:self.heartbeatInterval forKey:@"heartbeatInterval"];
     if (self.mockLocationPolicy != nil) [dict setObject:self.mockLocationPolicy forKey:@"mockLocationPolicy"];
     if (self.drivingEvents != nil) [dict setObject:self.drivingEvents forKey:@"drivingEvents"];
-    if (self.includeBattery != nil) [dict setObject:self.includeBattery forKey:@"includeBattery"];
+    // v5.0.1 — B7: paridad de FORMA con ConfigMapper.toJSONObject() de Android, que siempre emite
+    // includeBattery con su valor efectivo (true por defecto). iOS lo omitia si nunca se habia
+    // fijado, asi que `if (cfg.includeBattery === false)` daba resultados opuestos por plataforma
+    // aunque el comportamiento efectivo fuese el mismo (nil se trata como ON en el facade).
+    [dict setObject:(self.includeBattery ?: @YES) forKey:@"includeBattery"];
     if (self.activityConfidenceThreshold != nil) [dict setObject:self.activityConfidenceThreshold forKey:@"activityConfidenceThreshold"];
     if (self.maxAcceptedAccuracy != nil) [dict setObject:self.maxAcceptedAccuracy forKey:@"maxAcceptedAccuracy"];
     if ([self hasStationaryRadius]) [dict setObject:self.stationaryRadius forKey:@"stationaryRadius"];
@@ -636,7 +670,14 @@
     if ([self hasMaxLocations]) [dict setObject:self.maxLocations forKey:@"maxLocations"];
     if ([self hasPauseLocationUpdates]) [dict setObject:self._pauseLocationUpdates forKey:@"pauseLocationUpdates"];
     if ([self hasLocationProvider]) [dict setObject:self.locationProvider forKey:@"locationProvider"];
-    [dict setObject:self._template forKey:@"postTemplate"];
+    // v5.0.1 — B7: Android emite `postTemplate: null` cuando el usuario no configuro ninguno;
+    // iOS devolvia SIEMPRE el template por defecto ya materializado, asi que comprobar
+    // `cfg.postTemplate == null` para saber si se habia personalizado el payload fallaba en iOS.
+    // Se decide con el flag, NO con el ivar: el getter -_template materializa el default y lo
+    // invoca cualquiera (incluido -description, o sea el log de configure()), asi que mirar el
+    // ivar daba una respuesta dependiente del timing — peor que ser consistentemente incorrecta.
+    [dict setObject:(self.hasUserTemplate ? self._template : (NSObject *)[NSNull null])
+             forKey:@"postTemplate"];
 
     return dict;
 }
@@ -645,6 +686,92 @@
 {
     return [NSString stringWithFormat:@"Config: distanceFilter=%@ stationaryRadius=%@ desiredAccuracy=%@ activityType=%@ activitiesInterval=%@ isDebugging=%@ stopOnTerminate=%@ url=%@ syncThreshold=%@ maxLocations=%@ httpHeaders=%@ pauseLocationUpdates=%@ saveBatteryOnBackground=%@ locationProvider=%@ postTemplate=%@", self.distanceFilter, self.stationaryRadius, self.desiredAccuracy, self.activityType, self.activitiesInterval, self._debug, self._stopOnTerminate, self.url, self.syncThreshold, self.maxLocations, self.httpHeaders, self._pauseLocationUpdates, self._saveBatteryOnBackground, self.locationProvider, self._template];
 
+}
+
+@end
+
+#pragma mark - v5.0.1 (B1) validacion, paridad con ConfigMapper.validate() de Android
+
+static NSString * const MAURConfigErrorDomain = @"com.marianhello";
+
+static NSError * MAURConfigError(NSString *message)
+{
+    return [NSError errorWithDomain:MAURConfigErrorDomain
+                               code:1002 /* MAURBGConfigureError */
+                           userInfo:@{ NSLocalizedDescriptionKey: message }];
+}
+
+/** nil pasa (semantica de actualizacion parcial); un valor presente debe estar en la lista. */
+static BOOL MAURRequireOneOfString(NSString *name, NSString *value, NSArray *allowed, NSError * __autoreleasing *outError)
+{
+    if (value == nil) return YES;
+    for (NSString *candidate in allowed) {
+        if ([candidate caseInsensitiveCompare:value] == NSOrderedSame) return YES;
+    }
+    if (outError != NULL) {
+        *outError = MAURConfigError([NSString stringWithFormat:@"%@ must be one of %@, got '%@'",
+                                     name, [allowed componentsJoinedByString:@", "], value]);
+    }
+    return NO;
+}
+
+static BOOL MAURRequireNonNegative(NSString *name, NSNumber *value, NSError * __autoreleasing *outError)
+{
+    if (value == nil) return YES;
+    if ([value doubleValue] >= 0) return YES;
+    if (outError != NULL) {
+        *outError = MAURConfigError([NSString stringWithFormat:@"%@ must be >= 0, got %@", name, value]);
+    }
+    return NO;
+}
+
+static BOOL MAURRequireRange(NSString *name, NSNumber *value, double min, double max, NSError * __autoreleasing *outError)
+{
+    if (value == nil) return YES;
+    double v = [value doubleValue];
+    if (v >= min && v <= max) return YES;
+    if (outError != NULL) {
+        *outError = MAURConfigError([NSString stringWithFormat:@"%@ must be between %g and %g, got %@",
+                                     name, min, max, value]);
+    }
+    return NO;
+}
+
+@implementation MAURConfig (MAURValidation)
+
+- (BOOL) validate:(NSError * __autoreleasing *)outError
+{
+    if (self.locationProvider != nil) {
+        int p = [self.locationProvider intValue];
+        if (p != 0 && p != 1 && p != 2) {
+            if (outError != NULL) {
+                *outError = MAURConfigError([NSString stringWithFormat:
+                        @"locationProvider must be one of 0, 1, 2, got %@", self.locationProvider]);
+            }
+            return NO;
+        }
+    }
+
+    if (!MAURRequireNonNegative(@"stationaryRadius", self.stationaryRadius, outError)) return NO;
+    if (!MAURRequireNonNegative(@"distanceFilter", self.distanceFilter, outError)) return NO;
+    if (!MAURRequireNonNegative(@"activitiesInterval", self.activitiesInterval, outError)) return NO;
+    if (!MAURRequireNonNegative(@"heartbeatInterval", self.heartbeatInterval, outError)) return NO;
+    // 0 se acepta a proposito en ambos: syncThreshold 0 = sincronizar en cada posicion,
+    // maxLocations 0 = no persistir. v4 los aceptaba y hay apps en produccion con esos valores.
+    if (!MAURRequireNonNegative(@"syncThreshold", self.syncThreshold, outError)) return NO;
+    if (!MAURRequireNonNegative(@"maxLocations", self.maxLocations, outError)) return NO;
+    if (!MAURRequireNonNegative(@"maxAcceptedAccuracy", self.maxAcceptedAccuracy, outError)) return NO;
+    if (!MAURRequireRange(@"activityConfidenceThreshold", self.activityConfidenceThreshold, 0, 100, outError)) return NO;
+
+    if (!MAURRequireOneOfString(@"httpMethod", self.httpMethod, @[@"POST", @"GET", @"PUT", @"PATCH"], outError)) return NO;
+    // R14: GET fuera del sync — la URL se resuelve con location:nil, asi que no se sustituye
+    // ningun placeholder por posicion y un 200 borraria el lote con cero datos.
+    if (!MAURRequireOneOfString(@"syncHttpMethod", self.syncHttpMethod, @[@"POST", @"PUT", @"PATCH"], outError)) return NO;
+    if (!MAURRequireOneOfString(@"httpMode", self.httpMode, @[@"batch", @"single"], outError)) return NO;
+    if (!MAURRequireOneOfString(@"syncMode", self.syncMode, @[@"batch", @"single"], outError)) return NO;
+    if (!MAURRequireOneOfString(@"mockLocationPolicy", self.mockLocationPolicy, @[@"allow", @"flag", @"drop"], outError)) return NO;
+
+    return YES;
 }
 
 @end

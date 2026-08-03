@@ -54,6 +54,11 @@ public class ContentProviderLocationDAO implements LocationDAO {
                     whereArgs,
                     LocationEntry.COLUMN_NAME_TIME + " ASC"
             );
+            // v5.0.1 — ContentResolver.query() devuelve null si el proceso del provider
+            // murio (el proceso :sync compite con el principal): NPE en produccion.
+            if (cursor == null) {
+                return locations;
+            }
             while (cursor.moveToNext()) {
                 locations.add(BackgroundLocation.fromCursor(cursor));
             }
@@ -100,6 +105,11 @@ public class ContentProviderLocationDAO implements LocationDAO {
                     null,
                     null
             );
+            // v5.0.1 — ContentResolver.query() devuelve null si el proceso del provider
+            // murio (el proceso :sync compite con el principal): NPE en produccion.
+            if (cursor == null) {
+                return location;
+            }
             while (cursor.moveToNext()) {
                 location = BackgroundLocation.fromCursor(cursor);
                 if (!cursor.isLast()) {
@@ -163,6 +173,11 @@ public class ContentProviderLocationDAO implements LocationDAO {
                     null
                     );
 
+            // v5.0.1 — ContentResolver.query() devuelve null si el proceso del provider
+            // murio (el proceso :sync compite con el principal): NPE en produccion.
+            if (cursor == null) {
+                return location;
+            }
             while (cursor.moveToNext()) {
                 location = BackgroundLocation.fromCursor(cursor);
                 if (!cursor.isLast()) {
@@ -205,6 +220,11 @@ public class ContentProviderLocationDAO implements LocationDAO {
                     null
             );
 
+            // v5.0.1 — ContentResolver.query() devuelve null si el proceso del provider
+            // murio (el proceso :sync compite con el principal): NPE en produccion.
+            if (cursor == null) {
+                return location;
+            }
             while (cursor.moveToNext()) {
                 location = BackgroundLocation.fromCursor(cursor);
                 if (!cursor.isLast()) {
@@ -301,7 +321,13 @@ public class ContentProviderLocationDAO implements LocationDAO {
                     null
             );
 
-            cursor.moveToFirst();
+            // v5.0.1 — ContentResolver.query() devuelve null si el proceso del provider
+            // murio (el proceso :sync compite con el principal): NPE en produccion.
+            // v5.0.1 — tabla vacia: moveToFirst() devolvia false y getLong(0) lanzaba
+            // CursorIndexOutOfBoundsException.
+            if (cursor == null || !cursor.moveToFirst() || cursor.isNull(0)) {
+                return null;
+            }
             return LocationContentProvider.buildUriWithId(mAuthority, cursor.getLong(0));
         } finally {
             if (cursor != null) {
@@ -340,12 +366,17 @@ public class ContentProviderLocationDAO implements LocationDAO {
             return persistLocation(location);
         }
 
-        ArrayList<ContentProviderOperation> operations = new ArrayList<ContentProviderOperation>();
-
-        // TODO: move this logic as separate action somewhere else
-        // TODO: add db vaccum
-        if (rowCount > maxRows) {
-            // delete some locations to reduce their count to maxRows
+        // v5.0.1 — antes esto encolaba un DELETE de las (rowCount - maxRows) filas más antiguas
+        // por `time` y, en el MISMO applyBatch, un UPDATE sobre getOldestLocationUri() — que es
+        // justo una de las filas que el DELETE acababa de borrar. El UPDATE afectaba a 0 filas:
+        // la posición no se guardaba y se devolvía el id de una fila inexistente, que el llamante
+        // usaba luego para borrar/marcar. Ocurría siempre que la tabla superaba maxLocations (al
+        // bajar el límite o al actualizar desde una BD ya crecida).
+        //
+        // Ahora: se recorta a maxRows - 1 y se inserta. El resultado final es el mismo (la tabla
+        // queda exactamente en maxRows) sin depender de reciclar una fila concreta.
+        long toDelete = rowCount - maxRows + 1;
+        if (toDelete > 0) {
             String selection = new StringBuilder()
                     .append(LocationEntry._ID)
                     .append(" IN (SELECT ").append(LocationEntry._ID)
@@ -354,45 +385,22 @@ public class ContentProviderLocationDAO implements LocationDAO {
                     .append(" LIMIT ?)")
                     .toString();
 
+            ArrayList<ContentProviderOperation> operations = new ArrayList<ContentProviderOperation>();
             operations.add(
                     ContentProviderOperation.newDelete(mContentUri)
-                    .withSelection(selection, new String[] {(String.valueOf(rowCount - maxRows))})
+                    .withSelection(selection, new String[] { String.valueOf(toDelete) })
                     .build()
             );
+
+            try {
+                mResolver.applyBatch(mAuthority, operations);
+            } catch (Exception e) {
+                logger.error("Error trimming locations to maxRows {}: {}", maxRows, e.getMessage());
+                return -1;
+            }
         }
 
-        // Resolve the recycled row's id BEFORE the batch runs, and return it.
-        // This used to `return 0`, which was harmless only because nothing called this overload.
-        // Now that PostLocationTask honours maxLocations, returning 0 would make the caller do
-        // setLocationId(0) and then deleteLocationById(0) after a successful POST — deleting the
-        // wrong row (or none) while the location actually sent stayed behind and was resent.
-        Uri oldestUri = getOldestLocationUri();
-        if (oldestUri == null) {
-            logger.warn("No recyclable row found, falling back to insert");
-            return persistLocation(location);
-        }
-        long recycledId;
-        try {
-            recycledId = Long.parseLong(oldestUri.getLastPathSegment());
-        } catch (NumberFormatException e) {
-            logger.error("Unparseable location uri {}: {}", oldestUri, e.getMessage());
-            return -1;
-        }
-
-        operations.add(
-                ContentProviderOperation.newUpdate(oldestUri)
-                    .withValues(location.toContentValues())
-                    .build()
-        );
-
-        try {
-            mResolver.applyBatch(mAuthority, operations);
-        } catch (Exception e) {
-            logger.error("Error persisting location (maxRows: {}): {}", maxRows, e.getMessage());
-            return -1;
-        }
-
-        return recycledId;
+        return persistLocation(location);
     }
 
     @Override
@@ -426,8 +434,27 @@ public class ContentProviderLocationDAO implements LocationDAO {
     }
 
     @Override
+    /**
+     * v5.0.1 — borrado LÓGICO, igual que {@code SQLiteLocationDAO.deleteLocationById} y que
+     * {@code BatchManager.setBatchCompleted} (R1). Este DAO era el único que borraba físicamente:
+     * un POST correcto en tiempo real hacía desaparecer la fila, así que {@code getLocations()} se
+     * vaciaba igual que con el bug R1 pero por la ruta de tiempo real en vez de por la de lote.
+     * `maxLocations` es lo que acota la tabla.
+     *
+     * <p>Un id negativo (persistLocation devolvió -1) construye una URI que el UriMatcher del
+     * provider no reconoce -> IllegalArgumentException en el hilo del executor.
+     */
     public void deleteLocationById(long locationId) {
-        mResolver.delete(LocationContentProvider.buildUriWithId(mAuthority, locationId), null, null);
+        if (locationId < 0) {
+            return;
+        }
+        ContentValues values = new ContentValues();
+        values.put(LocationEntry.COLUMN_NAME_STATUS, BackgroundLocation.DELETED);
+
+        String whereClause = LocationEntry._ID + " = ?";
+        String[] whereArgs = { String.valueOf(locationId) };
+
+        mResolver.update(mContentUri, values, whereClause, whereArgs);
     }
 
     @Override
@@ -443,8 +470,17 @@ public class ContentProviderLocationDAO implements LocationDAO {
     }
 
     @Override
+    /**
+     * v5.0.1 — borrado LÓGICO, igual que {@code SQLiteLocationDAO.deleteAllLocations}. El borrado
+     * físico hacía que {@code getValidLocationsAndDelete()} destruyera también las filas
+     * SYNC_PENDING que aún no se habían enviado: la app pedía "dame lo pendiente" y perdía lo que
+     * no cabía en esa lectura.
+     */
     public int deleteAllLocations() {
-        return mResolver.delete(mContentUri, null, null);
+        ContentValues values = new ContentValues();
+        values.put(LocationEntry.COLUMN_NAME_STATUS, BackgroundLocation.DELETED);
+
+        return mResolver.update(mContentUri, values, null, null);
     }
 
     @Override

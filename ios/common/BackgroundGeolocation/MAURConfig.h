@@ -33,7 +33,7 @@ enum {
 @property NSMutableDictionary* httpHeaders;
 // v3.3 Phase 2: backend-agnostic HTTP transport
 @property NSString *httpMethod;        // POST | GET | PUT | PATCH (default POST)
-@property NSString *syncHttpMethod;    // POST | GET | PUT | PATCH (default POST)
+@property NSString *syncHttpMethod;    // POST | PUT | PATCH (default POST). GET se rechaza en -validate: (R14)
 @property NSString *httpMode;          // batch | single (default batch)
 @property NSString *syncMode;          // batch | single (default batch)
 @property NSMutableDictionary* queryParams; // static placeholder values for URL templating
@@ -61,10 +61,17 @@ enum {
 @property NSNumber *_pauseLocationUpdates;
 @property NSNumber *locationProvider;
 @property NSObject *_template;
+/** v5.0.1 — B7: YES solo si el JS pasó `postTemplate`/`bodyTemplate` explícitamente. El getter
+ *  `-_template` materializa el template por defecto en cuanto alguien lo lee (y lo lee
+ *  `-description`, o sea el propio log de configure()), así que mirar el ivar para decidir si
+ *  `getConfig()` debe devolver `null` daba un resultado dependiente del timing. Este flag no
+ *  depende de cuándo se haya leído nada. */
+@property (nonatomic) BOOL hasUserTemplate;
 
 - (instancetype) initWithDefaults;
 + (instancetype) fromDictionary:(NSDictionary*)config;
 + (instancetype) merge:(MAURConfig*)config withConfig:(MAURConfig*)newConfig;
+
 + (NSDictionary*) getDefaultTemplate;
 
 - (BOOL) hasStationaryRadius;
@@ -77,6 +84,9 @@ enum {
 - (BOOL) hasValidUrl;
 - (BOOL) hasSyncUrl;
 - (BOOL) hasValidSyncUrl;
+/** v5.0.1 — R15: `syncUrl` o, si está vacío, `url` como destino de reserva para los reintentos. */
+- (NSString*) effectiveSyncUrl;
+- (BOOL) hasEffectiveSyncUrl;
 - (BOOL) hasSyncThreshold;
 - (BOOL) hasSyncEnabled;
 - (BOOL) syncEnabled;
@@ -100,5 +110,19 @@ enum {
 - (NSDictionary*) toDictionary;
 
 @end;
+
+/**
+ * v5.0.1 — paridad con ConfigMapper.validate() de Android. Devuelve NO y rellena outError si algún
+ * valor está fuera de rango o no pertenece al conjunto permitido. Sin esto, iOS aceptaba
+ * `locationProvider: 3` o `httpMode: 'batched'`, los PERSISTÍA en SQLite y fallaba mucho después
+ * (o caía a un default en silencio), con el valor malo ya guardado para los siguientes arranques.
+ *
+ * Se declara en una categoría —y no en la @interface principal— porque su implementación vive en
+ * `@implementation MAURConfig (MAURValidation)`; declararla arriba hacía que clang avisara con
+ * -Wincomplete-implementation en cada build.
+ */
+@interface MAURConfig (MAURValidation)
+- (BOOL) validate:(NSError * __autoreleasing *)outError;
+@end
 
 #endif /* MAURConfig_h */

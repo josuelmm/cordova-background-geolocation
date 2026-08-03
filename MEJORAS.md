@@ -13,7 +13,7 @@
 > |---|---|---|
 > | 1. Android (A1–A21) | 21 | **21 cerrados.** A8 y A16 estaban parciales y se cerraron; A5 tenía una regresión introducida al arreglarlo (ver abajo) y también se cerró |
 > | 2. HTTP/sync/persistencia (B1–B23) | 23 | 23 cerrados (verificado símbolo por símbolo) |
-> | 3. Config/puente/build (C1–C17) | 17 | 17 cerrados. C5 se completó añadiendo `mocked` al template default de Android (iOS ya lo tenía) |
+> | 3. Config/puente/build (C1–C17) | 17 | 17 cerrados. **C5 revisado en 5.0.1:** se había cerrado añadiendo `mocked` al template por defecto; eso cambiaba el payload de todos los backends sin pedirlo y se revirtió (R2). La afirmación "iOS ya lo tenía" era falsa: v4 iOS tenía 0 ocurrencias de `mocked`. Ahora `@mocked` se resuelve pero hay que declararlo en el `postTemplate` |
 > | 4. iOS (D1–D30) | 30 | 30 cerrados a nivel de código |
 > | 5. JS/Angular (E1–E19) | 19 | 19 cerrados |
 > | 6. Driving events (F1–F19) | 19 | 19 cerrados. F4 requirió una segunda pasada (ver abajo) |
@@ -72,18 +72,118 @@
 >   hermano en vuelo. Eliminada: esas filas huérfanas ya las rescata
 >   `restoreStaleSyncLocationsOlderThan:` al inicio de cada ventana de sync. Ahora solo se loguea.
 >
+> ### Regresiones v4 → v5 (auditoría del 2026-08-01)
+>
+> Un fallo en producción (HTTP 400 en el 100% de las posiciones) destapó que las ~132 correcciones
+> de v5.0.0 se verificaron **por separado pero nunca en combinación**, y que varias eliminaron
+> comportamiento del que dependían consumidores reales. Se auditó el diff `2486d97..HEAD` buscando
+> específicamente comportamiento **eliminado**.
+>
+> **Corregido en 5.0.1** (detalle en `CHANGELOG.md`): 4xx borraba la posición en vez de encolarla ·
+> `batch`+form-urlencoded enviaba `locations=<json>` · `charset=UTF-8` desactivaba el aplanado ·
+> `postTemplate` array daba 200 sin enviar nada · corte de red duplicaba items · HTTP 285
+> enmascarado · Angular `subscribe(cb)` ignorado · iOS `Content-Type` duplicado en sync ·
+> `syncThreshold:0` / `maxLocations:0` rechazados.
+>
+> **Estado tras 5.0.1: 15 de 15 revisadas.** 9 corregidas, 6 mantenidas con justificación
+> explícita, 0 sin corregir.
+>
+> **Corrección de clasificación (verificada contra el árbol de v4):** de esas 8, **R11 y R15 no eran
+> regresiones de v5.0.0**. Ambas ya se comportaban igual en v4 — `SyncAdapter` de v4 nunca leyó
+> `getSyncMode()`, y `PostLocationTask` de v4 ya abortaba sin `syncUrl`. Están corregidas, pero
+> como deuda heredada y paridad nueva, no como algo que v5.0.0 rompiera. Regresiones reales de
+> v5.0.0 en esta tabla: 6 (R1, R2, R6, R10, R13, R14).
+>
+> | # | Regresión | Estado |
+> |---|---|---|
+> | R1 | `getLocations()` vaciado por el borrado físico del lote | **Corregida** — vuelve el soft-delete; `maxLocations` acota |
+> | R2 | `mocked` añadido al template por defecto (ambas plataformas) | **Corregida** — revertido |
+> | R6 | `READ_TIMEOUT` 120 s → 30 s rompía lotes grandes | **Corregida** — 30 s por posición, 120 s por lote |
+> | R10 | `radio.js` descartaba `[fn, contextoB]` | **Corregida** — identidad = par (callback, contexto) |
+> | R11 | Android ignoraba `syncMode` | **Corregida, pero mal clasificada aquí** — v4 tampoco leía `getSyncMode()` (0 ocurrencias en `SyncAdapter` v4). No es regresión de v5.0.0: es *feature a medias desde v4* + paridad nueva con iOS. Ahora se honra `single` |
+> | R13 | `androidx` exige compileSdk 34 con `<engine>` en 12 | **Corregida** — motor mínimo 13 |
+> | R14 | `syncHttpMethod:'GET'` borraba el lote con 200 | **Corregida** — rechazado en `validate()` |
+> | R15 | `url` sin `syncUrl` no reintentaba nunca | **Corregida, pero mal clasificada aquí** — v4 ya exigía `hasValidSyncUrl()` (`PostLocationTask.java:157` en v4). No es regresión de v5.0.0: es *agujero heredado de v4* que el Javadoc contradecía. Ahora `url` actúa de destino de reserva |
+> | R3 | `mockLocationsEnabled` siempre null | **Se mantiene** — v4 devolvía `false` siempre (API 23 retiró el ajuste): era una falsa confianza. Usa `@mocked` |
+> | R4 | Sync periódico de 15 min | **Se mantiene** — sin él se perdían los pendientes al fin de turno. Opt-out: `syncEnabled: false` |
+> | R5 | `checkStatus()` pasa a OR de permisos | **Se mantiene** — el servicio arranca con COARSE. Para distinguir: `getDiagnostics().fineLocationGranted` |
+> | R7 | `tripEnd`: duración y distancia | **Se mantiene** — corrige falsos positivos. Revisa si facturas por km |
+> | R8 | `speeding` con histéresis y cooldown | **Se mantiene** — evita ráfagas al cruzar el límite |
+> | R9 | `.d.ts`: `on()` devuelve `EventSubscription` | **Se mantiene** — el tipo de v4 no describía el runtime. Rompe compilación, no ejecución |
+> | R12 | iOS no aplana en la ruta de sync | **Corregida** — `MAURBackgroundSync` construye el cuerpo según el `Content-Type` configurado: con form-urlencoded fuerza la ruta por-posición (una petición plana por ubicación, igual que Android) y aplana `clave=valor` reutilizando la lógica de `MAURPostLocationTask`. **Sin compilar en Xcode**: verificado solo con clang + stubs |
+>
+> ### Segunda auditoría (02-08): 15 fallos más, fuera de la tabla R1–R15
+>
+> La tabla de arriba cubre el diff v4 → v5. Auditando el **árbol completo** (Android a fondo +
+> paridad Android/iOS campo a campo) aparecieron 15 fallos que R1–R15 no podía ver porque no eran
+> diferencias contra v4. Todos corregidos; detalle en `CHANGELOG.md`.
+>
+> | # | Qué | Plataforma |
+> |---|---|---|
+> | A1 | `setBatchPartiallyCompleted` seguía en borrado físico (R1 estaba a medias) | Android |
+> | A2 | `acceptedOut` sin `try/finally`: duplicados en cada corte de red | Android |
+> | A3 | `HTTP 285` tragado también en el bucle per-item de sync | Android |
+> | A4 | `maxLocations: 0` significaba ilimitado, no "no persistir" | Android |
+> | A5 | `persistLocation(maxRows)` borraba la fila que después actualizaba | Android |
+> | A6 | `deleteLocationById(-1)` lanzaba `IllegalArgumentException` | Android |
+> | A7 | El sync periódico de 15 min nunca drenaba (le aplicaba `syncThreshold`) | Android |
+> | A8 | Placeholder sin resolver salía como literal `"@heading"` en tiempo real | Android |
+> | A9 | `maxAcceptedAccuracy: null` no podía desactivar el filtro | Android |
+> | A10 | El `charset` del `Content-Type` se perdía en form-urlencoded | Android |
+> | B1 | Se subía un lote vacío `[]` con la cola vacía | iOS |
+> | B2 | Los eventos `foreground` / `background` no se emitían | iOS |
+> | B3 | El placeholder de URL `{is_moving}` salía literal | iOS |
+> | B4 | `stationaryRadius` se truncaba a entero al releerse de SQLite | iOS |
+> | B5 | Faltaba la cabecera `x-batch-id` en las subidas de sync | iOS |
+>
+> ### Cuarta auditoría (02-08): las 14 deudas catalogadas, cerradas
+>
+> La tercera auditoría dejó 14 deudas abiertas, documentadas con archivo y línea. Están cerradas.
+> Detalle en `CHANGELOG.md`.
+>
+> | # | Qué | Plataforma |
+> |---|---|---|
+> | A1 | `deleteLocationById` / `deleteAllLocations` borraban físicamente | Android |
+> | A2 | Cinco cursores sin comprobar `null` (+ `getOldestLocationUri` con tabla vacía) | Android |
+> | A3 | `mConfig` / `mProvider` no eran `volatile` | Android |
+> | A4 | El fallback a `url` usaba `syncMode`/`syncHttpMethod` en vez de `httpMode`/`httpMethod` | Android |
+> | A5 | El bucle per-item JSON no prevalidaba los elementos | Android |
+> | A6 | `RuntimeException` del `ContentResolver` tumbaba el proceso `:sync` | Android |
+> | A7 | Faltaban 5 permisos en los manifests de los módulos Gradle | Android |
+> | B1 | Cero validación de configuración | iOS |
+> | B2 | `battery` / `isCharging` / `events` llegaban `nil` al evento JS | iOS |
+> | B3 | Sync `single` lanzaba las N subidas en paralelo sin cortar al fallar | iOS |
+> | B4 | `headlessTask()` sin selector: promesa rechazada con "Invalid action" | iOS |
+> | B5 | Timeout del POST en tiempo real: 60 s por defecto, no 30 s | iOS |
+> | B6 | El escapado de URL dejaba pasar `/ = ; : ? @ , $` | iOS |
+> | B7 | `getConfig()` con formas distintas para `includeBattery` y `postTemplate` | iOS |
+> | — | `@timestamp_iso`: documentado desde 3.3.0, nunca implementado | **ambas** |
+>
+> **No queda ningún hallazgo de código abierto.** Lo que queda son gates de release —Xcode, QA en
+> dispositivo, CI instrumentado— listados en `COMPATIBILIDAD.md` §6. Este documento afirmó dos veces
+> "cero hallazgos abiertos" cuando no lo era; la diferencia ahora es que las cuatro auditorías están
+> escritas con su alcance, y ese alcance dice explícitamente qué NO se ha probado: nada de iOS se ha
+> compilado ni ejecutado.
+>
+> **Lección de método, no de código:** cada corrección de v5.0.0 se validó aislada. Lo que faltó
+> fue la matriz — `httpMode` × `syncMode` × `Content-Type` × método × ruta × plataforma — y un
+> diff de v4 buscando qué se había **quitado**. Los 5 tests de regresión añadidos en 5.0.1 cubren
+> ya las celdas del incidente.
+>
 > ### Validación ejecutada
 >
 > ```
 > cd android && ./gradlew :common:testDebugUnitTest :CDVBackgroundGeolocation:testDebugUnitTest
-> → BUILD SUCCESSFUL — 68 tests, 0 fallos          (66 antes; +2 por los tests de tick())
+> → BUILD SUCCESSFUL — 82 tests, 0 fallos          (68 en v5.0.0; +14 de regresión en 5.0.1)
 > cd android && ./gradlew :common:compileDebugAndroidTestJavaWithJavac \
 >                        :CDVBackgroundGeolocation:compileDebugAndroidTestJavaWithJavac
 > → BUILD SUCCESSFUL — los 72 tests instrumentados compilan (antes: 80 errores)
-> npm run test:js → 26 + 239 aserciones OK
-> clang -fsyntax-only con stubs sobre los 5 .m modificados → sin errores
+> npm run test:js → 239 aserciones OK
+> clang -fsyntax-only con stubs sobre los .m modificados → sin errores nuevos
 > python -c 'yaml.safe_load(ci.yml)' → YAML válido
 > ```
+>
+> *(Este bloque decía «68 tests» hasta el 02-08; estaba desfasado respecto al CHANGELOG.)*
 >
 > ### Lo que NO está verificado — leer antes de publicar
 >

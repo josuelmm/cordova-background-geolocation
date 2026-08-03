@@ -35,6 +35,17 @@ static NSString * const TAG = @"MAURPostLocationTask";
 
 static MAURLocationTransform s_locationTransform = nil;
 
+/** v5.0.1 — una sola cola serie para todo el pipeline de posiciones (ver -add:onReady:). */
++ (dispatch_queue_t) serialQueue
+{
+    static dispatch_queue_t queue = nil;
+    static dispatch_once_t queueOnce;
+    dispatch_once(&queueOnce, ^{
+        queue = dispatch_queue_create("com.marianhello.bgloc.postlocation", DISPATCH_QUEUE_SERIAL);
+    });
+    return queue;
+}
+
 - (instancetype) init
 {
     self = [super init];
@@ -94,6 +105,11 @@ static MAURLocationTransform s_locationTransform = nil;
 
 - (void) add:(MAURLocation * _Nonnull)inLocation
 {
+    [self add:inLocation onReady:nil];
+}
+
+- (void) add:(MAURLocation * _Nonnull)inLocation onReady:(void (^ _Nullable)(MAURLocation * _Nonnull))onReady
+{
     // Take this variable on the main thread to be safe
     MAURLocationTransform locationTransform = s_locationTransform;
 
@@ -117,7 +133,12 @@ static MAURLocationTransform s_locationTransform = nil;
         }
     };
 
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+    // v5.0.1 — cola SERIE propia en vez de la global concurrente. Android usa
+    // Executors.newSingleThreadExecutor() en PostLocationTask, asi que esto es paridad exacta y
+    // ademas arregla dos cosas: (a) los eventos a JS salian FUERA DE ORDEN cuando dos fixes se
+    // solapaban (antes la llamada al delegado era sincrona y estrictamente ordenada), y (b) dos
+    // bloques concurrentes escribian en SQLite a la vez.
+    dispatch_async([[self class] serialQueue], ^{
 
         MAURLocation *location = inLocation;
 
@@ -182,6 +203,21 @@ static MAURLocationTransform s_locationTransform = nil;
             attachBattery(location);
         }
 
+        // v5.0.1 — B2: emitir a JS AQUI, con la posicion ya enriquecida, en el mismo orden que
+        // Android (LocationServiceImpl.onLocation: transform -> eventos -> bateria -> broadcast
+        // -> persistir/postear). El facade lo hacia sincronamente tras -add:, en carrera con este
+        // bloque, asi que battery/isCharging/events llegaban nil a JS casi siempre. Como en
+        // Android, un transform que devuelve nil no emite nada (ya se hizo return arriba).
+        if (onReady != nil) {
+            // dispatch_sync: el bloque de main queue tiene que ejecutarse ANTES de que este hilo
+            // siga y acabe llamando a finishBackgroundTask(). Con dispatch_async, iOS podia
+            // suspender la app con el evento aun encolado y JS no lo recibia nunca. Esta cola es
+            // serie y NUNCA es la principal, asi que no hay riesgo de deadlock.
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                onReady(location);
+            });
+        }
+
         // v3.5 Phase 4: mock location policy. Detection already exists in MAURLocation.simulated.
         if (location.simulated != nil && [location.simulated boolValue]) {
             NSString *policy = self.config.mockLocationPolicy ?: @"allow";
@@ -211,7 +247,9 @@ static MAURLocationTransform s_locationTransform = nil;
             }
         }
 
-        if ([self.config hasValidSyncUrl] && [self.config syncEnabled]) {
+        // v5.0.1 — R15: hasEffectiveSyncUrl, no hasValidSyncUrl. Con solo `url` configurada, las
+        // filas SyncPending no las leía nadie y morían al reciclar maxLocations.
+        if ([self.config hasEffectiveSyncUrl] && [self.config syncEnabled]) {
             NSNumber *locationsCount = [locationDAO getLocationsForSyncCount];
             NSInteger threshold = self.config.syncThreshold != nil ? self.config.syncThreshold.integerValue : 100;
             if (locationsCount && [locationsCount integerValue] >= threshold) {
@@ -256,27 +294,50 @@ static MAURLocationTransform s_locationTransform = nil;
     }
 
     NSString *jsonStr = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
-    NSString *contentType = [httpHeaders objectForKey:@"Content-Type"];
+    // v5.0.1 — la clave de cabecera es case-insensitive en HTTP: con `content-type` en minusculas
+    // este objectForKey: devolvia nil, se asumia application/json y ademas el bucle de abajo
+    // añadia la cabecera del usuario por separado -> "application/json,application/x-www-form-urlencoded".
+    NSString *contentType = nil;
+    for (id key in httpHeaders) {
+        if ([key isKindOfClass:[NSString class]]
+                && [(NSString *)key caseInsensitiveCompare:@"Content-Type"] == NSOrderedSame) {
+            contentType = [NSString stringWithFormat:@"%@", httpHeaders[key]];
+            break;
+        }
+    }
     if (!contentType) {
         contentType = @"application/json";
     }
+    // v5.0.1 — mismo fallo que ya se corrigio en Android: `application/x-www-form-urlencoded;
+    // charset=UTF-8` no es igual a `application/x-www-form-urlencoded`, asi que comparar la
+    // cabecera entera desactivaba el aplanado y salia JSON crudo declarado como formulario -> 400.
+    NSString *mediaType = [[contentType componentsSeparatedByString:@";"] firstObject] ?: contentType;
+    mediaType = [[mediaType stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] lowercaseString];
+    BOOL isFormUrlEncoded = [mediaType isEqualToString:@"application/x-www-form-urlencoded"];
 
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:resolvedUrl]];
     [request setHTTPMethod:method];
+    // v5.0.1 — B5: paridad con HttpPostService de Android (CONNECT/READ_TIMEOUT_MS = 30 s). Sin
+    // esto regia el default de NSURLSession (60 s), asi que ante un backend que tarda 45 s en
+    // responder Android daba la posicion por fallida y la encolaba mientras iOS la daba por
+    // entregada y la borraba: mismo servidor, resultados distintos por plataforma.
+    [request setTimeoutInterval:30];
     if (!isBodyless) {
         [request setValue:contentType forHTTPHeaderField:@"Content-Type"];
     }
     if (httpHeaders != nil) {
         for (id key in httpHeaders) {
-            if (![key isEqualToString:@"Content-Type"]) {
-                NSString *value = [httpHeaders objectForKey:key];
-                [request addValue:value forHTTPHeaderField:key];
+            if ([key isKindOfClass:[NSString class]]
+                    && [(NSString *)key caseInsensitiveCompare:@"Content-Type"] == NSOrderedSame) {
+                continue; // ya aplicada con setValue: arriba
             }
+            NSString *value = [httpHeaders objectForKey:key];
+            [request addValue:value forHTTPHeaderField:key];
         }
     }
 
     if (!isBodyless) {
-        if ([contentType isEqualToString:@"application/x-www-form-urlencoded"]) {
+        if (isFormUrlEncoded) {
             id jsonObject = [NSJSONSerialization JSONObjectWithData:data options:0 error:outError];
             NSDictionary *dict = nil;
             if ([jsonObject isKindOfClass:[NSArray class]] && [jsonObject count] == 1) {
@@ -379,7 +440,7 @@ static MAURLocationTransform s_locationTransform = nil;
 
 - (void) sync
 {
-    if (![self.config syncEnabled] || ![self.config hasValidSyncUrl]) {
+    if (![self.config syncEnabled] || ![self.config hasEffectiveSyncUrl]) {
         return;
     }
     // v4.5.1 — rescue rows stuck in SyncPending from a previous upload that never completed
@@ -389,10 +450,36 @@ static MAURLocationTransform s_locationTransform = nil;
     [[MAURSQLiteLocationDAO sharedInstance] restoreStaleSyncLocationsOlderThan:staleCutoff error:nil];
     // For sync (batch) only static queryParams placeholders apply; per-location templating
     // belongs in real-time post (httpMode="single" + httpMethod=GET) instead.
-    NSString *resolvedSyncUrl = [MAURUrlTemplateResolver resolve:self.config.syncUrl location:nil queryParams:self.config.queryParams];
-    NSString *syncMethod = self.config.syncHttpMethod ?: @"POST";
+    NSString *resolvedSyncUrl = [MAURUrlTemplateResolver resolve:[self.config effectiveSyncUrl] location:nil queryParams:self.config.queryParams];
+
+    // v5.0.1 — R15, paridad con SyncAdapter de Android. Cuando NO hay `syncUrl` el destino
+    // efectivo es `url`, y ese endpoint espera el contrato de TIEMPO REAL: httpMethod/httpMode, no
+    // syncHttpMethod/syncMode. Mandarle un array JSON por POST porque syncMode vale "batch" daba
+    // 400 permanente y `syncError` en bucle en cada ventana. Android ya lo hacia asi; iOS no.
+    BOOL usingRealtimeUrlAsFallback = ![self.config hasValidSyncUrl];
+    NSString *syncMethod = usingRealtimeUrlAsFallback
+            ? (self.config.httpMethod ?: @"POST")
+            : (self.config.syncHttpMethod ?: @"POST");
     // v4.5.6 — D26: honour syncMode ("single" => one request per location, "batch" => array).
-    NSString *syncMode = self.config.syncMode ?: @"batch";
+    NSString *syncMode = usingRealtimeUrlAsFallback
+            ? (self.config.httpMode ?: @"batch")
+            : (self.config.syncMode ?: @"batch");
+
+    if (usingRealtimeUrlAsFallback) {
+        // GET no sirve aqui por el mismo motivo que R14 lo prohibe en syncHttpMethod: la URL del
+        // lote se resuelve con location:nil, asi que los placeholders por posicion se quedan sin
+        // sustituir y un 2xx a esa peticion borraria el lote con cero datos reales. Se omite el
+        // sync; las filas siguen en cola y el envio en tiempo real (que si los resuelve) las cubre.
+        if ([@"GET" caseInsensitiveCompare:syncMethod] == NSOrderedSame) {
+            DDLogWarn(@"%@ Sync omitido: sin `syncUrl` y con httpMethod GET no hay forma de resolver "
+                      @"los placeholders por posicion en la URL del lote. Configura `syncUrl` con "
+                      @"POST/PUT/PATCH para reintentar lo acumulado sin conexion.", TAG);
+            return;
+        }
+        DDLogInfo(@"%@ Sync sin syncUrl: se reintenta contra `url` con httpMethod=%@ y httpMode=%@",
+                  TAG, syncMethod, syncMode);
+    }
+
     [uploader sync:resolvedSyncUrl withTemplate:self.config._template withHttpHeaders:self.config.httpHeaders withMethod:syncMethod withMode:syncMode];
 }
 

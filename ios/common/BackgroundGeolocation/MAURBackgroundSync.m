@@ -30,6 +30,9 @@ static NSString * const sHandlerLock = @"MAURBackgroundSyncHandlerLock";
 {
     NSURLSession *urlSession;
     NSMutableArray *tasks;
+    // v5.0.1 — B3: cola de subidas pendientes en modo `single`. Ver -enqueueSingleUploads:.
+    NSMutableArray *pendingSingleUploads;
+    BOOL singleChainActive;
     // v4.5.6 — D26: makes each upload's temp file name unique (single mode creates several
     // uploads within the same second). Only mutated inside @synchronized (self).
     NSUInteger uploadSequence;
@@ -111,6 +114,56 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend
 
 @end
 
+#pragma mark - v5.0.1 (R12) form-urlencoded helpers
+
+/**
+ * v5.0.1 — R12. La ruta de sync serializaba SIEMPRE un array JSON, tambien cuando el usuario
+ * declaraba `Content-Type: application/x-www-form-urlencoded`. Android manda N peticiones planas
+ * (`lat=..&lon=..`) y iOS mandaba `[{...}]` etiquetado como formulario: ningun decoder
+ * OsmAnd/Traccar lo entiende -> HTTP 400 en cada ventana de sync. Estas tres funciones replican
+ * exactamente lo que ya hacen MAURPostLocationTask (iOS) y HttpPostService (Android).
+ */
+static NSString * MAURContentTypeFromHeaders(NSDictionary *httpHeaders)
+{
+    if (httpHeaders == nil) return nil;
+    // La clave de cabecera es case-insensitive en HTTP: `content-type` en minusculas tiene que
+    // contar igual, si no el aplanado se desactiva por la puerta de atras.
+    for (id key in httpHeaders) {
+        if ([key isKindOfClass:[NSString class]]
+                && [(NSString *)key caseInsensitiveCompare:@"Content-Type"] == NSOrderedSame) {
+            return [NSString stringWithFormat:@"%@", [httpHeaders objectForKey:key]];
+        }
+    }
+    return nil;
+}
+
+/** `application/x-www-form-urlencoded; charset=UTF-8` -> `application/x-www-form-urlencoded`. */
+static BOOL MAURIsFormUrlEncoded(NSString *contentType)
+{
+    if (contentType == nil) return NO;
+    NSString *mediaType = [[contentType componentsSeparatedByString:@";"] firstObject] ?: contentType;
+    mediaType = [[mediaType stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] lowercaseString];
+    return [@"application/x-www-form-urlencoded" isEqualToString:mediaType];
+}
+
+static NSString * MAURFormUrlEncodedBody(NSDictionary *dict)
+{
+    NSMutableArray *parts = [NSMutableArray array];
+    for (id key in dict) {
+        if (![key isKindOfClass:[NSString class]]) continue;
+        id raw = [dict objectForKey:key];
+        // v4.5.4: los NSNull (placeholders sin valor: @speed, @events, @battery...) se omiten.
+        // Serializarlos como "<null>" hace que Traccar responda 400 (NumberFormatException).
+        if (raw == nil || raw == [NSNull null]) continue;
+        NSString *value = [NSString stringWithFormat:@"%@", raw];
+        if ([@"null" isEqualToString:value] || [@"<null>" isEqualToString:value]) continue;
+        NSString *encodedKey = [(NSString *)key stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+        NSString *encodedValue = [value stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+        [parts addObject:[NSString stringWithFormat:@"%@=%@", encodedKey, encodedValue]];
+    }
+    return [parts componentsJoinedByString:@"&"];
+}
+
 @implementation MAURBackgroundSync
 
 + (NSString*) sessionIdentifier
@@ -167,6 +220,8 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend
     // v3.5 Phase 4: previously `tasks` was never allocated; addObject/removeObject/cancel/status
     // silently no-op'd on nil. Allocate now so cancel and status actually work.
     tasks = [[NSMutableArray alloc] init];
+    pendingSingleUploads = [[NSMutableArray alloc] init];
+    singleChainActive = NO;
 
     // v5.0 — D19: reuse the process-wide background session and become the instance its delegate
     // callbacks are forwarded to. The newest instance wins, which is what a WebView reload wants.
@@ -240,22 +295,64 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend
     MAURSQLiteLocationDAO* locationDAO = [MAURSQLiteLocationDAO sharedInstance];
     NSArray *locations = [locationDAO getLocationsForSync];
 
+    // v5.0.1 — paridad con SyncAdapter de Android, que envía `x-batch-id` en cada subida. Un
+    // backend que deduplica lotes por esa cabecera funcionaba en Android y duplicaba en iOS al
+    // reintentar. No se muta el diccionario del usuario: se copia.
+    NSMutableDictionary *syncHeaders = (httpHeaders != nil)
+            ? [httpHeaders mutableCopy]
+            : [NSMutableDictionary dictionary];
+    long long batchId = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
+    syncHeaders[@"x-batch-id"] = [NSString stringWithFormat:@"%lld", batchId];
+    httpHeaders = syncHeaders;
+
     BOOL singleMode = (mode != nil && [@"single" isEqualToString:[mode lowercaseString]]);
+
+    // v5.0.1 — R12: form-urlencoded no tiene forma de representar un array de N posiciones en un
+    // solo cuerpo. Android resuelve esto mandando una peticion plana por elemento; aqui se fuerza
+    // la misma ruta por-posicion, que ademas ya lleva la contabilidad correcta de locationIds
+    // (una fila borrada solo cuando SU peticion respondio 2xx).
+    if (!singleMode && MAURIsFormUrlEncoded(MAURContentTypeFromHeaders(httpHeaders))) {
+        DDLogInfo(@"Sync: Content-Type form-urlencoded con syncMode 'batch'; se envia una peticion "
+                  @"plana por posicion (paridad con Android). Usa application/json si quieres un lote unico.");
+        singleMode = YES;
+    }
 
     if (singleMode) {
         if ([locations count] == 0) {
             return;
         }
+        // v5.0.1 — B3: esto lanzaba las N subidas de golpe. Android es SECUENCIAL y corta en el
+        // primer fallo (HttpPostService, bucle per-item), asi que con 500 posiciones en cola y el
+        // servidor caido Android hacia 1 peticion y iOS 500. Ahora se encolan y se envia la
+        // siguiente solo cuando la anterior responde 2xx; un fallo (o un 285) vacia la cola y el
+        // resto se reintenta en la proxima ventana de sync.
+        NSMutableArray *queued = [NSMutableArray arrayWithCapacity:[locations count]];
         for (MAURLocation *location in locations) {
             id payload = [location toResultFromTemplate:locationTemplate];
-            NSArray *ids = (location.locationId != nil) ? @[location.locationId] : nil;
-            [self upload:payload
-                   toUrl:url
-         withHttpHeaders:httpHeaders
-              withMethod:method
-          locationsCount:1
-             locationIds:ids];
+            NSArray *ids = (location.locationId != nil) ? @[location.locationId] : @[];
+            [queued addObject:@{ @"payload": payload,
+                                 @"url": url,
+                                 @"headers": (httpHeaders ?: @{}),
+                                 @"method": (method ?: @"POST"),
+                                 @"ids": ids }];
         }
+        @synchronized (pendingSingleUploads) {
+            [pendingSingleUploads addObjectsFromArray:queued];
+            if (singleChainActive) {
+                // Ya hay una cadena en curso; sus completions consumiran tambien lo recien anadido.
+                return;
+            }
+            singleChainActive = YES;
+        }
+        [self startNextSingleUpload];
+        return;
+    }
+
+    // v5.0.1 — sin esta guarda, un forceSync() con la cola vacía subía un cuerpo `[]` real:
+    // Android corta en dos sitios (BatchManager y SyncAdapter) y nunca crea un lote vacío. Si el
+    // backend contestaba 285 a ese `[]`, se emitía abort_updates y el tracking se paraba solo;
+    // con un 4xx se emitía un syncError espurio.
+    if ([locations count] == 0) {
         return;
     }
 
@@ -273,6 +370,93 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend
 }
 
 /**
+ * v5.0.1 — B3: envia la siguiente subida encolada del modo `single`. Marca la tarea con el flag
+ * "singleChain" para que -URLSession:task:didCompleteWithError: sepa continuar (2xx) o abortar la
+ * cadena (fallo o 285), igual que el bucle per-item de Android.
+ *
+ * Si el proceso muere a mitad de cadena la cola en memoria se pierde: las filas restantes siguen
+ * SyncPending y las recupera -restoreStaleSyncLocationsOlderThan: en la siguiente ventana de sync.
+ */
+- (void) startNextSingleUpload
+{
+    // Bucle en vez de una sola llamada: si -upload: no llega a crear la tarea (serializacion
+    // fallida, URL invalida), NO habra ningun didCompleteWithError que continue la cadena. Sin
+    // este bucle singleChainActive se quedaba en YES PARA SIEMPRE y todos los -sync: posteriores
+    // encolaban y salian sin enviar nada: el sync moria hasta reiniciar la app, con
+    // pendingSingleUploads creciendo sin limite. Ahora la entrada que no se pudo enviar se
+    // devuelve a PostPending y se prueba la siguiente.
+    while (YES) {
+        NSDictionary *next = nil;
+        @synchronized (pendingSingleUploads) {
+            if ([pendingSingleUploads count] == 0) {
+                singleChainActive = NO;
+                return;
+            }
+            next = [pendingSingleUploads firstObject];
+            [pendingSingleUploads removeObjectAtIndex:0];
+        }
+
+        NSArray *ids = next[@"ids"];
+        BOOL started = [self upload:next[@"payload"]
+                              toUrl:next[@"url"]
+                    withHttpHeaders:[next[@"headers"] mutableCopy]
+                         withMethod:next[@"method"]
+                     locationsCount:1
+                        locationIds:([ids count] > 0 ? ids : nil)
+                        singleChain:YES];
+        if (started) {
+            return; // la continuacion la hara didCompleteWithError
+        }
+        DDLogError(@"Sync 'single': no se pudo crear la subida de %@; se devuelve a la cola y se "
+                   @"continua con la siguiente", ids);
+        [self restorePendingIds:ids];
+    }
+}
+
+/**
+ * v5.0.1 — B3: devuelve a PostPending las filas de las entradas descartadas.
+ *
+ * -getLocationsForSync marca TODAS las filas PostPending -> SyncPending al empezar el ciclo. Si la
+ * cadena se aborta sin enviarlas, solo la tarea que fallo restaura sus propios ids: las demas se
+ * quedaban SyncPending e invisibles hasta que
+ * -restoreStaleSyncLocationsOlderThan: las rescataba... 15 MINUTOS despues. Con 500 posiciones y
+ * un 502 en la primera, eran 499 filas congeladas un cuarto de hora, y las ventanas de sync
+ * intermedias veian la cola vacia. Android restaura el lote entero al momento.
+ */
+- (void) restorePendingIds:(NSArray *)ids
+{
+    if ([ids count] == 0) return;
+    NSError *err = nil;
+    if (![[MAURSQLiteLocationDAO sharedInstance] restoreFailedSyncLocations:ids error:&err]) {
+        DDLogError(@"restoreFailedSyncLocations tras abortar la cadena fallo: %@",
+                   err.localizedDescription ?: @"unknown");
+    }
+}
+
+/** v5.0.1 — B3: descarta lo que quede en la cadena tras un fallo, devolviendo las filas a la cola. */
+- (void) abortSingleChain
+{
+    NSArray *dropped = nil;
+    @synchronized (pendingSingleUploads) {
+        dropped = [pendingSingleUploads copy];
+        [pendingSingleUploads removeAllObjects];
+        singleChainActive = NO;
+    }
+    if ([dropped count] == 0) return;
+
+    NSMutableArray *ids = [NSMutableArray array];
+    for (NSDictionary *entry in dropped) {
+        NSArray *entryIds = entry[@"ids"];
+        if ([entryIds count] > 0) {
+            [ids addObjectsFromArray:entryIds];
+        }
+    }
+    DDLogWarn(@"Sync 'single': %lu posiciones devueltas a la cola tras un fallo",
+              (unsigned long)[dropped count]);
+    [self restorePendingIds:ids];
+}
+
+/**
  * v4.5.6 — D26: extracted from -sync: so both batch and single mode share one code path.
  * `locationIds` is nil in batch mode (success deletes every synced row older than the captured
  * cutoff, as before) and carries the single location's id in single mode (success deletes exactly
@@ -285,11 +469,51 @@ withHttpHeaders:(NSMutableDictionary * _Nullable)httpHeaders
  locationsCount:(NSUInteger)locationsCount
     locationIds:(NSArray * _Nullable)locationIds
 {
-    NSError *error = nil;
-    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:jsonPayload options:0 error:&error];
-    if (jsonData == nil) {
-        DDLogError(@"Sync payload serialization failed: %@", error.localizedDescription);
-        return;
+    [self upload:jsonPayload toUrl:url withHttpHeaders:httpHeaders withMethod:method
+  locationsCount:locationsCount locationIds:locationIds singleChain:NO];
+}
+
+/** Devuelve YES solo si se llego a crear y arrancar la NSURLSessionTask. Ver -startNextSingleUpload. */
+- (BOOL) upload:(id)jsonPayload
+          toUrl:(NSString * _Nonnull)url
+withHttpHeaders:(NSMutableDictionary * _Nullable)httpHeaders
+     withMethod:(NSString * _Nullable)method
+ locationsCount:(NSUInteger)locationsCount
+    locationIds:(NSArray * _Nullable)locationIds
+    singleChain:(BOOL)singleChain
+{
+    // v5.0.1 — R12: el cuerpo se construye segun el Content-Type configurado, no siempre JSON.
+    NSString *configuredContentType = MAURContentTypeFromHeaders(httpHeaders);
+    BOOL isFormUrlEncoded = MAURIsFormUrlEncoded(configuredContentType);
+
+    NSData *bodyData = nil;
+    if (isFormUrlEncoded) {
+        NSDictionary *dict = nil;
+        if ([jsonPayload isKindOfClass:[NSDictionary class]]) {
+            dict = (NSDictionary *)jsonPayload;
+        } else if ([jsonPayload isKindOfClass:[NSArray class]]
+                   && [(NSArray *)jsonPayload count] == 1
+                   && [[(NSArray *)jsonPayload firstObject] isKindOfClass:[NSDictionary class]]) {
+            dict = (NSDictionary *)[(NSArray *)jsonPayload firstObject];
+        }
+        if (dict != nil) {
+            bodyData = [MAURFormUrlEncodedBody(dict) dataUsingEncoding:NSUTF8StringEncoding];
+        } else {
+            // Paridad con la guarda H1 de Android: un postTemplate de tipo array no se puede
+            // aplanar a clave=valor. No enviar nada en silencio devolveria un 200 falso y borraria
+            // las filas; se envia sin aplanar para que el servidor rechace y el fallo sea visible.
+            DDLogError(@"form-urlencoded requiere un postTemplate de tipo objeto; el payload es %@. "
+                       @"Se envia sin aplanar y el servidor lo rechazara.", NSStringFromClass([jsonPayload class]));
+        }
+    }
+
+    if (bodyData == nil) {
+        NSError *error = nil;
+        bodyData = [NSJSONSerialization dataWithJSONObject:jsonPayload options:0 error:&error];
+        if (bodyData == nil) {
+            DDLogError(@"Sync payload serialization failed: %@", error.localizedDescription);
+            return NO;
+        }
     }
 
     NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
@@ -303,21 +527,42 @@ withHttpHeaders:(NSMutableDictionary * _Nullable)httpHeaders
     @synchronized (self) {
         sequence = ++uploadSequence;
     }
-    NSString *fileName = [NSString stringWithFormat:@"locations_%@_%lu.json",
-                          [dateFormatter stringFromDate:[NSDate date]], (unsigned long)sequence];
+    NSString *fileName = [NSString stringWithFormat:@"locations_%@_%lu.%@",
+                          [dateFormatter stringFromDate:[NSDate date]], (unsigned long)sequence,
+                          (isFormUrlEncoded ? @"txt" : @"json")];
     NSURL *jsonUrl = [NSURL fileURLWithPath:[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0] stringByAppendingPathComponent:fileName]];
-    [jsonData writeToFile:jsonUrl.path atomically:NO];
+    [bodyData writeToFile:jsonUrl.path atomically:NO];
     uint64_t bytesTotalForThisFile = [[[NSFileManager defaultManager] attributesOfItemAtPath:jsonUrl.path error:nil] fileSize];
 
-    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:[NSURL URLWithString:url]];
+    // v5.0.1 — +URLWithString: devuelve nil ante una URL malformada (p.ej. un placeholder de
+    // queryParams sin escapar), y -initWithURL:nil lanza NSInvalidArgumentException: crash del
+    // proceso en cada ventana de sync. Se aborta esta subida y el llamante continua.
+    NSURL *requestUrl = [NSURL URLWithString:url];
+    if (requestUrl == nil) {
+        DDLogError(@"Sync: URL invalida, no se puede subir: %@", url);
+        [[NSFileManager defaultManager] removeItemAtURL:jsonUrl error:NULL];
+        return NO;
+    }
+
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:requestUrl];
     NSString *resolvedMethod = (method != nil && method.length > 0) ? [method uppercaseString] : @"POST";
     [request setHTTPMethod:resolvedMethod];
     [request setTimeoutInterval:120]; // Prevents sync from hanging indefinitely if server does not respond
     [request setValue:[NSString stringWithFormat:@"%llu", bytesTotalForThisFile] forHTTPHeaderField:@"Content-Length"];
-    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    // v5.0.1 — H3: el Content-Type se fijaba a application/json y luego el bucle de abajo hacia
+    // addValue: para TODAS las claves, incluida Content-Type. addValue: CONCATENA, asi que con
+    // httpHeaders = {Content-Type: application/x-www-form-urlencoded} la cabecera que salia al
+    // cable era literalmente "application/json,application/x-www-form-urlencoded" — invalida.
+    // Ahora se respeta la del usuario y se usa setValue: (reemplaza) para esa clave concreta,
+    // igual que ya hacia MAURPostLocationTask. `configuredContentType` se resolvio arriba (R12).
+    [request setValue:(configuredContentType ?: @"application/json") forHTTPHeaderField:@"Content-Type"];
 
     if (httpHeaders != nil) {
         for(id key in httpHeaders) {
+            if ([key isKindOfClass:[NSString class]]
+                    && [(NSString *)key caseInsensitiveCompare:@"Content-Type"] == NSOrderedSame) {
+                continue; // ya aplicada arriba con setValue:
+            }
             id value = [httpHeaders objectForKey:key];
             [request addValue:value forHTTPHeaderField:key];
         }
@@ -345,9 +590,14 @@ withHttpHeaders:(NSMutableDictionary * _Nullable)httpHeaders
     if (locationIds != nil) {
         objc_setAssociatedObject(task, "locationIds", locationIds, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
+    // v5.0.1 — B3: marca de pertenencia a la cadena secuencial del modo `single`.
+    if (singleChain) {
+        objc_setAssociatedObject(task, "singleChain", @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
 
     [task resume];
 
+    return YES;
 }
 
 // http://stackoverflow.com/a/572623/48125
@@ -491,6 +741,18 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend
     NSNumber *sentNum = objc_getAssociatedObject(task, "locationsSent");
     NSInteger locationsSent = sentNum != nil ? [sentNum integerValue] : 0;
     BOOL isStatusOkay = (statusCode >= 200 && statusCode < 300);
+
+    // v5.0.1 — B3: cadena secuencial del modo `single`. 2xx (salvo 285) -> siguiente; cualquier
+    // otra cosa vacia la cola y el resto se reintenta en la proxima ventana, igual que corta el
+    // bucle per-item de Android. Se hace ANTES del dispatch al hilo principal para no encadenar
+    // una peticion nueva despues de un fallo por culpa del reordenamiento de colas.
+    if (objc_getAssociatedObject(task, "singleChain") != nil) {
+        if (error == nil && isStatusOkay && statusCode != 285) {
+            [self startNextSingleUpload];
+        } else {
+            [self abortSingleChain];
+        }
+    }
 
     dispatch_async(dispatch_get_main_queue(), ^{
         if (error != nil) {
