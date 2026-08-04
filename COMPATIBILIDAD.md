@@ -130,6 +130,13 @@ cuya firma `on(eventName: string, callback?)` no cambió.
   nombre, así que es indiferente, pero los logs del servidor se ven distintos.
 - **Sin impacto:** los cambios de driving events (la app no activa `drivingEvents`) y la validación
   de `ConfigMapper` (todos los valores que manda la app son válidos).
+- **Nuevo en 5.0.3 — `location.speed` y `location.bearing` pueden faltar en iOS.** Antes iOS
+  siempre traía las dos claves, pero con el valor `-1` de CoreLocation cuando no había lectura
+  válida. Ahora, igual que Android desde siempre, la clave simplemente no viene. Si la app lee
+  `loc.speed` para pintarla, comprueba `!= null` en vez de asumir número — y de paso deja de
+  mostrar `-1 m/s`. En `postTemplate` el valor sale como `null` (mismo comportamiento que Android),
+  no desaparece la clave del JSON. Con `strictNullChecks` el `.d.ts` te marcará dónde hay que
+  tocarlo. Los otros cambios de 5.0.3 son de driving events, que esta app no activa.
 - **Corregido en 5.0.1 — este punto decía otra cosa.** Aquí se listaba "el borrado físico del lote
   de sync" como cambio sin impacto. Sí lo tenía: `getLocations()` se vaciaba tras cada sync porque
   `getAllLocations()` no filtra por estado. Revertido al borrado lógico de v4 en las tres rutas

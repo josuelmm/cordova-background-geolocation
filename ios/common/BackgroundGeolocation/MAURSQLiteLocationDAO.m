@@ -212,8 +212,11 @@
     BOOL success = [database executeUpdate:sql,
         [NSNumber numberWithDouble:[location.time timeIntervalSince1970]],
         location.accuracy,
-        location.speed,
-        location.heading,
+        // v5.0.3 — `speed` / `heading` son nil cuando CoreLocation no tenia lectura (antes se
+        // guardaba -1). Explicito como el resto de columnas opcionales de abajo: se persiste NULL
+        // y -convertToLocation: lo devuelve como nil, no como 0.0.
+        location.speed ?: [NSNull null],
+        location.heading ?: [NSNull null],
         location.altitude,
         location.latitude,
         location.longitude,
@@ -575,8 +578,17 @@
     NSTimeInterval timestamp = [rs doubleForColumnIndex:1];
     location.time = [NSDate dateWithTimeIntervalSince1970:timestamp];
     location.accuracy = [NSNumber numberWithDouble:[rs doubleForColumnIndex:2]];
-    location.speed = [NSNumber numberWithDouble:[rs doubleForColumnIndex:3]];
-    location.heading = [NSNumber numberWithDouble:[rs doubleForColumnIndex:4]];
+    // v5.0.3 — NULL (sin lectura) debe volver como nil, no como 0.0: un 0 se lee como "parado"
+    // y como "rumbo norte". Las filas escritas por versiones <= 5.0.2 traen -1, que se normaliza
+    // aqui al mismo nil para que un lote pendiente de sync no siga enviando -1 al servidor.
+    if (![rs columnIndexIsNull:3]) {
+        double s = [rs doubleForColumnIndex:3];
+        if (s >= 0) location.speed = [NSNumber numberWithDouble:s];
+    }
+    if (![rs columnIndexIsNull:4]) {
+        double h = [rs doubleForColumnIndex:4];
+        if (h >= 0) location.heading = [NSNumber numberWithDouble:h];
+    }
     location.altitude = [NSNumber numberWithDouble:[rs doubleForColumnIndex:5]];
     location.latitude = [NSNumber numberWithDouble:[rs doubleForColumnIndex:6]];
     location.longitude = [NSNumber numberWithDouble:[rs doubleForColumnIndex:7]];

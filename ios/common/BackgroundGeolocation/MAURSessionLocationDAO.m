@@ -83,8 +83,10 @@ static NSString *const kSessionActiveKey = @"bgloc_session_active";
         [database executeUpdate:sql,
             [NSNumber numberWithDouble:[location.time timeIntervalSince1970]],
             location.accuracy ?: @0,
-            location.speed ?: @0,
-            location.heading ?: @0,
+            // v5.0.3 — NULL, no 0: "sin lectura de velocidad" y "parado" no son lo mismo, y un
+            // rumbo 0 es norte. Mismo criterio que MAURSQLiteLocationDAO.
+            location.speed ?: [NSNull null],
+            location.heading ?: [NSNull null],
             location.altitude ?: @0,
             location.latitude ?: @0,
             location.longitude ?: @0,
@@ -137,8 +139,15 @@ static NSString *const kSessionActiveKey = @"bgloc_session_active";
     NSTimeInterval timestamp = [rs doubleForColumnIndex:1];
     location.time = [NSDate dateWithTimeIntervalSince1970:timestamp];
     location.accuracy = [NSNumber numberWithDouble:[rs doubleForColumnIndex:2]];
-    location.speed = [NSNumber numberWithDouble:[rs doubleForColumnIndex:3]];
-    location.heading = [NSNumber numberWithDouble:[rs doubleForColumnIndex:4]];
+    // v5.0.3 — NULL vuelve como nil; las filas de versiones <= 5.0.2 traen -1 y se normalizan.
+    if (![rs columnIndexIsNull:3]) {
+        double s = [rs doubleForColumnIndex:3];
+        if (s >= 0) location.speed = [NSNumber numberWithDouble:s];
+    }
+    if (![rs columnIndexIsNull:4]) {
+        double h = [rs doubleForColumnIndex:4];
+        if (h >= 0) location.heading = [NSNumber numberWithDouble:h];
+    }
     location.altitude = [NSNumber numberWithDouble:[rs doubleForColumnIndex:5]];
     location.latitude = [NSNumber numberWithDouble:[rs doubleForColumnIndex:6]];
     location.longitude = [NSNumber numberWithDouble:[rs doubleForColumnIndex:7]];

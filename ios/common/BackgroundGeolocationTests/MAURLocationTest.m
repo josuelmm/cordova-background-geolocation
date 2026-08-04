@@ -7,6 +7,7 @@
 //
 
 #import <XCTest/XCTest.h>
+#import <CoreLocation/CoreLocation.h>
 #import "MAURLocation.h"
 
 @interface MAURLocationTest : XCTestCase
@@ -211,6 +212,74 @@
                         }};
 
     XCTAssertEqualObjects(actual, expected);
+}
+
+#pragma mark - v5.0.3: velocidad y curso invalidos de CoreLocation
+
+/**
+ * CoreLocation devuelve -1 en `speed` y en `course` cuando no tiene lectura valida. Hasta 5.0.2
+ * ese -1 se guardaba tal cual y viajaba a JS, al postTemplate y al servidor. Android nunca lo ha
+ * hecho: `hasSpeed()` / `hasBearing()` son false y la clave no se emite.
+ */
+- (void)testInvalidSpeedAndCourseAreNotStored {
+    CLLocation *noReading = [[CLLocation alloc] initWithCoordinate:CLLocationCoordinate2DMake(49, 20)
+                                                          altitude:100
+                                                horizontalAccuracy:10
+                                                  verticalAccuracy:10
+                                                            course:-1
+                                                             speed:-1
+                                                         timestamp:[NSDate dateWithTimeIntervalSince1970:1000]];
+
+    MAURLocation *location = [MAURLocation fromCLLocation:noReading];
+
+    XCTAssertNil(location.speed, @"speed -1 de CoreLocation debe quedar nil, no -1");
+    XCTAssertNil(location.heading, @"course -1 de CoreLocation debe quedar nil, no -1");
+
+    NSDictionary *dict = [location toDictionary];
+    XCTAssertNil(dict[@"speed"], @"sin lectura, la clave speed no debe aparecer");
+    XCTAssertNil(dict[@"bearing"], @"sin lectura, la clave bearing no debe aparecer");
+    XCTAssertNil(dict[@"heading"], @"sin lectura, la clave heading no debe aparecer");
+
+    XCTAssertNil([location getValueForKey:@"@speed"]);
+    XCTAssertNil([location getValueForKey:@"@bearing"]);
+}
+
+/** Una lectura valida (incluido el 0 legitimo: parado con rumbo norte) se conserva intacta. */
+- (void)testValidSpeedAndCourseAreStored {
+    CLLocation *moving = [[CLLocation alloc] initWithCoordinate:CLLocationCoordinate2DMake(49, 20)
+                                                       altitude:100
+                                             horizontalAccuracy:10
+                                               verticalAccuracy:10
+                                                         course:0
+                                                          speed:0
+                                                      timestamp:[NSDate dateWithTimeIntervalSince1970:1000]];
+
+    MAURLocation *location = [MAURLocation fromCLLocation:moving];
+
+    XCTAssertEqualObjects(location.speed, @0, @"speed 0 es una lectura valida (parado)");
+    XCTAssertEqualObjects(location.heading, @0, @"course 0 es una lectura valida (norte)");
+
+    NSDictionary *dict = [location toDictionary];
+    XCTAssertEqualObjects(dict[@"speed"], @0);
+    XCTAssertEqualObjects(dict[@"bearing"], @0);
+}
+
+/** El diccionario construido directamente desde un CLLocation sigue el mismo criterio. */
+- (void)testClassToDictionaryOmitsInvalidSpeedAndCourse {
+    CLLocation *noReading = [[CLLocation alloc] initWithCoordinate:CLLocationCoordinate2DMake(49, 20)
+                                                          altitude:100
+                                                horizontalAccuracy:10
+                                                  verticalAccuracy:10
+                                                            course:-1
+                                                             speed:-1
+                                                         timestamp:[NSDate dateWithTimeIntervalSince1970:1000]];
+
+    NSDictionary *dict = [MAURLocation toDictionary:noReading];
+
+    XCTAssertNil(dict[@"speed"]);
+    XCTAssertNil(dict[@"bearing"]);
+    XCTAssertNil(dict[@"heading"]);
+    XCTAssertNotNil(dict[@"latitude"], @"el resto de campos no se ve afectado");
 }
 
 @end

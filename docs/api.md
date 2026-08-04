@@ -91,6 +91,13 @@ If you define `postTemplate`, the plugin only serialises the keys you list. Buil
 
 `@id`, `@time` (UTC ms), `@time_seconds` (UTC seconds, since 4.5.5 — use this for Traccar OsmAnd and any backend that expects 10-digit seconds), `@timestamp_iso` (ISO 8601 string), `@provider`, `@locationProvider`, `@latitude`, `@longitude`, `@accuracy`, `@altitudeAccuracy`, `@speed`, `@altitude`, `@bearing`, `@radius`, `@isFromMockProvider`, `@mockLocationsEnabled` (Android), `@simulated` (iOS), `@events`, `@battery`, `@isCharging`, `@recordedAt` (iOS only).
 
+> **`@speed` / `@bearing` pueden no tener valor.** No todos los fixes traen velocidad y rumbo: el
+> proveedor de red no los da, y el primer fix o el que sigue a una reacquisición tampoco. En ese
+> caso resuelven a JSON `null` (Android e iOS). En el evento `location` de JS la clave directamente
+> no aparece — comprueba `loc.speed != null` antes de usarla. **Desde 5.0.3 iOS se comporta así
+> igual que Android**; hasta 5.0.2 enviaba el `-1` de CoreLocation como si fuera una lectura real.
+> Lo mismo aplica a los placeholders de URL `{speed}` y `{bearing}`, que se omiten del contexto.
+
 **If you want `events`, `battery`, `isCharging` in your custom payload, include them explicitly**:
 
 ```js

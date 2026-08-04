@@ -6,11 +6,26 @@
 //
 
 #import "MAURSensorFusionDetector.h"
+// v5.0.3 — -setLastLocation: lee loc.speed para corroborar el impacto; el header solo tiene un
+// @class MAURLocation, asi que aqui hace falta la interfaz completa.
+#import "MAURLocation.h"
 #import <CoreMotion/CoreMotion.h>
 #import <UIKit/UIKit.h>
 
 static const double kJitterGyroRadS  = 0.7;   // ~40 deg/s
-static const double kJitterAccelMps2 = 0.5;
+/**
+ * v5.0.3 — 2.0 m/s², antes 0.5. Paridad con SensorFusionDetector.JITTER_ACCEL_MPS2 en Android,
+ * corregido alli en v5.0 y no portado a iOS. 0.5 m/s² queda POR DEBAJO de la aceleracion de un
+ * coche saliendo de un semaforo (~1-2 m/s²), asi que combinado con el OR contra el giroscopo
+ * `phoneUsageWhileDriving` se disparaba una vez por cooldown durante todo el trayecto sin que
+ * nadie tocara el telefono.
+ */
+static const double kJitterAccelMps2 = 2.0;
+/** Velocidad por debajo de la cual se considera corroborado un impacto (vehiculo detenido). */
+static const double kCrashCorroborationSpeedMps = 3.0;
+/** O bien: una caida de velocidad de al menos esto dentro de la ventana de corroboracion. */
+static const double kCrashCorroborationDropMps  = 5.0;
+static const NSTimeInterval kCrashCorroborationWindowMs = 15000.0;
 
 @interface MAURSensorFusionDetector ()
 @property (nonatomic, strong) CMMotionManager *motion;
@@ -24,6 +39,16 @@ static const double kJitterAccelMps2 = 0.5;
 // thread. The flag is `atomic` so the sensor queue can read it without any dispatch.
 @property (atomic, assign) BOOL appIsActive;
 @property (nonatomic, assign) BOOL appStateObserversRegistered;
+// v5.0.3 — corroboracion GPS del impacto, como Android. Un telefono que se cae del soporte
+// supera 3 g sin problema, asi que un pico del acelerometro por si solo no es un choque.
+@property (atomic, assign) double lastSpeedMps;        // -1 = desconocida
+@property (atomic, assign) double recentPeakSpeedMps;  // -1 = sin pico
+@property (atomic, assign) NSTimeInterval recentPeakAtMs;
+// v5.0.3 — el muestreo de CoreMotion solo esta activo durante un viaje (ver -setTripActive:).
+@property (nonatomic, assign) BOOL sampling;
+- (void)startSampling;
+- (void)stopSampling;
+- (BOOL)gpsCorroboratesImpact:(NSTimeInterval)nowMs;
 @end
 
 @implementation MAURSensorFusionDetector
@@ -46,6 +71,10 @@ static const double kJitterAccelMps2 = 0.5;
         _jitterAboveSince = 0;
         _appIsActive = NO;
         _appStateObserversRegistered = NO;
+        _lastSpeedMps = -1;
+        _recentPeakSpeedMps = -1;
+        _recentPeakAtMs = 0;
+        _sampling = NO;
     }
     return self;
 }
@@ -107,13 +136,11 @@ static const double kJitterAccelMps2 = 0.5;
         if (self.started || !self.enabled) return;
         if (![self.motion isDeviceMotionAvailable]) return;
         [self registerAppStateObservers];
-        __weak typeof(self) weakSelf = self;
-        [self.motion startDeviceMotionUpdatesToQueue:self.queue
-                                          withHandler:^(CMDeviceMotion * _Nullable motion, NSError * _Nullable error) {
-            if (!motion || error) return;
-            [weakSelf processMotion:motion];
-        }];
         self.started = YES;
+        // v5.0.3 — el muestreo NO arranca aqui. Todo lo que emite esta clase esta condicionado a
+        // `tripActive`, y CoreMotion a 50 Hz con la app en background es de lo mas caro que puede
+        // hacer el plugin. Aparcado no cuesta nada, igual que Android desde v5.0 (A14).
+        if (self.tripActive) [self startSampling];
     }
 }
 
@@ -121,10 +148,78 @@ static const double kJitterAccelMps2 = 0.5;
     @synchronized (self) {
         [self unregisterAppStateObservers];
         if (!self.started) return;
-        [self.motion stopDeviceMotionUpdates];
+        [self stopSampling];
         self.started = NO;
         self.jitterAboveSince = 0;
     }
+}
+
+- (void)setTripActive:(BOOL)tripActive {
+    @synchronized (self) {
+        _tripActive = tripActive;
+        if (!tripActive) {
+            self.jitterAboveSince = 0;
+            [self stopSampling];
+        } else if (self.started) {
+            [self startSampling];
+        }
+    }
+}
+
+- (void)setLastLocation:(MAURLocation *)lastLocation {
+    // Asignacion directa, sin @synchronized: replica exactamente lo que hacia el setter
+    // sintetizado (`nonatomic, strong`) para no cambiar la semantica de concurrencia existente.
+    _lastLocation = lastLocation;
+    // v5.0.3 — mantiene el pico reciente de velocidad para -gpsCorroboratesImpact:.
+    // Espejo de SensorFusionDetector.setLastLocation() en Android.
+    if (lastLocation == nil || lastLocation.speed == nil) return;
+    double s = [lastLocation.speed doubleValue];
+    if (s < 0) return;
+    NSTimeInterval nowMs = [[NSDate date] timeIntervalSince1970] * 1000.0;
+    if (self.recentPeakSpeedMps < 0
+            || s >= self.recentPeakSpeedMps
+            || (nowMs - self.recentPeakAtMs) > kCrashCorroborationWindowMs) {
+        self.recentPeakSpeedMps = s;
+        self.recentPeakAtMs = nowMs;
+    }
+    self.lastSpeedMps = s;
+}
+
+/** Llamar siempre bajo @synchronized (self). */
+- (void)startSampling {
+    if (self.sampling || !self.enabled) return;
+    if (![self.motion isDeviceMotionAvailable]) return;
+    __weak typeof(self) weakSelf = self;
+    [self.motion startDeviceMotionUpdatesToQueue:self.queue
+                                      withHandler:^(CMDeviceMotion * _Nullable motion, NSError * _Nullable error) {
+        if (!motion || error) return;
+        [weakSelf processMotion:motion];
+    }];
+    self.sampling = YES;
+}
+
+/** Llamar siempre bajo @synchronized (self). */
+- (void)stopSampling {
+    if (!self.sampling) return;
+    [self.motion stopDeviceMotionUpdates];
+    self.sampling = NO;
+}
+
+/**
+ * v5.0.3 — un pico de 3 g por si solo no es un choque: un telefono que se cae del soporte lo
+ * supera. Se exige que el GPS lo corrobore: o el vehiculo esta practicamente parado ahora, o
+ * perdio mucha velocidad dentro de la ventana. Sin lectura de velocidad se emite igualmente
+ * (parking subterraneo, tunel): un falso positivo molesta, un choque no notificado no.
+ * Espejo de SensorFusionDetector.gpsCorroboratesImpact() en Android.
+ */
+- (BOOL)gpsCorroboratesImpact:(NSTimeInterval)nowMs {
+    double speed = self.lastSpeedMps;
+    if (speed < 0) return YES;
+    if (speed <= kCrashCorroborationSpeedMps) return YES;
+    double peak = self.recentPeakSpeedMps;
+    return peak >= 0
+        && (nowMs - self.recentPeakAtMs) <= kCrashCorroborationWindowMs
+        && (peak - speed) >= kCrashCorroborationDropMps;
 }
 
 - (void)dealloc {
@@ -156,7 +251,8 @@ static const double kJitterAccelMps2 = 0.5;
 
     // Crash detection
     if (tripActiveNow && self.crashImpactG > 0 && accelMagG >= self.crashImpactG
-            && (nowMs - self.lastCrashAt) >= self.crashCooldownMs) {
+            && (nowMs - self.lastCrashAt) >= self.crashCooldownMs
+            && [self gpsCorroboratesImpact:nowMs]) {
         self.lastCrashAt = nowMs;
         if ([l respondsToSelector:@selector(onSensorCrashWithImpactG:location:)]) {
             [l onSensorCrashWithImpactG:accelMagG location:loc];
@@ -168,7 +264,12 @@ static const double kJitterAccelMps2 = 0.5;
     BOOL screenOn = [self isScreenOnApprox];
     if (!screenOn) { self.jitterAboveSince = 0; return; }
 
-    BOOL above = (accelMagMs >= kJitterAccelMps2) || (gyroMag >= kJitterGyroRadS);
+    // v5.0.3 — AND, no OR. Paridad con Android v5.0: manipular el telefono con la mano se ve en
+    // AMBOS canales a la vez. La aceleracion del vehiculo mueve el acelerometro sin rotar el
+    // dispositivo, y la vibracion de la carretera no sostiene ninguno de los dos durante la
+    // ventana entera. Ambos valores salen de la misma muestra de CMDeviceMotion, asi que aqui no
+    // hace falta el TTL de frescura que Android necesita al tener dos canales independientes.
+    BOOL above = (accelMagMs >= kJitterAccelMps2) && (gyroMag >= kJitterGyroRadS);
     if (above) {
         if (self.jitterAboveSince == 0) self.jitterAboveSince = nowMs;
         if ((nowMs - self.jitterAboveSince) >= self.phoneUsageWindowMs

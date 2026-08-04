@@ -93,6 +93,10 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     double  drTripDistanceMeters;
     BOOL    drHasPrev;
     double  drPrevLat, drPrevLon;
+    // v5.0.3 — paridad con DrivingEventsDetector: el acumulador de distancia necesita saber
+    // cuando y con que precision se tomo el punto anterior para descartar segmentos basura.
+    NSTimeInterval drPrevPosAt;
+    BOOL    drPrevPosAccurate;
     NSTimeInterval drAboveTripSpeedSince;
     NSTimeInterval drBelowMovingSince;
     BOOL    drWasSpeeding;
@@ -104,6 +108,16 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     BOOL     drHasPrevBearing;
     NSTimeInterval drPrevBearingAt;
     NSTimeInterval drLastHardBrakeAt, drLastRapidAccelAt, drLastSharpTurnAt, drLastCrashAt;
+    // v5.0.3 — cooldown de `speeding`, que en iOS no tenia ninguno (Android: lastSpeedingAt).
+    NSTimeInterval drLastSpeedingAt;
+    // v5.0.3 — ventana deslizante de velocidad para `possibleCrash`. Android la incorporo en
+    // 5.0.2 (DrivingEventsDetector.maxSpeedWithin) y iOS se quedo comparando solo contra el fix
+    // inmediatamente anterior: con intervalos de flota (10-60 s) dos fixes consecutivos nunca
+    // caen dentro de crashWindowMs, asi que el evento no se emitia jamas.
+    NSTimeInterval drHistAt[32];
+    double   drHistSpeed[32];
+    NSInteger drHistHead;
+    NSInteger drHistCount;
     // v4.2 sensor fusion
     MAURSensorFusionDetector *sensorFusion;
     // v4.3 — events buffered when no simultaneous fix is available; drained onto next location.
@@ -422,6 +436,8 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     drTripStartedAt = 0;
     drTripDistanceMeters = 0;
     drHasPrev = NO;
+    drPrevPosAt = 0;
+    drPrevPosAccurate = NO;
     drAboveTripSpeedSince = 0;
     drBelowMovingSince = 0;
     drWasSpeeding = NO;
@@ -432,6 +448,37 @@ NSString * const MAURPhoneUsageWhileDrivingNotification = @"MAURPhoneUsageWhileD
     drHasPrevBearing = NO;
     drPrevBearingAt = 0;
     drLastHardBrakeAt = drLastRapidAccelAt = drLastSharpTurnAt = drLastCrashAt = 0;
+    drLastSpeedingAt = 0;
+    drHistHead = 0;
+    drHistCount = 0;
+}
+
+/**
+ * v5.0.3 — velocidad maxima registrada antes de `now`, con al menos `minAge` segundos de
+ * antiguedad y como mucho `window`. Devuelve -1 si no hay ninguna muestra en el rango.
+ * Espejo de DrivingEventsDetector.maxSpeedWithin() en Android.
+ *
+ * La antiguedad minima evita que un lote de fixes con marcas de tiempo casi identicas se lea
+ * como un colapso instantaneo de velocidad.
+ */
+- (double) drMaxSpeedWithin:(NSTimeInterval)now window:(NSTimeInterval)window minAge:(NSTimeInterval)minAge
+{
+    double max = -1;
+    for (NSInteger i = 0; i < drHistCount; i++) {
+        NSInteger idx = (drHistHead - 1 - i + 64) % 32;
+        NSTimeInterval age = now - drHistAt[idx];
+        if (age < minAge || age > window) continue;
+        if (drHistSpeed[idx] > max) max = drHistSpeed[idx];
+    }
+    return max;
+}
+
+- (void) drPushSpeedSample:(NSTimeInterval)at speed:(double)speed
+{
+    drHistAt[drHistHead] = at;
+    drHistSpeed[drHistHead] = speed;
+    drHistHead = (drHistHead + 1) % 32;
+    if (drHistCount < 32) drHistCount++;
 }
 
 #pragma mark - v5.0 F4: periodic driving tick
@@ -679,13 +726,15 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
     // SystemClock.elapsedRealtime()), so a batch of old fixes cannot rewind them and slip several
     // events through the anti-burst window, and an NTP step cannot park them in the future.
     NSTimeInterval mono = [NSProcessInfo processInfo].systemUptime;
-    // v4.5.6 — F14: CoreLocation reports -1 for an unknown speed/course, so `!= nil` is never a
-    // useful validity check on iOS. Track validity explicitly: an invalid speed must NOT feed the
-    // acceleration / crash deltas, where -1 produced phantom hardBrake and possibleCrash events.
+    // v4.5.6 — F14: an invalid speed must NOT feed the acceleration / crash deltas, where it
+    // produced phantom hardBrake and possibleCrash events.
     // v5.0 — F2: nor the moving/stopped machine; see the bail-out below.
+    // v5.0.3 — desde MAURLocation +fromCLLocation: el -1 de CoreLocation ya llega como nil, pero
+    // la comprobacion del signo se mantiene: por aqui pasan tambien fixes rehidratados de SQLite
+    // escritos por versiones <= 5.0.2, que si guardaron el -1 literal.
     BOOL hasSpeed = (loc.speed != nil && [loc.speed doubleValue] >= 0);
     double speed = hasSpeed ? [loc.speed doubleValue] : 0.0;
-    // v4.5.6 — F14: same for the course (heading). -1 == no bearing available.
+    // Mismo criterio para el curso (heading).
     BOOL hasHeading = (loc.heading != nil && [loc.heading doubleValue] >= 0);
 
     // Provider change
@@ -698,13 +747,43 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
                                                           userInfo:@{@"provider": provider}];
     }
 
+    // ---- Acumulador de distancia -----------------------------------------------------------
+    // v5.0.3 — hasta aqui iOS sumaba TODOS los segmentos sin filtrar, mientras Android aplica
+    // tres puertas (DrivingEventsDetector, "Distance accumulator"). Sin ellas `tripEnd.distance`
+    // en iOS sumaba el jitter del GPS parado en un semaforo (metros por fix, durante minutos) y
+    // trazaba la linea recta entre los dos extremos de un tunel. Con facturacion por km, error
+    // directo. Mismas constantes y misma logica que Android.
+    static const double kMaxDistanceAccuracyM = 50.0;  // fix peor que esto no acumula
+    static const double kMinSegmentMeters     = 5.0;   // suelo, ademas de "superar la accuracy"
+    static const NSTimeInterval kMaxSegmentGap = 120.0; // hueco mayor => la recta es ficcion
+
     double curLat = [loc.latitude doubleValue];
     double curLon = [loc.longitude doubleValue];
-    if (drHasPrev && drTripActive) {
-        drTripDistanceMeters += [self drHaversineFromLat:drPrevLat lon:drPrevLon toLat:curLat lon:curLon];
+    // Ojo con el signo: en Android un valor negativo significa "el fix no trae accuracy" y se
+    // acepta; en CoreLocation un `horizontalAccuracy` negativo significa "la coordenada NO es
+    // valida", que es justo lo contrario. Solo la ausencia del campo (fix rehidratado de SQLite)
+    // se trata como desconocida-y-aceptable.
+    BOOL hasAcc = (loc.accuracy != nil);
+    double acc = hasAcc ? [loc.accuracy doubleValue] : -1.0;
+    BOOL accurate = hasAcc ? (acc >= 0 && acc <= kMaxDistanceAccuracyM) : YES;
+    if (drHasPrev && drTripActive && accurate && drPrevPosAccurate) {
+        NSTimeInterval segDt = now - drPrevPosAt;
+        // Android amplia este tope a max(120 s, 3x `interval`) porque alli el muestreo es por
+        // tiempo y una flota configura 5 min. iOS no tiene `interval` (MAURConfig no lo expone):
+        // CoreLocation entrega por desplazamiento, asi que en un vehiculo en marcha los fixes
+        // llegan muy por debajo de 120 s y el tope fijo no recorta nada legitimo.
+        if (segDt >= 0 && segDt <= kMaxSegmentGap) {
+            double seg = [self drHaversineFromLat:drPrevLat lon:drPrevLon toLat:curLat lon:curLon];
+            double minDisp = MAX(kMinSegmentMeters, acc > 0 ? acc : 0);
+            if (seg >= minDisp) {
+                drTripDistanceMeters += seg;
+            }
+        }
     }
     drPrevLat = curLat;
     drPrevLon = curLon;
+    drPrevPosAt = now;
+    drPrevPosAccurate = accurate;
     drHasPrev = YES;
 
     // v4.1 GPS-derived sensor-like events
@@ -801,7 +880,12 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
                                                                 object:self
                                                               userInfo:@{@"location": loc}];
             if (drTripActive) {
-                NSTimeInterval durMs = (now - drTripStartedAt) * 1000.0;
+                // v5.0.3 — el viaje termino cuando el vehiculo dejo de moverse, no
+                // `stoppedDuration` despues; si no, cada viaje arrastra una cola falsa de 60 s.
+                // Android lo hace asi desde 5.0 y el propio -onDrivingTick: de abajo tambien;
+                // esta rama era la unica que seguia midiendo hasta `now`.
+                NSTimeInterval durMs = (drBelowMovingSince - drTripStartedAt) * 1000.0;
+                if (durMs < 0) durMs = 0;
                 double dist = drTripDistanceMeters;
                 drTripActive = NO;
                 [self attachDrivingEvent:@"tripEnd" to:loc extra:@{@"distance": @(dist), @"durationMs": @((long long)durMs)}];
@@ -817,11 +901,17 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
         }
     }
 
+    // v5.0.3 — banda muerta + cooldown, como Android (SPEEDING_REARM_FACTOR / lastSpeedingAt).
+    // iOS rearmaba en cuanto `kmh <= speedLimit`: circulando justo en el limite, el ruido de
+    // cuantizacion del GPS cruza el umbral arriba y abajo cada pocos segundos y salia una rafaga
+    // de `speeding`. Solo se rearma por debajo del 95% del limite.
+    static const double kSpeedingRearmFactor = 0.95;
     if (speedLimit > 0) {
         double kmh = speed * 3.6;
-        if (kmh > speedLimit) {
-            if (!drWasSpeeding) {
+        if (!drWasSpeeding) {
+            if (kmh > speedLimit && (mono - drLastSpeedingAt) >= kCooldown) {
                 drWasSpeeding = YES;
+                drLastSpeedingAt = mono;
                 [self attachDrivingEvent:@"speeding" to:loc extra:@{@"speedKmh": @(kmh), @"limitKmh": @(speedLimit)}];
                 [[NSNotificationCenter defaultCenter] postNotificationName:MAURSpeedingNotification
                                                                     object:self
@@ -831,7 +921,7 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
                                                                       @"limitKmh": @(speedLimit)
                                                                   }];
             }
-        } else {
+        } else if (kmh < speedLimit * kSpeedingRearmFactor) {
             drWasSpeeding = NO;
         }
     }
@@ -858,11 +948,21 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
                                                                     object:self
                                                                   userInfo:@{@"location": loc, @"value": @(accel)}];
             }
-            if (crashImpactKmh > 0 && dt <= crashWindow) {
-                double dropKmh = (drPrevSpeed - speed) * 3.6;
+        }
+
+        // v5.0.3 — possibleCrash con ventana deslizante real, fuera del bloque de `dt` de arriba.
+        // Antes vivia dentro de el, asi que exigia que DOS fixes CONSECUTIVOS cayeran ambos dentro
+        // de [kMinDelta, kMaxDelta] y ademas dentro de crashWindow (2 s por defecto): con el
+        // muestreo tipico de una flota eso no ocurre nunca y el evento no se emitia. Ahora se
+        // compara la velocidad actual contra el pico registrado en la ventana, igual que Android
+        // (DrivingEventsDetector.maxSpeedWithin) desde 5.0.2.
+        if (crashImpactKmh > 0 && crashWindow > 0) {
+            double peak = [self drMaxSpeedWithin:now window:crashWindow minAge:MIN(kMinDelta, crashWindow)];
+            if (peak >= 0) {
+                double dropKmh = (peak - speed) * 3.6; // positivo al frenar
                 if (dropKmh >= crashImpactKmh
-                    && speed < 1.5
-                    && drPrevSpeed * 3.6 >= crashImpactKmh
+                    && speed < 1.5                      // acabo practicamente parado
+                    && peak * 3.6 >= crashImpactKmh     // la velocidad previa superaba el umbral
                     && (mono - drLastCrashAt) >= kCooldown) {
                     drLastCrashAt = mono;
                     [self attachDrivingEvent:@"possibleCrash" to:loc extra:@{@"value": @(dropKmh), @"source": @"gps"}];
@@ -878,6 +978,9 @@ static NSTimeInterval const kPendingDrivingEventsTTLMs   = 60000.0;
     // (-1) reading used to reset the baseline to 0 and fake a huge acceleration on the next fix.
     // v5.0 — F2: guaranteed by the bail-out above, kept for clarity.
     if (hasSpeed) {
+        // v5.0.3 — la muestra entra en la ventana deslizante DESPUES de evaluar el choque, para
+        // que el pico no se compare consigo mismo. Mismo orden que Android.
+        [self drPushSpeedSample:now speed:speed];
         drPrevSpeed = speed;
         drPrevSpeedAt = now;
     }

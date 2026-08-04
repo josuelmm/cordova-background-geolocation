@@ -762,14 +762,25 @@ export interface Location {
    *
    * Note: Not all providers are capable of providing speed.
    * Typically network providers are not able to do so.
+   *
+   * **Opcional a proposito.** Android nunca ha emitido la clave cuando
+   * `Location.hasSpeed()` es false (primer fix, proveedor de red, reacquisicion).
+   * Desde 5.0.3 iOS hace lo mismo: CoreLocation devuelve `-1` cuando no tiene
+   * lectura valida y hasta 5.0.2 ese `-1` viajaba a JS y al servidor como si
+   * fuera una velocidad real. Comprueba `loc.speed != null` antes de usarla.
    */
-  speed: number;
+  speed?: number;
 
   /** Altitude if available, in meters above the WGS 84 reference ellipsoid. */
   altitude: number;
 
-  /** Bearing, in degrees. */
-  bearing: number;
+  /**
+   * Bearing (curso sobre el suelo), en grados 0-360.
+   *
+   * **Opcional a proposito**, por el mismo motivo que {@link speed}: ausente
+   * cuando el fix no trae rumbo. Comprueba `loc.bearing != null`.
+   */
+  bearing?: number;
 
   /**
    * True if location was recorded by mock provider. (ANDROID ONLY)

@@ -92,8 +92,15 @@ enum {
     instance.time = location.timestamp;
     instance.accuracy = [NSNumber numberWithDouble:location.horizontalAccuracy];
     instance.altitudeAccuracy = [NSNumber numberWithDouble:location.verticalAccuracy];
-    instance.speed = [NSNumber numberWithDouble:location.speed];
-    instance.heading = [NSNumber numberWithDouble:location.course]; // will be deprecated
+    // v5.0.3 — CoreLocation reporta **-1** en `speed` y en `course` cuando no tiene lectura
+    // valida (primer fix, interior, reacquisicion, o parado sin rumbo). Guardarlo tal cual hacia
+    // que ese -1 viajara hasta JS, hasta el `postTemplate` (`@speed` / `@bearing`) y hasta el
+    // servidor: una flota registraba vehiculos a -1 m/s con rumbo -1 grados. Android nunca ha
+    // hecho eso — `hasSpeed()` / `hasBearing()` son false y la clave sencillamente no se emite.
+    // Aqui se hace lo mismo: nil => la clave no aparece en el diccionario ni en el template.
+    // El detector interno ya trataba el -1 aparte (`hasSpeed`), asi que no cambia su semantica.
+    instance.speed = location.speed >= 0 ? [NSNumber numberWithDouble:location.speed] : nil;
+    instance.heading = location.course >= 0 ? [NSNumber numberWithDouble:location.course] : nil; // will be deprecated
     instance.altitude = [NSNumber numberWithDouble:location.altitude];
     instance.latitude = [NSNumber numberWithDouble:location.coordinate.latitude];
     instance.longitude = [NSNumber numberWithDouble:location.coordinate.longitude];
@@ -128,9 +135,14 @@ enum {
     [dict setObject:timestamp forKey:@"time"];
     [dict setObject:[NSNumber numberWithDouble:location.horizontalAccuracy] forKey:@"accuracy"];
     [dict setObject:[NSNumber numberWithDouble:location.verticalAccuracy] forKey:@"altitudeAccuracy"];
-    [dict setObject:[NSNumber numberWithDouble:location.speed] forKey:@"speed"];
-    [dict setObject:[NSNumber numberWithDouble:location.course] forKey:@"heading"];
-    [dict setObject:[NSNumber numberWithDouble:location.course] forKey:@"bearing"];
+    // v5.0.3 — mismo criterio que +fromCLLocation:: -1 es "sin lectura", no un valor.
+    if (location.speed >= 0) {
+        [dict setObject:[NSNumber numberWithDouble:location.speed] forKey:@"speed"];
+    }
+    if (location.course >= 0) {
+        [dict setObject:[NSNumber numberWithDouble:location.course] forKey:@"heading"];
+        [dict setObject:[NSNumber numberWithDouble:location.course] forKey:@"bearing"];
+    }
     [dict setObject:[NSNumber numberWithDouble:location.altitude] forKey:@"altitude"];
     [dict setObject:[NSNumber numberWithDouble:location.coordinate.latitude] forKey:@"latitude"];
     [dict setObject:[NSNumber numberWithDouble:location.coordinate.longitude] forKey:@"longitude"];

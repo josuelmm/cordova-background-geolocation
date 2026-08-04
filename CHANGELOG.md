@@ -1,5 +1,62 @@
 # Changelog
 
+## [5.0.3](https://github.com/josuelmm/cordova-background-geolocation/tree/5.0.3) (2026-08-04)
+
+> **Velocidad, curso y detector de conducción en iOS.** La auditoría de 5.0.0 endureció el
+> detector en Android y varias de esas correcciones nunca se portaron a iOS, que se quedó con la
+> lógica de v4. Todos los cambios son en iOS salvo el `.d.ts`. Android no se toca.
+
+### Fixed — crítico
+
+- **iOS emitía `speed: -1` y `bearing: -1` como si fueran lecturas reales.** CoreLocation
+  devuelve `-1` en `speed` y en `course` cuando no tiene lectura válida (primer fix, interior,
+  reacquisición, parado sin rumbo). Ese `-1` se guardaba en `MAURLocation`, se persistía en
+  SQLite y viajaba **al evento `location` de JS, al `postTemplate` (`@speed` / `@bearing`), a los
+  placeholders de URL (`{speed}` / `{bearing}`) y al servidor**: una flota registraba vehículos a
+  −1 m/s con rumbo −1°. Android nunca lo ha hecho — `hasSpeed()` / `hasBearing()` son false y la
+  clave sencillamente no se emite. Ahora iOS hace lo mismo: sin lectura → `nil` → clave ausente
+  (y `null` en `postTemplate`, igual que Android). Un `0` legítimo (parado / rumbo norte) se
+  conserva. Las filas ya guardadas con `-1` se normalizan al leerlas, así que un lote pendiente
+  de sync deja de enviar `-1`. El detector interno ya distinguía el `-1` aparte, así que su
+  semántica no cambia.
+- **`tripEnd.distance` inflada en iOS.** iOS sumaba **todos** los segmentos sin filtrar mientras
+  Android aplica tres puertas. Sin ellas la distancia acumulaba el jitter del GPS parado en un
+  semáforo (metros por fix, durante minutos) y trazaba la línea recta entre los dos extremos de
+  un túnel. Portadas las tres: precisión del fix ≤ 50 m en ambos extremos, desplazamiento por
+  encima del círculo de precisión (mínimo 5 m) y hueco entre fixes ≤ 120 s. Con facturación por
+  km esto era error directo.
+- **`possibleCrash` no se emitía nunca en iOS con muestreo de flota.** La comprobación vivía
+  dentro del bloque de `dt`, así que exigía que dos fixes **consecutivos** cayeran ambos en
+  `[0.5 s, 5 s]` *y* dentro de `crashWindowMs` (2 s por defecto). Portada la ventana deslizante
+  real que Android tiene desde 5.0.2: se compara contra el pico de las últimas 32 muestras.
+
+### Fixed — falsos positivos y paridad
+
+- **`phoneUsageWhileDriving` se disparaba solo en iOS.** Seguía con el `OR` y el umbral de 0,5
+  m/s² de v4, por debajo de la aceleración de un coche saliendo de un semáforo: saltaba una vez
+  por cooldown durante todo el trayecto sin que nadie tocara el teléfono. Portado el criterio de
+  Android v5.0: `AND` de giroscopio **y** acelerómetro, umbral 2,0 m/s².
+- **`speeding` en ráfaga circulando justo en el límite.** iOS rearmaba en cuanto la velocidad
+  bajaba del límite, sin banda muerta ni cooldown. Portados ambos: solo rearma por debajo del
+  95 % del límite, con 4 s de cooldown.
+- **Choque por sensor sin corroboración GPS en iOS.** Un teléfono que se cae del soporte supera
+  3 g sin problema. Portada `gpsCorroboratesImpact` de Android: se exige que el vehículo esté
+  prácticamente parado o haya perdido velocidad en la ventana. Sin lectura de velocidad se emite
+  igualmente (túnel, parking), como en Android.
+- **`tripEnd.durationMs` incluía la cola de `stoppedDuration` en iOS.** La rama disparada por un
+  fix medía hasta *ahora* en vez de hasta el momento en que el vehículo dejó de moverse; el
+  `-onDrivingTick:` de al lado ya lo hacía bien. Ahora coinciden entre sí y con Android.
+
+### Changed
+
+- **Batería (iOS):** CoreMotion a 50 Hz ya no muestrea durante toda la sesión. Todo lo que emite
+  `MAURSensorFusionDetector` está condicionado a `tripActive`, así que el muestreo arranca y para
+  con el viaje, igual que Android desde 5.0 (A14). Aparcado no cuesta nada.
+- **`.d.ts`: `Location.speed` y `Location.bearing` pasan a opcionales** (`speed?`, `bearing?`).
+  Refleja lo que el runtime hace desde siempre en Android y ahora también en iOS. Si compilas con
+  `strictNullChecks` puede aparecer un error donde usabas `loc.speed` directamente; el arreglo es
+  comprobar `loc.speed != null` antes de usarla. Cambio solo de tipos, sin efecto en runtime.
+
 ## [5.0.2](https://github.com/josuelmm/cordova-background-geolocation/tree/5.0.2) (2026-08-03)
 
 > **Parche sobre 5.0.1 publicado.** Lo que salió a npm como 5.0.1 (`7b0f7b7`) dejó a medias
